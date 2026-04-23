@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../main.dart';
+import 'about_app_screen.dart';
+import 'privacy_policy_screen.dart';
 
 class StoreScreen extends StatefulWidget {
   final int refreshToken;
@@ -143,6 +145,20 @@ class _StoreScreenState extends State<StoreScreen> {
     if (value == null) return;
     await _runStoreAction(
       () => DatabaseHelper.instance.saveLowStockThreshold(value),
+    );
+  }
+
+  void _openPrivacyPolicy() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+    );
+  }
+
+  void _openAboutApp() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AboutAppScreen()),
     );
   }
 
@@ -354,9 +370,47 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
+                  const SizedBox(height: 18),
+                  const _SectionLabel(title: 'Legal & App Information'),
+                  const SizedBox(height: 10),
+                  _StoreActionRow(
+                    title: 'Privacy policy',
+                    subtitle: 'Privacy policy and data usage details',
+                    icon: Icons.privacy_tip_outlined,
+                    onTap: _openPrivacyPolicy,
+                  ),
+                  const SizedBox(height: 10),
+                  _StoreActionRow(
+                    title: 'About',
+                    subtitle: 'App information and version 1.0.0',
+                    icon: Icons.info_outline_rounded,
+                    onTap: _openAboutApp,
+                  ),
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String title;
+
+  const _SectionLabel({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.0,
+          color: AppColors.textMuted,
+        ),
+      ),
     );
   }
 }
