@@ -145,6 +145,7 @@ class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
   int _homeRefreshToken = 0;
   int _productsRefreshToken = 0;
+  int _billsRefreshToken = 0;
   int _storeRefreshToken = 0;
 
   void _switchTab(int index) {
@@ -152,6 +153,7 @@ class _AppShellState extends State<AppShell> {
       _currentIndex = index;
       if (index == 0) _homeRefreshToken++;
       if (index == 1) _productsRefreshToken++;
+      if (index == 2) _billsRefreshToken++;
       if (index == 3) _storeRefreshToken++;
     });
   }
@@ -161,8 +163,11 @@ class _AppShellState extends State<AppShell> {
       context,
       MaterialPageRoute(builder: (_) => const ScanScreen()),
     ).then((_) {
-      // Refresh bills when returning from scanner
-      if (_currentIndex == 2) setState(() {});
+      setState(() {
+        _homeRefreshToken++;
+        _productsRefreshToken++;
+        _billsRefreshToken++;
+      });
     });
   }
 
@@ -175,7 +180,7 @@ class _AppShellState extends State<AppShell> {
         onScan: _openScanner,
       ),
       ProductsScreen(refreshToken: _productsRefreshToken),
-      const BillsScreen(),
+      BillsScreen(refreshToken: _billsRefreshToken),
       StoreScreen(refreshToken: _storeRefreshToken),
     ];
 

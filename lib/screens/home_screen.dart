@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
+import '../models/bill.dart';
 import '../models/product.dart';
 import 'qr_sheet_screen.dart';
 
@@ -22,7 +23,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Product> _lowStockProducts = [];
+  List<Bill> _unpaidBills = [];
   int _productCount = 0;
+  int _todayBillCount = 0;
+  double _todaySales = 0;
   String? _shopName;
 
   @override
@@ -44,9 +48,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final products = await db.getAllProducts();
     final shopName = await db.getShopName();
     final lowStockThreshold = await db.getLowStockThreshold();
+    final todaySales = await db.getTodaySales();
+    final todayBillCount = await db.getTodayBillCount();
+    final unpaidBills = await db.getUnpaidBills(limit: 3);
     if (!mounted) return;
     setState(() {
       _productCount = products.length;
+      _todaySales = todaySales;
+      _todayBillCount = todayBillCount;
+      _unpaidBills = unpaidBills;
       _shopName = shopName;
       _lowStockProducts = products
           .where((p) => p.quantity <= lowStockThreshold)
@@ -105,9 +115,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
-                            '₹ 0',
-                            style: TextStyle(
+                          Text(
+                            '₹ ${_todaySales.toStringAsFixed(2)}',
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 32,
                               fontWeight: FontWeight.w800,
@@ -115,7 +125,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Start scanning to create bills!',
+                            _todayBillCount == 0
+                                ? 'Start scanning to create bills!'
+                                : '$_todayBillCount bill${_todayBillCount != 1 ? 's' : ''} created today',
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 12,
@@ -139,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Expanded(
                           child: _StatCard(
                             label: 'Bills Today',
-                            value: '0',
+                            value: '$_todayBillCount',
                             subtitle: 'transactions',
                           ),
                         ),
@@ -212,6 +224,36 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     const SizedBox(height: 28),
+                    if (_unpaidBills.isNotEmpty) ...[
+                      Row(
+                        children: [
+                          const Text(
+                            'Unpaid Bills',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => widget.onNavigate(2),
+                            child: Text(
+                              'View All →',
+                              style: TextStyle(
+                                color: AppColors.amber,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ..._unpaidBills.map(
+                        (bill) => _UnpaidBillItem(bill: bill),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                    const SizedBox(height: 8),
                     // ── NEEDS ATTENTION ──
                     Row(
                       children: [
@@ -439,6 +481,63 @@ class _LowStockItem extends StatelessWidget {
   }
 }
 
+class _UnpaidBillItem extends StatelessWidget {
+  final Bill bill;
+  const _UnpaidBillItem({required this.bill});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.pending_actions_outlined,
+              color: AppColors.error,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bill.customerName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+                Text(
+                  'Bill #${bill.id} • ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''} pending',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '₹${bill.totalAmount.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HomeHeaderDelegate extends SliverPersistentHeaderDelegate {
   final String shopName;
   final double topPadding;
@@ -481,11 +580,11 @@ class _HomeHeaderDelegate extends SliverPersistentHeaderDelegate {
                     style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
                     children: [
                       TextSpan(
-                        text: 'Scan',
+                        text: 'Store',
                         style: TextStyle(color: Colors.white),
                       ),
                       TextSpan(
-                        text: 'Sy',
+                        text: 'ly',
                         style: TextStyle(color: AppColors.amber),
                       ),
                     ],

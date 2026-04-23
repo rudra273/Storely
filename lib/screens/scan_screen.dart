@@ -19,10 +19,12 @@ class _ScanScreenState extends State<ScanScreen> {
   final MobileScannerController _camController = MobileScannerController();
   final List<BillItem> _items = [];
   bool _isProcessing = false;
+  bool _isSavingBill = false;
   bool _showAddedStatus = false;
   String? _lastScanned;
 
-  double get _total => _items.fold(0, (sum, i) => sum + i.subtotal);
+  double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
+  int get _itemCount => _items.fold(0, (sum, i) => sum + i.quantity);
 
   @override
   void dispose() {
@@ -87,18 +89,259 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  Future<void> _completeBill() async {
-    if (_items.isEmpty) return;
+  Future<int?> _completeBill({
+    required String customerName,
+    required String? customerPhone,
+    required double discountPercent,
+    required bool isPaid,
+  }) async {
+    if (_items.isEmpty) return null;
+    if (_isSavingBill) return null;
+
+    setState(() => _isSavingBill = true);
+    final subtotal = _subtotal;
+    final percent = discountPercent.clamp(0, 100).toDouble();
+    final discount = subtotal * percent / 100;
+    final total = subtotal - discount;
+    final itemCopies = _items
+        .map(
+          (item) => BillItem(
+            productName: item.productName,
+            mrp: item.mrp,
+            quantity: item.quantity,
+          ),
+        )
+        .toList();
 
     final bill = Bill(
-      totalAmount: _total,
-      itemCount: _items.fold(0, (sum, i) => sum + i.quantity),
+      customerName: customerName.trim().isEmpty
+          ? 'Walk-in Customer'
+          : customerName.trim(),
+      customerPhone: _cleanOptionalText(customerPhone),
+      subtotalAmount: subtotal,
+      discountPercent: percent,
+      discountAmount: discount,
+      totalAmount: total,
+      itemCount: _itemCount,
+      isPaid: isPaid,
     );
 
-    await DatabaseHelper.instance.insertBill(bill, _items);
+    try {
+      return await DatabaseHelper.instance.insertBill(bill, itemCopies);
+    } finally {
+      if (mounted) setState(() => _isSavingBill = false);
+    }
+  }
 
+  Future<void> _openBillSheet() async {
+    if (_items.isEmpty) return;
+
+    final customerController = TextEditingController();
+    final phoneController = TextEditingController(text: '+91 ');
+    final discountController = TextEditingController();
+    var discountPercent = 0.0;
+    var isPaid = true;
+
+    try {
+      final draft = await showModalBottomSheet<_BillDraft>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              final percent = discountPercent.clamp(0, 100).toDouble();
+              final discount = _subtotal * percent / 100;
+              final total = _subtotal - discount;
+              return SingleChildScrollView(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    20,
+                    20,
+                    MediaQuery.viewInsetsOf(ctx).bottom + 20,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text(
+                            'Create Bill',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: customerController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Customer name',
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: phoneController,
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Phone number (optional)',
+                          prefixIcon: Icon(Icons.phone_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _BillSummaryRow(
+                        label: 'Subtotal',
+                        value: '₹${_subtotal.toStringAsFixed(2)}',
+                      ),
+                      _BillSummaryRow(label: 'Items', value: '$_itemCount'),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: discountController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            final isValid = RegExp(
+                              r'^\d*\.?\d{0,2}$',
+                            ).hasMatch(newValue.text);
+                            return isValid ? newValue : oldValue;
+                          }),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Discount percentage',
+                          suffixText: '%',
+                        ),
+                        onChanged: (value) {
+                          setSheetState(() {
+                            discountPercent = double.tryParse(value) ?? 0;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(
+                            value: true,
+                            icon: Icon(Icons.check_circle_outline),
+                            label: Text('Paid'),
+                          ),
+                          ButtonSegment(
+                            value: false,
+                            icon: Icon(Icons.pending_actions_outlined),
+                            label: Text('Unpaid'),
+                          ),
+                        ],
+                        selected: {isPaid},
+                        onSelectionChanged: (value) =>
+                            setSheetState(() => isPaid = value.first),
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.cream,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Column(
+                          children: [
+                            _BillSummaryRow(
+                              label:
+                                  'Discount (${percent.toStringAsFixed(2)}%)',
+                              value: '- ₹${discount.toStringAsFixed(2)}',
+                            ),
+                            const Divider(height: 20),
+                            _BillSummaryRow(
+                              label: 'Grand Total',
+                              value: '₹${total.toStringAsFixed(2)}',
+                              isTotal: true,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(
+                              sheetContext,
+                              _BillDraft(
+                                customerName: customerController.text,
+                                customerPhone: phoneController.text,
+                                discountPercent: percent,
+                                isPaid: isPaid,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.receipt_long_rounded),
+                          label: const Text('Generate Bill'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.amber,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+      if (draft == null) return;
+      final billId = await _completeBill(
+        customerName: draft.customerName,
+        customerPhone: draft.customerPhone,
+        discountPercent: draft.discountPercent,
+        isPaid: draft.isPaid,
+      );
+      if (billId == null || !mounted) return;
+      await _showBillCreatedDialog(
+        billId: billId,
+        customerName: draft.customerName.trim().isEmpty
+            ? 'Walk-in Customer'
+            : draft.customerName.trim(),
+        totalAmount:
+            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
+        itemCount: _itemCount,
+        isPaid: draft.isPaid,
+      );
+    } finally {
+      customerController.dispose();
+      phoneController.dispose();
+      discountController.dispose();
+    }
+  }
+
+  Future<void> _showBillCreatedDialog({
+    required int billId,
+    required String customerName,
+    required double totalAmount,
+    required int itemCount,
+    required bool isPaid,
+  }) async {
     if (mounted) {
-      showDialog(
+      await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
@@ -112,7 +355,7 @@ class _ScanScreenState extends State<ScanScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '₹${_total.toStringAsFixed(2)}',
+                '₹${totalAmount.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.w800,
@@ -120,8 +363,9 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                '${_items.length} item${_items.length != 1 ? 's' : ''}',
+                '$customerName\nBill #$billId • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
                 style: TextStyle(color: AppColors.textMuted),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -145,6 +389,17 @@ class _ScanScreenState extends State<ScanScreen> {
       _items[index].quantity += delta;
       if (_items[index].quantity <= 0) _items.removeAt(index);
     });
+  }
+
+  void _setQty(int index, int quantity) {
+    if (quantity < 1) return;
+    setState(() => _items[index].quantity = quantity);
+  }
+
+  String? _cleanOptionalText(String? value) {
+    final trimmed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (trimmed == null || trimmed.isEmpty || trimmed == '+91') return null;
+    return trimmed;
   }
 
   @override
@@ -320,11 +575,38 @@ class _ScanScreenState extends State<ScanScreen> {
                                         minHeight: 36,
                                       ),
                                     ),
-                                    Text(
-                                      '${item.quantity}',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16,
+                                    SizedBox(
+                                      width: 44,
+                                      child: TextFormField(
+                                        key: ValueKey(
+                                          '${item.productName}-${item.mrp}-${item.quantity}',
+                                        ),
+                                        initialValue: '${item.quantity}',
+                                        textAlign: TextAlign.center,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter
+                                              .digitsOnly,
+                                        ],
+                                        decoration: const InputDecoration(
+                                          isDense: true,
+                                          filled: false,
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 8,
+                                          ),
+                                          border: InputBorder.none,
+                                        ),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                        onChanged: (value) {
+                                          final quantity = int.tryParse(value);
+                                          if (quantity != null) {
+                                            _setQty(i, quantity);
+                                          }
+                                        },
                                       ),
                                     ),
                                     IconButton(
@@ -385,7 +667,7 @@ class _ScanScreenState extends State<ScanScreen> {
                             ),
                           ),
                           Text(
-                            '₹${_total.toStringAsFixed(2)}',
+                            '₹${_subtotal.toStringAsFixed(2)}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 24,
@@ -396,10 +678,10 @@ class _ScanScreenState extends State<ScanScreen> {
                       ),
                       const Spacer(),
                       FilledButton.icon(
-                        onPressed: _completeBill,
-                        icon: const Icon(Icons.check_rounded),
+                        onPressed: _openBillSheet,
+                        icon: const Icon(Icons.receipt_long_rounded),
                         label: const Text(
-                          'Complete Bill',
+                          'Bill',
                           style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                         style: FilledButton.styleFrom(
@@ -422,4 +704,58 @@ class _ScanScreenState extends State<ScanScreen> {
           : null,
     );
   }
+}
+
+class _BillSummaryRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isTotal;
+
+  const _BillSummaryRow({
+    required this.label,
+    required this.value,
+    this.isTotal = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: isTotal ? AppColors.textDark : AppColors.textMuted,
+              fontSize: isTotal ? 16 : 14,
+              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: isTotal ? AppColors.textDark : AppColors.textMuted,
+              fontSize: isTotal ? 20 : 14,
+              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BillDraft {
+  final String customerName;
+  final String? customerPhone;
+  final double discountPercent;
+  final bool isPaid;
+
+  const _BillDraft({
+    required this.customerName,
+    required this.customerPhone,
+    required this.discountPercent,
+    required this.isPaid,
+  });
 }

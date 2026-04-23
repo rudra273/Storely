@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 
 class BillsScreen extends StatefulWidget {
-  const BillsScreen({super.key});
+  final int refreshToken;
+
+  const BillsScreen({super.key, this.refreshToken = 0});
   @override
   State<BillsScreen> createState() => _BillsScreenState();
 }
@@ -21,9 +24,11 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _loadBills();
+  void didUpdateWidget(covariant BillsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _loadBills();
+    }
   }
 
   Future<void> _loadBills() async {
@@ -62,6 +67,62 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
+  Future<void> _updateBillStatus(Bill bill, bool isPaid) async {
+    if (bill.id == null) return;
+    await DatabaseHelper.instance.updateBillPaidStatus(bill.id!, isPaid);
+    await _loadBills();
+  }
+
+  Future<void> _sendBillOnWhatsApp(Bill bill) async {
+    final phone = _whatsAppPhone(bill.customerPhone);
+    if (phone == null) return;
+
+    final uri = Uri.https('wa.me', '/$phone', {
+      'text': _buildBillMessage(bill),
+    });
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unable to open WhatsApp')));
+    }
+  }
+
+  String? _whatsAppPhone(String? value) {
+    final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
+    if (phone == null || phone.isEmpty || phone == '91') return null;
+    if (phone.length == 10) return '91$phone';
+    return phone;
+  }
+
+  String _buildBillMessage(Bill bill) {
+    final buffer = StringBuffer()
+      ..writeln('Storely Bill #${bill.id}')
+      ..writeln('Customer: ${bill.customerName}')
+      ..writeln(
+        'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}',
+      )
+      ..writeln('')
+      ..writeln('Items:');
+    for (final item in bill.items) {
+      buffer.writeln(
+        '- ${item.productName} x${item.quantity}: ₹${item.subtotal.toStringAsFixed(2)}',
+      );
+    }
+    buffer
+      ..writeln('')
+      ..writeln('Subtotal: ₹${bill.subtotalAmount.toStringAsFixed(2)}');
+    if (bill.discountAmount > 0) {
+      buffer.writeln(
+        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -₹${bill.discountAmount.toStringAsFixed(2)}',
+      );
+    }
+    buffer
+      ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
+      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}');
+    return buffer.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -78,16 +139,46 @@ class _BillsScreenState extends State<BillsScreen> {
           ? _buildEmpty()
           : RefreshIndicator(
               onRefresh: _loadBills,
-              child: ListView.builder(
+              child: ListView(
                 padding: const EdgeInsets.all(16),
-                itemCount: _bills.length,
-                itemBuilder: (_, i) => _BillCard(
-                  bill: _bills[i],
-                  onDelete: () => _deleteBill(_bills[i]),
-                ),
+                children: _buildGroupedBillCards(),
               ),
             ),
     );
+  }
+
+  List<Widget> _buildGroupedBillCards() {
+    final widgets = <Widget>[];
+    String? currentGroup;
+
+    for (final bill in _bills) {
+      final group = _dateGroupTitle(bill.createdAt);
+      if (group != currentGroup) {
+        currentGroup = group;
+        widgets.add(_DateHeader(title: group));
+      }
+
+      widgets.add(
+        _BillCard(
+          bill: bill,
+          onDelete: () => _deleteBill(bill),
+          onStatusChanged: (isPaid) => _updateBillStatus(bill, isPaid),
+          onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
+        ),
+      );
+    }
+
+    return widgets;
+  }
+
+  String _dateGroupTitle(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final billDate = DateTime(date.year, date.month, date.day);
+    final daysAgo = today.difference(billDate).inDays;
+    if (daysAgo == 0) return 'Today';
+    if (daysAgo == 1) return 'Yesterday';
+    return DateFormat('dd MMM yyyy').format(date);
   }
 
   Widget _buildEmpty() {
@@ -123,10 +214,38 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 }
 
+class _DateHeader extends StatelessWidget {
+  final String title;
+  const _DateHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: AppColors.textMuted,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
 class _BillCard extends StatefulWidget {
   final Bill bill;
   final VoidCallback onDelete;
-  const _BillCard({required this.bill, required this.onDelete});
+  final VoidCallback onSendWhatsApp;
+  final ValueChanged<bool> onStatusChanged;
+  const _BillCard({
+    required this.bill,
+    required this.onDelete,
+    required this.onSendWhatsApp,
+    required this.onStatusChanged,
+  });
   @override
   State<_BillCard> createState() => _BillCardState();
 }
@@ -173,7 +292,7 @@ class _BillCardState extends State<_BillCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Bill #${bill.id}',
+                          bill.customerName,
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 15,
@@ -181,7 +300,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          dateStr,
+                          'Bill #${bill.id} • $dateStr',
                           style: TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 12,
@@ -193,6 +312,8 @@ class _BillCardState extends State<_BillCard> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      _PaymentChip(isPaid: bill.isPaid),
+                      const SizedBox(height: 4),
                       Text(
                         '₹${bill.totalAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
@@ -227,6 +348,27 @@ class _BillCardState extends State<_BillCard> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Column(
                 children: [
+                  if (bill.customerPhone != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.phone_outlined,
+                            size: 16,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            bill.customerPhone!,
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ...bill.items.map(
                     (item) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -258,17 +400,66 @@ class _BillCardState extends State<_BillCard> {
                     ),
                   ),
                   const Divider(),
+                  if (bill.discountAmount > 0) ...[
+                    _AmountRow(
+                      label: 'Subtotal',
+                      value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
+                    ),
+                    _AmountRow(
+                      label: 'Discount',
+                      value:
+                          '${bill.discountPercent.toStringAsFixed(2)}% • - ₹${bill.discountAmount.toStringAsFixed(2)}',
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      TextButton.icon(
-                        onPressed: widget.onDelete,
-                        icon: const Icon(Icons.delete_outline, size: 18),
-                        label: const Text('Delete'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppColors.error,
+                      Expanded(
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 0,
+                          children: [
+                            TextButton.icon(
+                              onPressed: widget.onDelete,
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Delete'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.error,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () =>
+                                  widget.onStatusChanged(!bill.isPaid),
+                              icon: Icon(
+                                bill.isPaid
+                                    ? Icons.pending_actions_outlined
+                                    : Icons.check_circle_outline,
+                                size: 18,
+                              ),
+                              label: Text(
+                                bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
+                              ),
+                              style: TextButton.styleFrom(
+                                foregroundColor: bill.isPaid
+                                    ? AppColors.textMuted
+                                    : AppColors.success,
+                              ),
+                            ),
+                            if (bill.customerPhone != null)
+                              TextButton.icon(
+                                onPressed: widget.onSendWhatsApp,
+                                icon: const Icon(Icons.send_outlined, size: 18),
+                                label: const Text('WhatsApp'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppColors.success,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(
                         'Total: ₹${bill.totalAmount.toStringAsFixed(2)}',
                         style: const TextStyle(
@@ -282,6 +473,57 @@ class _BillCardState extends State<_BillCard> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentChip extends StatelessWidget {
+  final bool isPaid;
+  const _PaymentChip({required this.isPaid});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isPaid ? AppColors.success : AppColors.error;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        isPaid ? 'Paid' : 'Unpaid',
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+}
+
+class _AmountRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _AmountRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(label, style: TextStyle(color: AppColors.textMuted)),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );

@@ -21,7 +21,7 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 5,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -56,6 +56,7 @@ class DatabaseHelper {
     if (oldVersion < 5) {
       await _createSettingsTable(db);
     }
+    if (oldVersion < 8) await _upgradeBillTables(db);
   }
 
   Future<void> _ensureSchema(Database db) async {
@@ -72,6 +73,7 @@ class DatabaseHelper {
     );
     await _createOptionTables(db);
     await _createBillTables(db);
+    await _upgradeBillTables(db);
     await _seedOptionsFromProducts(db);
   }
 
@@ -151,8 +153,14 @@ class DatabaseHelper {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS bills(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer',
+        customer_phone TEXT,
+        subtotal_amount REAL NOT NULL DEFAULT 0,
+        discount_percent REAL NOT NULL DEFAULT 0,
+        discount_amount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
+        is_paid INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL
       )
     ''');
@@ -166,6 +174,50 @@ class DatabaseHelper {
         subtotal REAL NOT NULL,
         FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
       )
+    ''');
+  }
+
+  Future<void> _upgradeBillTables(DatabaseExecutor executor) async {
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'customer_name',
+      "customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer'",
+    );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'customer_phone',
+      'customer_phone TEXT',
+    );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'subtotal_amount',
+      'subtotal_amount REAL NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'discount_percent',
+      'discount_percent REAL NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'discount_amount',
+      'discount_amount REAL NOT NULL DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'is_paid',
+      'is_paid INTEGER NOT NULL DEFAULT 1',
+    );
+    await executor.execute('''
+      UPDATE bills
+      SET subtotal_amount = total_amount + discount_amount
+      WHERE subtotal_amount = 0
     ''');
   }
 
@@ -554,11 +606,13 @@ class DatabaseHelper {
   // ── Bill CRUD ──
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
-    final billId = await db.insert('bills', bill.toMap());
-    for (final item in items) {
-      await db.insert('bill_items', item.toMap(billId));
-    }
-    return billId;
+    return db.transaction((txn) async {
+      final billId = await txn.insert('bills', bill.toMap());
+      for (final item in items) {
+        await txn.insert('bill_items', item.toMap(billId));
+      }
+      return billId;
+    });
   }
 
   Future<List<Bill>> getAllBills() async {
@@ -583,6 +637,16 @@ class DatabaseHelper {
     return await db.delete('bills', where: 'id = ?', whereArgs: [id]);
   }
 
+  Future<int> updateBillPaidStatus(int id, bool isPaid) async {
+    final db = await database;
+    return db.update(
+      'bills',
+      {'is_paid': isPaid ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<int> getBillCount() async {
     final db = await database;
     final r = await db.rawQuery('SELECT COUNT(*) as c FROM bills');
@@ -593,8 +657,41 @@ class DatabaseHelper {
     final db = await database;
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final r = await db.rawQuery(
-      "SELECT COALESCE(SUM(total_amount),0) as s FROM bills WHERE created_at LIKE '$today%'",
+      'SELECT COALESCE(SUM(total_amount),0) as s FROM bills WHERE created_at LIKE ?',
+      ['$today%'],
     );
     return (r.first['s'] as num).toDouble();
+  }
+
+  Future<int> getTodayBillCount() async {
+    final db = await database;
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final r = await db.rawQuery(
+      'SELECT COUNT(*) as c FROM bills WHERE created_at LIKE ?',
+      ['$today%'],
+    );
+    return Sqflite.firstIntValue(r) ?? 0;
+  }
+
+  Future<List<Bill>> getUnpaidBills({int? limit}) async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where: 'is_paid = ?',
+      whereArgs: [0],
+      orderBy: 'created_at DESC',
+      limit: limit,
+    );
+    final bills = <Bill>[];
+    for (final map in billMaps) {
+      final itemMaps = await db.query(
+        'bill_items',
+        where: 'bill_id = ?',
+        whereArgs: [map['id']],
+      );
+      final items = itemMaps.map((m) => BillItem.fromMap(m)).toList();
+      bills.add(Bill.fromMap(map, items));
+    }
+    return bills;
   }
 }
