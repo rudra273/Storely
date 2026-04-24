@@ -32,7 +32,7 @@ class _ScanScreenState extends State<ScanScreen> {
     super.dispose();
   }
 
-  void _onDetect(BarcodeCapture capture) {
+  Future<void> _onDetect(BarcodeCapture capture) async {
     if (_isProcessing) return;
     final barcode = capture.barcodes.firstOrNull;
     if (barcode == null || barcode.rawValue == null) return;
@@ -46,20 +46,33 @@ class _ScanScreenState extends State<ScanScreen> {
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
+      final id = (data['id'] as num?)?.toInt();
+      final code = data['code'] as String?;
       final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
       final unit = _cleanOptionalText(data['unit'] as String?);
+      final product = await DatabaseHelper.instance.findProductForBilling(
+        id: id,
+        itemCode: code,
+        name: name,
+      );
+      final scannedItem = product == null
+          ? BillItem(productName: name, mrp: mrp, unit: unit)
+          : await DatabaseHelper.instance.buildBillItemForProduct(product);
+      if (!mounted) return;
 
       // Check if already in list
       final existing = _items.indexWhere(
-        (i) => i.productName.toLowerCase() == name.toLowerCase(),
+        (i) =>
+            i.productName.toLowerCase() ==
+            scannedItem.productName.toLowerCase(),
       );
 
       setState(() {
         if (existing >= 0) {
           _items[existing].quantity++;
-          _items[existing].unit ??= unit;
+          _items[existing].unit ??= scannedItem.unit;
         } else {
-          _items.add(BillItem(productName: name, mrp: mrp, unit: unit));
+          _items.add(scannedItem);
         }
         _showAddedStatus = true;
       });
@@ -67,6 +80,7 @@ class _ScanScreenState extends State<ScanScreen> {
       HapticFeedback.mediumImpact();
       _allowNextScanAfter(_scanCooldown);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _showAddedStatus = false);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -108,9 +122,17 @@ class _ScanScreenState extends State<ScanScreen> {
     final itemCopies = _items
         .map(
           (item) => BillItem(
+            productId: item.productId,
             productName: item.productName,
             mrp: item.mrp,
             unit: item.unit,
+            purchasePriceSnapshot: item.purchasePriceSnapshot,
+            sellingPriceSnapshot: item.sellingPriceSnapshot,
+            costSnapshot: item.costSnapshot,
+            profitSnapshot: item.profitSnapshot,
+            commissionSnapshot: item.commissionSnapshot,
+            gstSnapshot: item.gstSnapshot,
+            wasDirectPrice: item.wasDirectPrice,
             quantity: item.quantity,
           ),
         )

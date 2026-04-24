@@ -47,6 +47,16 @@ mixin DatabaseBills {
     );
   }
 
+  Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
+    final db = await database;
+    return db.update(
+      'bills',
+      {'profit_commission_percent': percent.clamp(0, 100).toDouble()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<int> getBillCount() async {
     final db = await database;
     final r = await db.rawQuery('SELECT COUNT(*) as c FROM bills');
@@ -105,9 +115,9 @@ mixin DatabaseBills {
       '''
       UPDATE products
       SET quantity = MAX(quantity - ?, 0)
-      WHERE LOWER(name) = LOWER(?)
+      WHERE ${item.productId == null ? 'LOWER(name) = LOWER(?)' : 'id = ?'}
       ''',
-      [item.quantity, item.productName],
+      [item.quantity, item.productId ?? item.productName],
     );
   }
 }

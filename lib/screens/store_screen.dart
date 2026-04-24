@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../main.dart';
+import '../models/product.dart';
+import '../models/pricing.dart';
+import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
 
@@ -17,6 +20,8 @@ class _StoreScreenState extends State<StoreScreen> {
   String? _shopName;
   List<String> _categories = [];
   List<String> _suppliers = [];
+  List<String> _units = [];
+  GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
   int _lowStockThreshold = 5;
   bool _isLoading = true;
 
@@ -39,12 +44,16 @@ class _StoreScreenState extends State<StoreScreen> {
     final shopName = await db.getShopName();
     final categories = await db.getCategories();
     final suppliers = await db.getSuppliers();
+    final units = await db.getUnits();
+    final pricingSettings = await db.getGlobalPricingSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
       _shopName = shopName;
       _categories = categories;
       _suppliers = suppliers;
+      _units = units;
+      _pricingSettings = pricingSettings;
       _lowStockThreshold = lowStockThreshold;
       _isLoading = false;
     });
@@ -162,6 +171,13 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  void _openAnalytics() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+    );
+  }
+
   Future<void> _showCategoryManager() {
     return _showOptionManager(
       title: 'Categories',
@@ -172,6 +188,40 @@ class _StoreScreenState extends State<StoreScreen> {
       onEdit: _editCategory,
       onDelete: _deleteCategory,
     );
+  }
+
+  Future<void> _showGlobalPricingSettings() async {
+    final result = await showModalBottomSheet<GlobalPricingSettings>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _GlobalPricingSheet(settings: _pricingSettings, units: _units),
+    );
+    if (result == null) return;
+    await _runStoreAction(() async {
+      await DatabaseHelper.instance.saveGlobalPricingSettings(result);
+      await DatabaseHelper.instance.refreshAllProductSellingPrices();
+    });
+  }
+
+  Future<void> _showCategoryPricing(String name) async {
+    final current =
+        await DatabaseHelper.instance.getCategoryPricing(name) ??
+        CategoryPricingSettings(name: name);
+    if (!mounted) return;
+    final result = await showModalBottomSheet<CategoryPricingSettings>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _CategoryPricingSheet(settings: current, global: _pricingSettings),
+    );
+    if (result == null) return;
+    await _runStoreAction(() async {
+      await DatabaseHelper.instance.saveCategoryPricing(result);
+      await DatabaseHelper.instance.refreshAllProductSellingPrices();
+    });
   }
 
   Future<void> _showSupplierManager() {
@@ -277,6 +327,11 @@ class _StoreScreenState extends State<StoreScreen> {
                               final name = options[index];
                               return _OptionRow(
                                 name: name,
+                                onSettings: title == 'Categories'
+                                    ? () => runAndRefresh(
+                                        () => _showCategoryPricing(name),
+                                      )
+                                    : null,
                                 onEdit: () => runAndRefresh(() => onEdit(name)),
                                 onDelete: () =>
                                     runAndRefresh(() => onDelete(name)),
@@ -365,10 +420,25 @@ class _StoreScreenState extends State<StoreScreen> {
                   ),
                   const SizedBox(height: 10),
                   _StoreActionRow(
+                    title: 'Pricing Defaults',
+                    subtitle:
+                        '${_pricingSettings.gstRegistered ? 'GST registered' : 'GST not registered'} • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
+                    icon: Icons.calculate_outlined,
+                    onTap: _showGlobalPricingSettings,
+                  ),
+                  const SizedBox(height: 10),
+                  _StoreActionRow(
                     title: 'Needs Attention',
                     subtitle: 'Show stock at $_lowStockThreshold or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
+                  ),
+                  const SizedBox(height: 10),
+                  _StoreActionRow(
+                    title: 'Analytics',
+                    subtitle: 'Revenue, profit, GST and unit volume',
+                    icon: Icons.analytics_outlined,
+                    onTap: _openAnalytics,
                   ),
                   const SizedBox(height: 18),
                   const _SectionLabel(title: 'Legal & App Information'),
@@ -521,11 +591,13 @@ class _StoreActionRow extends StatelessWidget {
 
 class _OptionRow extends StatelessWidget {
   final String name;
+  final VoidCallback? onSettings;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _OptionRow({
     required this.name,
+    this.onSettings,
     required this.onEdit,
     required this.onDelete,
   });
@@ -549,6 +621,12 @@ class _OptionRow extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
+          if (onSettings != null)
+            IconButton(
+              onPressed: onSettings,
+              icon: const Icon(Icons.tune_rounded, size: 20),
+              tooltip: 'Pricing',
+            ),
           IconButton(
             onPressed: onEdit,
             icon: const Icon(Icons.edit_outlined, size: 20),
@@ -599,6 +677,391 @@ class _PanelIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(icon, color: AppColors.amber),
+    );
+  }
+}
+
+class _GlobalPricingSheet extends StatefulWidget {
+  final GlobalPricingSettings settings;
+  final List<String> units;
+
+  const _GlobalPricingSheet({required this.settings, required this.units});
+
+  @override
+  State<_GlobalPricingSheet> createState() => _GlobalPricingSheetState();
+}
+
+class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
+  late final TextEditingController _gstCtrl;
+  late final TextEditingController _overheadCtrl;
+  late final TextEditingController _marginCtrl;
+  late bool _gstRegistered;
+  late List<String> _units;
+
+  @override
+  void initState() {
+    super.initState();
+    _gstCtrl = TextEditingController(
+      text: widget.settings.defaultGstPercent.toStringAsFixed(2),
+    );
+    _overheadCtrl = TextEditingController(
+      text: widget.settings.defaultOverheadCost.toStringAsFixed(2),
+    );
+    _marginCtrl = TextEditingController(
+      text: widget.settings.defaultProfitMarginPercent.toStringAsFixed(2),
+    );
+    _gstRegistered = widget.settings.gstRegistered;
+    _units = List.of(widget.units);
+  }
+
+  @override
+  void dispose() {
+    _gstCtrl.dispose();
+    _overheadCtrl.dispose();
+    _marginCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addUnit() async {
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) => const _NameDialog(title: 'Add Unit', label: 'Unit'),
+    );
+    if (value == null) return;
+    await DatabaseHelper.instance.addUnitOption(value);
+    final units = await DatabaseHelper.instance.getUnits();
+    if (mounted) setState(() => _units = units);
+  }
+
+  Future<void> _deleteUnit(String unit) async {
+    await DatabaseHelper.instance.deleteUnitOption(unit);
+    final units = await DatabaseHelper.instance.getUnits();
+    if (mounted) setState(() => _units = units);
+  }
+
+  void _save() {
+    Navigator.pop(
+      context,
+      GlobalPricingSettings(
+        defaultGstPercent: double.tryParse(_gstCtrl.text) ?? 0,
+        defaultOverheadCost: double.tryParse(_overheadCtrl.text) ?? 0,
+        defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
+        gstRegistered: _gstRegistered,
+        showPurchasePriceGlobally: widget.settings.showPurchasePriceGlobally,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsSheetFrame(
+      title: 'Pricing Defaults',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MoneyField(controller: _gstCtrl, label: 'Default GST %'),
+          const SizedBox(height: 10),
+          _MoneyField(controller: _overheadCtrl, label: 'Default Overhead ₹'),
+          const SizedBox(height: 10),
+          _MoneyField(
+            controller: _marginCtrl,
+            label: 'Default Profit Margin %',
+          ),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Shop is GST registered'),
+            subtitle: Text(
+              _gstRegistered
+                  ? 'GST is added on selling price'
+                  : 'Purchase GST is included in cost',
+            ),
+            value: _gstRegistered,
+            activeThumbColor: AppColors.navy,
+            onChanged: (value) => setState(() => _gstRegistered = value),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Custom Units',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton.filledTonal(
+                onPressed: _addUnit,
+                icon: const Icon(Icons.add_rounded),
+                tooltip: 'Add unit',
+              ),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _units
+                .where((unit) => !Product.presetUnits.contains(unit))
+                .map(
+                  (unit) => InputChip(
+                    label: Text(unit),
+                    onDeleted: () => _deleteUnit(unit),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _save,
+              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+              child: const Text('Save Defaults'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryPricingSheet extends StatefulWidget {
+  final CategoryPricingSettings settings;
+  final GlobalPricingSettings global;
+
+  const _CategoryPricingSheet({required this.settings, required this.global});
+
+  @override
+  State<_CategoryPricingSheet> createState() => _CategoryPricingSheetState();
+}
+
+class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
+  late final TextEditingController _gstCtrl;
+  late final TextEditingController _overheadCtrl;
+  late final TextEditingController _marginCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _gstCtrl = TextEditingController(
+      text: widget.settings.gstPercent?.toStringAsFixed(2) ?? '',
+    );
+    _overheadCtrl = TextEditingController(
+      text: widget.settings.overheadCost?.toStringAsFixed(2) ?? '',
+    );
+    _marginCtrl = TextEditingController(
+      text: widget.settings.profitMarginPercent?.toStringAsFixed(2) ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _gstCtrl.dispose();
+    _overheadCtrl.dispose();
+    _marginCtrl.dispose();
+    super.dispose();
+  }
+
+  CategoryPricingSettings _settings() {
+    return CategoryPricingSettings(
+      id: widget.settings.id,
+      name: widget.settings.name,
+      gstPercent: double.tryParse(_gstCtrl.text),
+      overheadCost: double.tryParse(_overheadCtrl.text),
+      profitMarginPercent: double.tryParse(_marginCtrl.text),
+      directPriceToggle: false,
+      manualPrice: null,
+    );
+  }
+
+  PriceBreakdown _preview() {
+    final sample = Product(
+      name: 'Sample',
+      mrp: 0,
+      purchasePrice: 100,
+      directPriceToggle: false,
+      quantity: 1,
+    );
+    return PricingCalculator.resolveProductPrice(
+      sample,
+      widget.global,
+      _settings(),
+    );
+  }
+
+  void _save() => Navigator.pop(context, _settings());
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = _preview();
+    return _SettingsSheetFrame(
+      title: '${widget.settings.name} Pricing',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MoneyField(
+            controller: _gstCtrl,
+            label: 'GST % (blank = ${widget.global.defaultGstPercent}%)',
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 10),
+          _MoneyField(
+            controller: _overheadCtrl,
+            label: 'Overhead ₹ (blank = ${widget.global.defaultOverheadCost})',
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 10),
+          _MoneyField(
+            controller: _marginCtrl,
+            label:
+                'Profit Margin % (blank = ${widget.global.defaultProfitMarginPercent}%)',
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          _FormulaPreview(breakdown: preview),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _save,
+              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+              child: const Text('Save Category Pricing'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsSheetFrame extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _SettingsSheetFrame({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: EdgeInsets.fromLTRB(
+          20,
+          14,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 20,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.creamDark,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 16),
+              child,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MoneyField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final ValueChanged<String>? onChanged;
+
+  const _MoneyField({
+    required this.controller,
+    required this.label,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      onChanged: onChanged,
+      decoration: InputDecoration(labelText: label),
+    );
+  }
+}
+
+class _FormulaPreview extends StatelessWidget {
+  final PriceBreakdown breakdown;
+
+  const _FormulaPreview({required this.breakdown});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          _FormulaRow('Item rate', breakdown.purchasePrice),
+          if (!breakdown.gstRegistered)
+            _FormulaRow('GST on purchase', breakdown.gstAmount),
+          _FormulaRow('Total cost', breakdown.totalCost),
+          _FormulaRow('Profit', breakdown.profitAmount),
+          if (breakdown.gstRegistered)
+            _FormulaRow('GST on sell', breakdown.gstAmount),
+          _FormulaRow('Selling price', breakdown.sellingPrice),
+        ],
+      ),
+    );
+  }
+}
+
+class _FormulaRow extends StatelessWidget {
+  final String label;
+  final double value;
+
+  const _FormulaRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textMuted)),
+          const Spacer(),
+          Text(
+            '₹${value.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
+import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import 'qr_sheet_screen.dart';
 
@@ -37,6 +38,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   bool _isLoading = true;
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
+  bool _isUpdatingPrices = false;
   int _lowStockThreshold = 5;
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
 
@@ -63,8 +65,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   Future<void> _loadProducts() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      if (_allProducts.isEmpty) {
+        _isLoading = true;
+      } else {
+        _isUpdatingPrices = true;
+      }
+    });
     final db = DatabaseHelper.instance;
+    await db.refreshAllProductSellingPrices();
     final products = await db.getAllProducts();
     final categories = await db.getCategories();
     final suppliers = await db.getSuppliers();
@@ -80,6 +89,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       _selectedCategories.removeWhere((value) => !_categories.contains(value));
       _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
       _isLoading = false;
+      _isUpdatingPrices = false;
     });
     _applyFilter();
   }
@@ -605,26 +615,61 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   // ── Add/Edit Sheet ──
-  void _showAddEditSheet({Product? product}) {
+  Future<void> _showAddEditSheet({Product? product}) async {
     final isEditing = product != null;
+    final db = DatabaseHelper.instance;
+    final globalPricing = await db.getGlobalPricingSettings();
+    var selectedCategoryPricing = product?.category == null
+        ? null
+        : await db.getCategoryPricing(product!.category!);
+    if (!mounted) return;
+
     final nameCtrl = TextEditingController(text: product?.name ?? '');
-    final mrpCtrl = TextEditingController(
-      text: product != null ? product.mrp.toStringAsFixed(2) : '',
+    final purchaseCtrl = TextEditingController(
+      text: product != null ? product.purchasePrice.toStringAsFixed(2) : '',
+    );
+    final manualPriceCtrl = TextEditingController(
+      text: product?.manualPrice != null
+          ? product!.manualPrice!.toStringAsFixed(2)
+          : product != null
+          ? product.mrp.toStringAsFixed(2)
+          : '',
     );
     final qtyCtrl = TextEditingController(
       text: product != null ? product.quantity.toString() : '',
     );
     final totalCtrl = TextEditingController(
       text: product != null
-          ? (product.mrp * product.quantity).toStringAsFixed(2)
+          ? (product.purchasePrice * product.quantity).toStringAsFixed(2)
           : '',
     );
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier;
     String? selectedUnit = product?.unit;
+    double effectiveGst() =>
+        selectedCategoryPricing?.gstPercent ?? globalPricing.defaultGstPercent;
+    double effectiveOverhead() =>
+        selectedCategoryPricing?.overheadCost ??
+        globalPricing.defaultOverheadCost;
+    double effectiveMargin() =>
+        selectedCategoryPricing?.profitMarginPercent ??
+        globalPricing.defaultProfitMarginPercent;
+    final gstCtrl = TextEditingController(
+      text: (product?.gstPercent ?? effectiveGst()).toStringAsFixed(2),
+    );
+    final overheadCtrl = TextEditingController(
+      text: (product?.overheadCost ?? effectiveOverhead()).toStringAsFixed(2),
+    );
+    final marginCtrl = TextEditingController(
+      text: (product?.profitMarginPercent ?? effectiveMargin()).toStringAsFixed(
+        2,
+      ),
+    );
+    var directPrice = product?.directPriceToggle ?? false;
     final formKey = GlobalKey<FormState>();
     String? nameError;
     var syncingTotals = false;
+    var syncingPrice = false;
 
     void setFieldText(TextEditingController controller, String value) {
       if (controller.text == value) return;
@@ -637,11 +682,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
     void updateTotalFromPriceAndQty() {
       if (syncingTotals) return;
       syncingTotals = true;
-      final price = double.tryParse(mrpCtrl.text);
+      final price = double.tryParse(purchaseCtrl.text);
       final quantity = int.tryParse(qtyCtrl.text);
       if (price != null && price > 0 && quantity != null && quantity >= 0) {
         setFieldText(totalCtrl, (price * quantity).toStringAsFixed(2));
-      } else if (mrpCtrl.text.isEmpty || qtyCtrl.text.isEmpty) {
+      } else if (purchaseCtrl.text.isEmpty || qtyCtrl.text.isEmpty) {
         setFieldText(totalCtrl, '');
       }
       syncingTotals = false;
@@ -650,7 +695,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     void updateQtyFromTotal() {
       if (syncingTotals) return;
       syncingTotals = true;
-      final price = double.tryParse(mrpCtrl.text);
+      final price = double.tryParse(purchaseCtrl.text);
       final total = double.tryParse(totalCtrl.text);
       if (price != null && price > 0 && total != null && total >= 0) {
         setFieldText(qtyCtrl, (total / price).round().toString());
@@ -660,279 +705,394 @@ class _ProductsScreenState extends State<ProductsScreen> {
       syncingTotals = false;
     }
 
-    mrpCtrl.addListener(updateTotalFromPriceAndQty);
+    double marginForSellingPrice(double sellingPrice) {
+      final purchasePrice = double.tryParse(purchaseCtrl.text) ?? 0;
+      final gstPercent = double.tryParse(gstCtrl.text) ?? 0;
+      final overhead = double.tryParse(overheadCtrl.text) ?? 0;
+      final purchaseGst = globalPricing.gstRegistered
+          ? 0.0
+          : purchasePrice * gstPercent / 100;
+      final totalCost = purchasePrice + purchaseGst + overhead;
+      final preGstSelling = globalPricing.gstRegistered
+          ? sellingPrice / (1 + gstPercent / 100)
+          : sellingPrice;
+      return totalCost <= 0 ? 0 : (preGstSelling - totalCost) / totalCost * 100;
+    }
+
+    void updateMarginFromDirectPrice() {
+      if (syncingPrice || !directPrice) return;
+      final sellingPrice = double.tryParse(manualPriceCtrl.text);
+      if (sellingPrice == null || sellingPrice <= 0) return;
+      syncingPrice = true;
+      setFieldText(
+        marginCtrl,
+        marginForSellingPrice(sellingPrice).toStringAsFixed(2),
+      );
+      syncingPrice = false;
+    }
+
+    PriceBreakdown buildPreview() {
+      final purchasePrice = double.tryParse(purchaseCtrl.text) ?? 0;
+      final manualPrice = double.tryParse(manualPriceCtrl.text);
+      final draft = Product(
+        id: product?.id,
+        itemCode: product?.itemCode,
+        name: nameCtrl.text.trim().isEmpty ? 'Product' : nameCtrl.text.trim(),
+        category: selectedCategory,
+        mrp: manualPrice ?? product?.mrp ?? purchasePrice,
+        purchasePrice: purchasePrice,
+        gstPercent: double.tryParse(gstCtrl.text),
+        overheadCost: double.tryParse(overheadCtrl.text),
+        profitMarginPercent: double.tryParse(marginCtrl.text),
+        directPriceToggle: directPrice,
+        manualPrice: manualPrice,
+        quantity: int.tryParse(qtyCtrl.text) ?? 0,
+        unit: selectedUnit,
+        supplier: selectedSupplier,
+        source: product?.source ?? ProductSource.mobile,
+        createdAt: product?.createdAt,
+      );
+      return PricingCalculator.resolveProductPrice(
+        draft,
+        globalPricing,
+        selectedCategoryPricing,
+      );
+    }
+
+    Future<void> updateCategoryPricing(
+      String? value,
+      StateSetter setSheet,
+    ) async {
+      selectedCategory = value;
+      selectedCategoryPricing = value == null
+          ? null
+          : await DatabaseHelper.instance.getCategoryPricing(value);
+      setFieldText(gstCtrl, effectiveGst().toStringAsFixed(2));
+      setFieldText(overheadCtrl, effectiveOverhead().toStringAsFixed(2));
+      setFieldText(marginCtrl, effectiveMargin().toStringAsFixed(2));
+      updateMarginFromDirectPrice();
+      if (mounted) setSheet(() {});
+    }
+
+    purchaseCtrl.addListener(updateTotalFromPriceAndQty);
     qtyCtrl.addListener(updateTotalFromPriceAndQty);
+    manualPriceCtrl.addListener(updateMarginFromDirectPrice);
+    updateMarginFromDirectPrice();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => SafeArea(
-          top: false,
-          child: Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
-            ),
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(28),
-            ),
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: AppColors.creamDark,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      isEditing ? 'Edit Product' : 'Add Product',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    _SourcePill(
-                      label: isEditing
-                          ? product.sourceLabel
-                          : 'Mobile · code auto-created',
-                      imported: product?.isImported ?? false,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: nameCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: InputDecoration(
-                        labelText: 'Product Name *',
-                        errorText: nameError,
-                      ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 14),
-                    _OptionDropdown(
-                      label: 'Category',
-                      value: selectedCategory,
-                      options: _categories,
-                      onChanged: (value) {
-                        setSheet(() => selectedCategory = value);
-                      },
-                      onAdd: () async {
-                        final value = await _showAddOptionDialog('Category');
-                        if (value == null || !mounted || !ctx.mounted) return;
-                        await DatabaseHelper.instance.addCategoryOption(value);
-                        if (!mounted || !ctx.mounted) return;
-                        setState(() {
-                          if (!_categories.contains(value)) {
-                            _categories.add(value);
-                            _categories.sort();
-                          }
-                        });
-                        setSheet(() => selectedCategory = value);
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    _OptionDropdown(
-                      label: 'Supplier',
-                      value: selectedSupplier,
-                      options: _suppliers,
-                      onChanged: (value) {
-                        setSheet(() => selectedSupplier = value);
-                      },
-                      onAdd: () async {
-                        final value = await _showAddOptionDialog('Supplier');
-                        if (value == null || !mounted || !ctx.mounted) return;
-                        await DatabaseHelper.instance.addSupplierOption(value);
-                        if (!mounted || !ctx.mounted) return;
-                        setState(() {
-                          if (!_suppliers.contains(value)) {
-                            _suppliers.add(value);
-                            _suppliers.sort();
-                          }
-                        });
-                        setSheet(() => selectedSupplier = value);
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    _OptionDropdown(
-                      label: 'Unit',
-                      value: selectedUnit,
-                      options: _units,
-                      noValueLabel: 'No Unit',
-                      addLabel: 'Add custom',
-                      onChanged: (value) {
-                        setSheet(() => selectedUnit = value);
-                      },
-                      onAdd: () async {
-                        final value = await _showAddOptionDialog('Unit');
-                        if (value == null || !mounted || !ctx.mounted) return;
-                        await DatabaseHelper.instance.addUnitOption(value);
-                        if (!mounted || !ctx.mounted) return;
-                        setState(() {
-                          if (!_units.any(
-                            (unit) => unit.toLowerCase() == value.toLowerCase(),
-                          )) {
-                            _units.add(value);
-                            _units.sort(
-                              (a, b) =>
-                                  a.toLowerCase().compareTo(b.toLowerCase()),
-                            );
-                          }
-                        });
-                        setSheet(() => selectedUnit = value);
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    // Row: MRP + Qty
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: mrpCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d*\.?\d{0,2}'),
-                              ),
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'Price (₹) *',
-                              prefixIcon: Icon(Icons.currency_rupee, size: 18),
-                            ),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              final n = double.tryParse(v);
-                              return (n == null || n <= 0) ? 'Invalid' : null;
-                            },
+        builder: (ctx, setSheet) {
+          final preview = buildPreview();
+          return SafeArea(
+            top: false,
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
+              ),
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.creamDark,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: qtyCtrl,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'Quantity *',
-                              prefixIcon: Icon(Icons.layers_outlined, size: 18),
-                            ),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              final n = int.tryParse(v);
-                              return (n == null || n < 0) ? 'Invalid' : null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: totalCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
                       ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}'),
+                      const SizedBox(height: 20),
+                      Text(
+                        isEditing ? 'Edit Product' : 'Add Product',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Total Value (₹)',
-                        prefixIcon: Icon(Icons.calculate_outlined, size: 18),
                       ),
-                      onChanged: (_) => updateQtyFromTotal(),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return null;
-                        final n = double.tryParse(v);
-                        return (n == null || n < 0) ? 'Invalid' : null;
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        if (!formKey.currentState!.validate()) return;
-                        final name = nameCtrl.text.trim();
-                        final unique = await DatabaseHelper.instance
-                            .isNameUnique(name, excludeId: product?.id);
-                        if (!unique) {
-                          setSheet(() => nameError = '"$name" already exists');
-                          return;
-                        }
-                        try {
-                          final p = Product(
-                            id: product?.id,
-                            itemCode: product?.itemCode,
-                            name: name,
-                            category: selectedCategory,
-                            mrp: double.parse(mrpCtrl.text),
-                            quantity: int.parse(qtyCtrl.text),
-                            unit: selectedUnit,
-                            supplier: selectedSupplier,
-                            source: product?.source ?? ProductSource.mobile,
-                            createdAt: product?.createdAt,
+                      const SizedBox(height: 20),
+                      _SourcePill(
+                        label: isEditing
+                            ? product.sourceLabel
+                            : 'Mobile · code auto-created',
+                        imported: product?.isImported ?? false,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: nameCtrl,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          labelText: 'Product Name *',
+                          errorText: nameError,
+                        ),
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      ),
+                      const SizedBox(height: 14),
+                      _OptionDropdown(
+                        label: 'Category',
+                        value: selectedCategory,
+                        options: _categories,
+                        onChanged: (value) {
+                          updateCategoryPricing(value, setSheet);
+                        },
+                        onAdd: () async {
+                          final value = await _showAddOptionDialog('Category');
+                          if (value == null || !mounted || !ctx.mounted) return;
+                          await DatabaseHelper.instance.addCategoryOption(
+                            value,
                           );
-                          if (isEditing) {
-                            await DatabaseHelper.instance.updateProduct(p);
-                          } else {
-                            await DatabaseHelper.instance.insertProduct(p);
-                          }
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _loadProducts();
-                        } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        }
-                      },
-                      icon: Icon(isEditing ? Icons.check : Icons.add),
-                      label: Text(
-                        isEditing ? 'Update' : 'Add Product',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                          if (!mounted || !ctx.mounted) return;
+                          setState(() {
+                            if (!_categories.contains(value)) {
+                              _categories.add(value);
+                              _categories.sort();
+                            }
+                          });
+                          await updateCategoryPricing(value, setSheet);
+                        },
                       ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.navy,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                      const SizedBox(height: 14),
+                      _OptionDropdown(
+                        label: 'Supplier',
+                        value: selectedSupplier,
+                        options: _suppliers,
+                        onChanged: (value) {
+                          setSheet(() => selectedSupplier = value);
+                        },
+                        onAdd: () async {
+                          final value = await _showAddOptionDialog('Supplier');
+                          if (value == null || !mounted || !ctx.mounted) return;
+                          await DatabaseHelper.instance.addSupplierOption(
+                            value,
+                          );
+                          if (!mounted || !ctx.mounted) return;
+                          setState(() {
+                            if (!_suppliers.contains(value)) {
+                              _suppliers.add(value);
+                              _suppliers.sort();
+                            }
+                          });
+                          setSheet(() => selectedSupplier = value);
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _OptionDropdown(
+                        label: 'Unit',
+                        value: selectedUnit,
+                        options: _units,
+                        noValueLabel: 'No Unit',
+                        addLabel: 'Add custom',
+                        onChanged: (value) {
+                          setSheet(() => selectedUnit = value);
+                        },
+                        onAdd: () async {
+                          final value = await _showAddOptionDialog('Unit');
+                          if (value == null || !mounted || !ctx.mounted) return;
+                          await DatabaseHelper.instance.addUnitOption(value);
+                          if (!mounted || !ctx.mounted) return;
+                          setState(() {
+                            if (!_units.any(
+                              (unit) =>
+                                  unit.toLowerCase() == value.toLowerCase(),
+                            )) {
+                              _units.add(value);
+                              _units.sort(
+                                (a, b) =>
+                                    a.toLowerCase().compareTo(b.toLowerCase()),
+                              );
+                            }
+                          });
+                          setSheet(() => selectedUnit = value);
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Direct Price'),
+                        subtitle: Text(
+                          directPrice
+                              ? 'Use manual selling price'
+                              : 'Use GST, overhead and margin formula',
+                        ),
+                        value: directPrice,
+                        activeThumbColor: AppColors.navy,
+                        onChanged: (value) => setSheet(() {
+                          directPrice = value;
+                          updateMarginFromDirectPrice();
+                        }),
+                      ),
+                      const SizedBox(height: 14),
+                      _PricingCalculationTable(
+                        purchaseCtrl: purchaseCtrl,
+                        gstCtrl: gstCtrl,
+                        overheadCtrl: overheadCtrl,
+                        marginCtrl: marginCtrl,
+                        manualPriceCtrl: manualPriceCtrl,
+                        directPrice: directPrice,
+                        breakdown: preview,
+                        gstRegistered: globalPricing.gstRegistered,
+                        onChanged: () {
+                          updateMarginFromDirectPrice();
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: qtyCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              decoration: const InputDecoration(
+                                labelText: 'Quantity *',
+                                prefixIcon: Icon(
+                                  Icons.layers_outlined,
+                                  size: 18,
+                                ),
+                              ),
+                              onChanged: (_) => setSheet(() {}),
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return 'Required';
+                                final n = int.tryParse(v);
+                                return (n == null || n < 0) ? 'Invalid' : null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: totalCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                ),
+                              ],
+                              decoration: const InputDecoration(
+                                labelText: 'Stock Value (₹)',
+                                prefixIcon: Icon(
+                                  Icons.calculate_outlined,
+                                  size: 18,
+                                ),
+                              ),
+                              onChanged: (_) {
+                                updateQtyFromTotal();
+                                setSheet(() {});
+                              },
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return null;
+                                final n = double.tryParse(v);
+                                return (n == null || n < 0) ? 'Invalid' : null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        onPressed: () async {
+                          if (!formKey.currentState!.validate()) return;
+                          final name = nameCtrl.text.trim();
+                          final unique = await DatabaseHelper.instance
+                              .isNameUnique(name, excludeId: product?.id);
+                          if (!unique) {
+                            setSheet(
+                              () => nameError = '"$name" already exists',
+                            );
+                            return;
+                          }
+                          try {
+                            final p = Product(
+                              id: product?.id,
+                              itemCode: product?.itemCode,
+                              name: name,
+                              category: selectedCategory,
+                              mrp: preview.sellingPrice,
+                              purchasePrice: double.parse(purchaseCtrl.text),
+                              gstPercent: double.tryParse(gstCtrl.text),
+                              overheadCost: double.tryParse(overheadCtrl.text),
+                              profitMarginPercent: double.tryParse(
+                                marginCtrl.text,
+                              ),
+                              directPriceToggle: directPrice,
+                              manualPrice: directPrice
+                                  ? double.tryParse(manualPriceCtrl.text)
+                                  : null,
+                              quantity: int.parse(qtyCtrl.text),
+                              unit: selectedUnit,
+                              supplier: selectedSupplier,
+                              source: product?.source ?? ProductSource.mobile,
+                              createdAt: product?.createdAt,
+                            );
+                            if (isEditing) {
+                              await DatabaseHelper.instance.updateProduct(p);
+                            } else {
+                              await DatabaseHelper.instance.insertProduct(p);
+                            }
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _loadProducts();
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          }
+                        },
+                        icon: Icon(isEditing ? Icons.check : Icons.add),
+                        label: Text(
+                          isEditing ? 'Update' : 'Add Product',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.navy,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     ).whenComplete(() {
       Future<void>.delayed(const Duration(milliseconds: 350), () {
-        mrpCtrl.removeListener(updateTotalFromPriceAndQty);
+        purchaseCtrl.removeListener(updateTotalFromPriceAndQty);
         qtyCtrl.removeListener(updateTotalFromPriceAndQty);
         nameCtrl.dispose();
-        mrpCtrl.dispose();
+        purchaseCtrl.dispose();
+        manualPriceCtrl.dispose();
+        gstCtrl.dispose();
+        overheadCtrl.dispose();
+        marginCtrl.dispose();
         qtyCtrl.dispose();
         totalCtrl.dispose();
       });
@@ -1151,6 +1311,29 @@ class _ProductsScreenState extends State<ProductsScreen> {
             ],
           ),
         ),
+        if (_isUpdatingPrices)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Text(
+                  'Updating prices...',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
         if (_selectedCategories.isNotEmpty || _selectedSuppliers.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -1332,6 +1515,281 @@ class _SortDropdownButton extends StatelessWidget {
   }
 }
 
+class _PricingCalculationTable extends StatelessWidget {
+  final TextEditingController purchaseCtrl;
+  final TextEditingController gstCtrl;
+  final TextEditingController overheadCtrl;
+  final TextEditingController marginCtrl;
+  final TextEditingController manualPriceCtrl;
+  final bool directPrice;
+  final PriceBreakdown breakdown;
+  final bool gstRegistered;
+  final VoidCallback onChanged;
+
+  const _PricingCalculationTable({
+    required this.purchaseCtrl,
+    required this.gstCtrl,
+    required this.overheadCtrl,
+    required this.marginCtrl,
+    required this.manualPriceCtrl,
+    required this.directPrice,
+    required this.breakdown,
+    required this.gstRegistered,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                gstRegistered ? 'GST Registered Pricing' : 'Pricing Breakdown',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: breakdown.wasDirectPrice
+                      ? AppColors.amber.withValues(alpha: 0.14)
+                      : AppColors.success.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  breakdown.wasDirectPrice ? 'direct' : 'auto',
+                  style: TextStyle(
+                    color: breakdown.wasDirectPrice
+                        ? AppColors.amber
+                        : AppColors.success,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '₹${breakdown.sellingPrice.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _PricingInputRow(
+            label: gstRegistered ? 'Item rate (ex-GST)' : 'Item rate',
+            controller: purchaseCtrl,
+            prefixText: '₹',
+            result: breakdown.purchasePrice,
+            onChanged: onChanged,
+            requiredPositive: true,
+          ),
+          if (!gstRegistered)
+            _PricingInputRow(
+              label: 'GST on purchase',
+              controller: gstCtrl,
+              suffixText: '%',
+              result: breakdown.landedCost,
+              delta: breakdown.gstAmount,
+              onChanged: onChanged,
+            ),
+          _PricingInputRow(
+            label: 'Overhead',
+            controller: overheadCtrl,
+            prefixText: '₹',
+            result: breakdown.totalCost,
+            delta: breakdown.overheadCost,
+            onChanged: onChanged,
+          ),
+          _PricingInputRow(
+            label: 'Margin',
+            controller: marginCtrl,
+            suffixText: '%',
+            result: breakdown.preGstSellingPrice,
+            delta: breakdown.profitAmount,
+            onChanged: onChanged,
+            readOnly: directPrice,
+          ),
+          if (gstRegistered)
+            _PricingInputRow(
+              label: 'GST on sell',
+              controller: gstCtrl,
+              suffixText: '%',
+              result: breakdown.sellingPrice,
+              delta: breakdown.gstAmount,
+              onChanged: onChanged,
+            ),
+          const Divider(height: 18),
+          if (directPrice)
+            _PricingInputRow(
+              label: 'Selling price',
+              controller: manualPriceCtrl,
+              prefixText: '₹',
+              result: breakdown.sellingPrice,
+              onChanged: onChanged,
+              requiredPositive: true,
+              isTotal: true,
+            )
+          else
+            _PricingResultRow(
+              label: 'Selling price',
+              value: breakdown.sellingPrice,
+              isTotal: true,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PricingInputRow extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final String? prefixText;
+  final String? suffixText;
+  final double result;
+  final double? delta;
+  final VoidCallback onChanged;
+  final bool requiredPositive;
+  final bool isTotal;
+  final bool readOnly;
+
+  const _PricingInputRow({
+    required this.label,
+    required this.controller,
+    this.prefixText,
+    this.suffixText,
+    required this.result,
+    this.delta,
+    required this.onChanged,
+    this.requiredPositive = false,
+    this.isTotal = false,
+    this.readOnly = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final deltaText = delta == null ? '' : ' +${delta!.toStringAsFixed(2)} =';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isTotal ? AppColors.navy : AppColors.textDark,
+                fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 96,
+            child: TextFormField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
+              textAlign: TextAlign.end,
+              readOnly: readOnly,
+              decoration: InputDecoration(
+                isDense: true,
+                filled: readOnly,
+                prefixText: prefixText,
+                suffixText: suffixText,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
+                ),
+              ),
+              onChanged: (_) => onChanged(),
+              validator: (value) {
+                final number = double.tryParse(value ?? '');
+                if (requiredPositive && (number == null || number <= 0)) {
+                  return 'Invalid';
+                }
+                if (!requiredPositive &&
+                    value != null &&
+                    value.isNotEmpty &&
+                    number == null) {
+                  return 'Invalid';
+                }
+                return null;
+              },
+            ),
+          ),
+          SizedBox(
+            width: 84,
+            child: Text(
+              '$deltaText ₹${result.toStringAsFixed(2)}',
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                color: isTotal ? AppColors.navy : AppColors.textMuted,
+                fontWeight: isTotal ? FontWeight.w900 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PricingResultRow extends StatelessWidget {
+  final String label;
+  final double value;
+  final bool isTotal;
+
+  const _PricingResultRow({
+    required this.label,
+    required this.value,
+    this.isTotal = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isTotal ? AppColors.navy : AppColors.textMuted,
+                fontWeight: isTotal ? FontWeight.w900 : FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            '₹${value.toStringAsFixed(2)}',
+            style: TextStyle(
+              color: isTotal ? AppColors.navy : AppColors.textDark,
+              fontWeight: isTotal ? FontWeight.w900 : FontWeight.w700,
+              fontSize: isTotal ? 16 : 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OptionDropdown extends StatelessWidget {
   final String label;
   final String? value;
@@ -1500,6 +1958,11 @@ class _ProductCard extends StatelessWidget {
                     const SizedBox(width: 8),
                   ],
                   _sourceBadge(product.sourceLabel, product.isImported),
+                  const SizedBox(width: 8),
+                  _sourceBadge(
+                    product.directPriceToggle ? 'direct' : 'auto',
+                    product.directPriceToggle,
+                  ),
                   const Spacer(),
                   // Stock badge
                   if (isOutOfStock)

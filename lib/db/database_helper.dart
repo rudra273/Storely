@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/bill.dart';
 import '../models/product.dart';
+import '../models/pricing.dart';
 
 part 'database_schema.dart';
 part 'database_settings.dart';

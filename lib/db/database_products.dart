@@ -2,6 +2,7 @@ part of 'database_helper.dart';
 
 mixin DatabaseProducts {
   Future<Database> get database;
+  Future<GlobalPricingSettings> getGlobalPricingSettings();
 
   Future<int> insertProduct(Product product) async {
     final db = await database;
@@ -70,6 +71,26 @@ mixin DatabaseProducts {
     return _getOptions(db, 'category_options', 'category');
   }
 
+  Future<CategoryPricingSettings?> getCategoryPricing(String name) async {
+    final db = await database;
+    return _getCategoryPricing(db, name);
+  }
+
+  Future<void> saveCategoryPricing(CategoryPricingSettings settings) async {
+    final db = await database;
+    final name = _normaliseName(settings.name);
+    if (name == null) throw ArgumentError('Category name is required');
+    await db.transaction((txn) async {
+      await _insertOption(txn, 'category_options', name);
+      await txn.update(
+        'category_options',
+        settings.toPricingMap(),
+        where: 'LOWER(name) = LOWER(?)',
+        whereArgs: [name],
+      );
+    });
+  }
+
   Future<List<String>> getSuppliers() async {
     final db = await database;
     return _getOptions(db, 'supplier_options', 'supplier');
@@ -103,6 +124,110 @@ mixin DatabaseProducts {
   Future<void> deleteSupplierOption(String name) async {
     final db = await database;
     await _deleteOption(db, 'supplier_options', 'supplier', name);
+  }
+
+  Future<PriceBreakdown> resolveProductPrice(Product product) async {
+    final db = await database;
+    final global = await getGlobalPricingSettings();
+    final category = product.category == null
+        ? null
+        : await _getCategoryPricing(db, product.category!);
+    return _resolveProductPrice(product, global, category);
+  }
+
+  Future<int> refreshAllProductSellingPrices() async {
+    final db = await database;
+    final global = await getGlobalPricingSettings();
+    final productMaps = await db.query('products');
+    final categoryRows = await db.query('category_options');
+    final categories = {
+      for (final row in categoryRows)
+        (row['name'] as String).toLowerCase(): CategoryPricingSettings.fromMap(
+          row,
+        ),
+    };
+
+    var updated = 0;
+    await db.transaction((txn) async {
+      for (final map in productMaps) {
+        final product = Product.fromMap(map);
+        final category = product.category == null
+            ? null
+            : categories[product.category!.toLowerCase()];
+        final breakdown = _resolveProductPrice(product, global, category);
+        if ((product.mrp - breakdown.sellingPrice).abs() < 0.005) continue;
+        await txn.update(
+          'products',
+          {'mrp': breakdown.sellingPrice},
+          where: 'id = ?',
+          whereArgs: [product.id],
+        );
+        updated++;
+      }
+    });
+    return updated;
+  }
+
+  Future<Product?> getProductById(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      'products',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Product.fromMap(rows.first);
+  }
+
+  Future<Product?> findProductForBilling({
+    int? id,
+    String? itemCode,
+    required String name,
+  }) async {
+    final db = await database;
+    if (id != null) {
+      final rows = await db.query(
+        'products',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return Product.fromMap(rows.first);
+    }
+    final code = _normaliseName(itemCode);
+    if (code != null) {
+      final rows = await db.query(
+        'products',
+        where: 'item_code = ?',
+        whereArgs: [code],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return Product.fromMap(rows.first);
+    }
+    final rows = await db.query(
+      'products',
+      where: 'LOWER(name) = LOWER(?)',
+      whereArgs: [name],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Product.fromMap(rows.first);
+  }
+
+  Future<BillItem> buildBillItemForProduct(Product product) async {
+    final breakdown = await resolveProductPrice(product);
+    return BillItem(
+      productId: product.id,
+      productName: product.name,
+      mrp: breakdown.sellingPrice,
+      unit: product.unit,
+      purchasePriceSnapshot: breakdown.purchasePrice,
+      sellingPriceSnapshot: breakdown.sellingPrice,
+      costSnapshot: breakdown.totalCost,
+      profitSnapshot: breakdown.profitAmount,
+      commissionSnapshot: 0,
+      gstSnapshot: breakdown.gstAmount,
+      wasDirectPrice: breakdown.wasDirectPrice,
+    );
   }
 
   Future<int> replaceAllProducts(List<Product> products) async {
@@ -208,6 +333,29 @@ mixin DatabaseProducts {
 
     return 'mitm${(maxNumber + 1).toString().padLeft(3, '0')}';
   }
+}
+
+Future<CategoryPricingSettings?> _getCategoryPricing(
+  DatabaseExecutor executor,
+  String name,
+) async {
+  final value = _normaliseName(name);
+  if (value == null) return null;
+  final rows = await executor.query(
+    'category_options',
+    where: 'LOWER(name) = LOWER(?)',
+    whereArgs: [value],
+    limit: 1,
+  );
+  return rows.isEmpty ? null : CategoryPricingSettings.fromMap(rows.first);
+}
+
+PriceBreakdown _resolveProductPrice(
+  Product product,
+  GlobalPricingSettings global,
+  CategoryPricingSettings? category,
+) {
+  return PricingCalculator.resolveProductPrice(product, global, category);
 }
 
 Future<List<String>> _getOptions(
