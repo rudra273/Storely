@@ -47,6 +47,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
       final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
+      final unit = _cleanOptionalText(data['unit'] as String?);
 
       // Check if already in list
       final existing = _items.indexWhere(
@@ -56,8 +57,9 @@ class _ScanScreenState extends State<ScanScreen> {
       setState(() {
         if (existing >= 0) {
           _items[existing].quantity++;
+          _items[existing].unit ??= unit;
         } else {
-          _items.add(BillItem(productName: name, mrp: mrp));
+          _items.add(BillItem(productName: name, mrp: mrp, unit: unit));
         }
         _showAddedStatus = true;
       });
@@ -108,6 +110,7 @@ class _ScanScreenState extends State<ScanScreen> {
           (item) => BillItem(
             productName: item.productName,
             mrp: item.mrp,
+            unit: item.unit,
             quantity: item.quantity,
           ),
         )
@@ -550,7 +553,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      '₹${item.mrp.toStringAsFixed(2)} each',
+                                      item.priceLabel,
                                       style: TextStyle(
                                         color: AppColors.textMuted,
                                         fontSize: 12,

@@ -15,7 +15,7 @@ Storely is designed to help store owners manage inventory and billing. This Priv
 2. Data Stored Locally
 Storely does not collect, upload, or store your data on any server in version 1.0.0. The information you enter is stored locally on your device, including:
 - Store details (such as shop name and settings)
-- Product details (name, price, quantity, barcode, category, supplier)
+- Product details (name, price, quantity, unit, barcode, category, supplier)
 - Billing information created in the app
 
 3. How Data Is Stored

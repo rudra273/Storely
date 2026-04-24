@@ -31,6 +31,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   List<Product> _filtered = [];
   List<String> _categories = [];
   List<String> _suppliers = [];
+  List<String> _units = [];
   final Set<String> _selectedCategories = {};
   final Set<String> _selectedSuppliers = {};
   bool _isLoading = true;
@@ -67,12 +68,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final products = await db.getAllProducts();
     final categories = await db.getCategories();
     final suppliers = await db.getSuppliers();
+    final units = await db.getUnits();
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
       _allProducts = products;
       _categories = categories;
       _suppliers = suppliers;
+      _units = units;
       _lowStockThreshold = lowStockThreshold;
       _selectedCategories.removeWhere((value) => !_categories.contains(value));
       _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
@@ -97,6 +100,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             p.name.toLowerCase().contains(query) ||
             (p.itemCode?.toLowerCase().contains(query) ?? false) ||
             (p.category?.toLowerCase().contains(query) ?? false) ||
+            (p.unit?.toLowerCase().contains(query) ?? false) ||
             (p.supplier?.toLowerCase().contains(query) ?? false) ||
             p.sourceLabel.toLowerCase().contains(query);
         return matchesCategory && matchesSupplier && matchesSearch;
@@ -515,7 +519,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                   ),
                                 ),
                                 Text(
-                                  '₹${p.mrp.toStringAsFixed(0)}',
+                                  p.priceLabel,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
@@ -610,10 +614,54 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final qtyCtrl = TextEditingController(
       text: product != null ? product.quantity.toString() : '',
     );
+    final totalCtrl = TextEditingController(
+      text: product != null
+          ? (product.mrp * product.quantity).toStringAsFixed(2)
+          : '',
+    );
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier;
+    String? selectedUnit = product?.unit;
     final formKey = GlobalKey<FormState>();
     String? nameError;
+    var syncingTotals = false;
+
+    void setFieldText(TextEditingController controller, String value) {
+      if (controller.text == value) return;
+      controller.value = TextEditingValue(
+        text: value,
+        selection: TextSelection.collapsed(offset: value.length),
+      );
+    }
+
+    void updateTotalFromPriceAndQty() {
+      if (syncingTotals) return;
+      syncingTotals = true;
+      final price = double.tryParse(mrpCtrl.text);
+      final quantity = int.tryParse(qtyCtrl.text);
+      if (price != null && price > 0 && quantity != null && quantity >= 0) {
+        setFieldText(totalCtrl, (price * quantity).toStringAsFixed(2));
+      } else if (mrpCtrl.text.isEmpty || qtyCtrl.text.isEmpty) {
+        setFieldText(totalCtrl, '');
+      }
+      syncingTotals = false;
+    }
+
+    void updateQtyFromTotal() {
+      if (syncingTotals) return;
+      syncingTotals = true;
+      final price = double.tryParse(mrpCtrl.text);
+      final total = double.tryParse(totalCtrl.text);
+      if (price != null && price > 0 && total != null && total >= 0) {
+        setFieldText(qtyCtrl, (total / price).round().toString());
+      } else if (totalCtrl.text.isEmpty) {
+        setFieldText(qtyCtrl, '');
+      }
+      syncingTotals = false;
+    }
+
+    mrpCtrl.addListener(updateTotalFromPriceAndQty);
+    qtyCtrl.addListener(updateTotalFromPriceAndQty);
 
     showModalBottomSheet(
       context: context,
@@ -723,6 +771,35 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       },
                     ),
                     const SizedBox(height: 14),
+                    _OptionDropdown(
+                      label: 'Unit',
+                      value: selectedUnit,
+                      options: _units,
+                      noValueLabel: 'No Unit',
+                      addLabel: 'Add custom',
+                      onChanged: (value) {
+                        setSheet(() => selectedUnit = value);
+                      },
+                      onAdd: () async {
+                        final value = await _showAddOptionDialog('Unit');
+                        if (value == null || !mounted || !ctx.mounted) return;
+                        await DatabaseHelper.instance.addUnitOption(value);
+                        if (!mounted || !ctx.mounted) return;
+                        setState(() {
+                          if (!_units.any(
+                            (unit) => unit.toLowerCase() == value.toLowerCase(),
+                          )) {
+                            _units.add(value);
+                            _units.sort(
+                              (a, b) =>
+                                  a.toLowerCase().compareTo(b.toLowerCase()),
+                            );
+                          }
+                        });
+                        setSheet(() => selectedUnit = value);
+                      },
+                    ),
+                    const SizedBox(height: 14),
                     // Row: MRP + Qty
                     Row(
                       children: [
@@ -769,6 +846,28 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: totalCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d{0,2}'),
+                        ),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Total Value (₹)',
+                        prefixIcon: Icon(Icons.calculate_outlined, size: 18),
+                      ),
+                      onChanged: (_) => updateQtyFromTotal(),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return null;
+                        final n = double.tryParse(v);
+                        return (n == null || n < 0) ? 'Invalid' : null;
+                      },
+                    ),
                     const SizedBox(height: 24),
                     FilledButton.icon(
                       onPressed: () async {
@@ -788,6 +887,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                             category: selectedCategory,
                             mrp: double.parse(mrpCtrl.text),
                             quantity: int.parse(qtyCtrl.text),
+                            unit: selectedUnit,
                             supplier: selectedSupplier,
                             source: product?.source ?? ProductSource.mobile,
                             createdAt: product?.createdAt,
@@ -827,7 +927,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      Future<void>.delayed(const Duration(milliseconds: 350), () {
+        mrpCtrl.removeListener(updateTotalFromPriceAndQty);
+        qtyCtrl.removeListener(updateTotalFromPriceAndQty);
+        nameCtrl.dispose();
+        mrpCtrl.dispose();
+        qtyCtrl.dispose();
+        totalCtrl.dispose();
+      });
+    });
   }
 
   Future<void> _deleteProduct(Product product) async {
@@ -1227,13 +1336,18 @@ class _OptionDropdown extends StatelessWidget {
   final String label;
   final String? value;
   final List<String> options;
+  final String? noValueLabel;
+  final String? addLabel;
   final ValueChanged<String?> onChanged;
   final VoidCallback onAdd;
+  static const _addValue = '__storely_add_option__';
 
   const _OptionDropdown({
     required this.label,
     required this.value,
     required this.options,
+    this.noValueLabel,
+    this.addLabel,
     required this.onChanged,
     required this.onAdd,
   });
@@ -1246,32 +1360,39 @@ class _OptionDropdown extends StatelessWidget {
       ...options,
     ];
 
-    return Row(
-      children: [
-        Expanded(
-          child: DropdownButtonFormField<String>(
-            initialValue: value != null && value!.isNotEmpty ? value : null,
-            isExpanded: true,
-            decoration: InputDecoration(labelText: label),
-            items: [
-              DropdownMenuItem<String>(value: null, child: Text('No $label')),
-              ...items.map(
-                (option) => DropdownMenuItem(
-                  value: option,
-                  child: Text(option, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-            ],
-            onChanged: onChanged,
+    return DropdownButtonFormField<String>(
+      initialValue: value != null && value!.isNotEmpty ? value : null,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        DropdownMenuItem<String>(
+          value: null,
+          child: Text(noValueLabel ?? 'No $label'),
+        ),
+        ...items.map(
+          (option) => DropdownMenuItem(
+            value: option,
+            child: Text(option, overflow: TextOverflow.ellipsis),
           ),
         ),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(
-          onPressed: onAdd,
-          icon: const Icon(Icons.add_rounded),
-          tooltip: 'Add $label',
+        DropdownMenuItem<String>(
+          value: _addValue,
+          child: Row(
+            children: [
+              const Icon(Icons.add_rounded, size: 18),
+              const SizedBox(width: 8),
+              Text(addLabel ?? 'Add $label'),
+            ],
+          ),
         ),
       ],
+      onChanged: (selected) {
+        if (selected == _addValue) {
+          onAdd();
+          return;
+        }
+        onChanged(selected);
+      },
     );
   }
 }
@@ -1422,7 +1543,7 @@ class _ProductCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      '₹ ${product.mrp.toStringAsFixed(product.mrp == product.mrp.roundToDouble() ? 0 : 2)}',
+                      product.priceLabel,
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -1439,7 +1560,7 @@ class _ProductCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '${product.quantity} units',
+                    product.quantityLabel,
                     style: TextStyle(
                       fontSize: 13,
                       color: isLowStock ? AppColors.error : AppColors.textMuted,

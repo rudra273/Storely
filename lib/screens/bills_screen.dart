@@ -106,7 +106,7 @@ class _BillsScreenState extends State<BillsScreen> {
       ..writeln('Items:');
     for (final item in bill.items) {
       buffer.writeln(
-        '- ${item.productName} x${item.quantity}: ₹${item.subtotal.toStringAsFixed(2)}',
+        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ₹${item.subtotal.toStringAsFixed(2)}',
       );
     }
     buffer
@@ -381,7 +381,7 @@ class _BillCardState extends State<_BillCard> {
                             ),
                           ),
                           Text(
-                            '×${item.quantity}',
+                            '${item.quantityLabel} x ${item.priceLabel}',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 13,

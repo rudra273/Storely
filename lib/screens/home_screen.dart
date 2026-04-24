@@ -450,9 +450,7 @@ class _LowStockItem extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  isOut
-                      ? 'Out of stock'
-                      : 'Only ${product.quantity} units left',
+                  isOut ? 'Out of stock' : 'Only ${product.quantityLabel} left',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
               ],

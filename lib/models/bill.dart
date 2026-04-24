@@ -70,15 +70,27 @@ class BillItem {
   final int? billId;
   final String productName;
   final double mrp;
+  String? unit;
   int quantity;
 
   double get subtotal => mrp * quantity;
+  String get unitLabel {
+    final value = unit?.trim();
+    return value == null || value.isEmpty ? '' : value;
+  }
+
+  String get priceLabel => unitLabel.isEmpty
+      ? '₹${mrp.toStringAsFixed(2)}'
+      : '₹${mrp.toStringAsFixed(2)} / $unitLabel';
+  String get quantityLabel =>
+      unitLabel.isEmpty ? '$quantity' : '$quantity $unitLabel';
 
   BillItem({
     this.id,
     this.billId,
     required this.productName,
     required this.mrp,
+    this.unit,
     this.quantity = 1,
   });
 
@@ -86,6 +98,7 @@ class BillItem {
     'bill_id': billId,
     'product_name': productName,
     'mrp': mrp,
+    'unit': unit,
     'quantity': quantity,
     'subtotal': subtotal,
   };
@@ -96,7 +109,13 @@ class BillItem {
       billId: map['bill_id'] as int?,
       productName: map['product_name'] as String,
       mrp: (map['mrp'] as num).toDouble(),
+      unit: _cleanOptional(map['unit'] as String?),
       quantity: map['quantity'] as int,
     );
+  }
+
+  static String? _cleanOptional(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 }

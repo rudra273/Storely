@@ -77,6 +77,7 @@ class CsvImporter {
             category: _getString(row, mapping['category']),
             mrp: _getDouble(row, mapping['mrp']) ?? 0,
             quantity: _getInt(row, mapping['quantity']) ?? 0,
+            unit: _getString(row, mapping['unit']),
             supplier: _getString(row, mapping['supplier']),
             source: ProductSource.imported,
           ),
@@ -414,6 +415,7 @@ class CsvImporter {
       'category': null,
       'mrp': null,
       'quantity': null,
+      'unit': null,
       'supplier': null,
     };
 
@@ -466,6 +468,15 @@ class CsvImporter {
         'available',
       ])) {
         mapping['quantity'] = i;
+      } else if (_matches(h, [
+        'unit',
+        'uom',
+        'measure',
+        'measurement',
+        'unit of measure',
+        'unit_of_measure',
+      ])) {
+        mapping['unit'] = i;
       } else if (_matches(h, [
         'supplier',
         'vendor',
