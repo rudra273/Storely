@@ -872,26 +872,10 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
     );
   }
 
-  PriceBreakdown _preview() {
-    final sample = Product(
-      name: 'Sample',
-      mrp: 0,
-      purchasePrice: 100,
-      directPriceToggle: false,
-      quantity: 1,
-    );
-    return PricingCalculator.resolveProductPrice(
-      sample,
-      widget.global,
-      _settings(),
-    );
-  }
-
   void _save() => Navigator.pop(context, _settings());
 
   @override
   Widget build(BuildContext context) {
-    final preview = _preview();
     return _SettingsSheetFrame(
       title: '${widget.settings.name} Pricing',
       child: Column(
@@ -915,8 +899,6 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
                 'Profit Margin % (blank = ${widget.global.defaultProfitMarginPercent}%)',
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 12),
-          _FormulaPreview(breakdown: preview),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -1009,59 +991,6 @@ class _MoneyField extends StatelessWidget {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       onChanged: onChanged,
       decoration: InputDecoration(labelText: label),
-    );
-  }
-}
-
-class _FormulaPreview extends StatelessWidget {
-  final PriceBreakdown breakdown;
-
-  const _FormulaPreview({required this.breakdown});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          _FormulaRow('Item rate', breakdown.purchasePrice),
-          if (!breakdown.gstRegistered)
-            _FormulaRow('GST on purchase', breakdown.gstAmount),
-          _FormulaRow('Total cost', breakdown.totalCost),
-          _FormulaRow('Profit', breakdown.profitAmount),
-          if (breakdown.gstRegistered)
-            _FormulaRow('GST on sell', breakdown.gstAmount),
-          _FormulaRow('Selling price', breakdown.sellingPrice),
-        ],
-      ),
-    );
-  }
-}
-
-class _FormulaRow extends StatelessWidget {
-  final String label;
-  final double value;
-
-  const _FormulaRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Text(label, style: const TextStyle(color: AppColors.textMuted)),
-          const Spacer(),
-          Text(
-            '₹${value.toStringAsFixed(2)}',
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ],
-      ),
     );
   }
 }
