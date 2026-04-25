@@ -970,11 +970,19 @@ class _ProductsScreenState extends State<ProductsScreen> {
         2,
       ),
     );
+    var formulaMarginText = marginCtrl.text;
     var directPrice = product?.directPriceToggle ?? false;
     final formKey = GlobalKey<FormState>();
     String? nameError;
     var syncingTotals = false;
     var syncingPrice = false;
+    var hasUserEdited = false;
+    var isSaving = false;
+    var priceBreakdownOpen = true;
+
+    void markEdited() {
+      hasUserEdited = true;
+    }
 
     void setFieldText(TextEditingController controller, String value) {
       if (controller.text == value) return;
@@ -1036,6 +1044,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
       syncingPrice = false;
     }
 
+    void restoreFormulaMargin() {
+      setFieldText(marginCtrl, formulaMarginText);
+    }
+
     PriceBreakdown buildPreview() {
       final purchasePrice = double.tryParse(purchaseCtrl.text) ?? 0;
       final manualPrice = double.tryParse(manualPriceCtrl.text);
@@ -1081,7 +1093,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
         setFieldText(overheadCtrl, effectiveOverhead().toStringAsFixed(2));
       }
       if (!marginCustom) {
-        setFieldText(marginCtrl, effectiveMargin().toStringAsFixed(2));
+        formulaMarginText = effectiveMargin().toStringAsFixed(2);
+        if (!directPrice) {
+          setFieldText(marginCtrl, formulaMarginText);
+        }
       }
       updateMarginFromDirectPrice();
       if (mounted) setSheet(() {});
@@ -1092,25 +1107,70 @@ class _ProductsScreenState extends State<ProductsScreen> {
     manualPriceCtrl.addListener(updateMarginFromDirectPrice);
     updateMarginFromDirectPrice();
 
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final preview = buildPreview();
-          Future<void> saveProduct() async {
-            if (!formKey.currentState!.validate()) return;
-            final name = nameCtrl.text.trim();
-            final unique = await DatabaseHelper.instance.isNameUnique(
-              name,
-              excludeId: product?.id,
-            );
-            if (!unique) {
-              setSheet(() => nameError = '"$name" already exists');
+          Future<void> requestClose() async {
+            if (isSaving) return;
+            if (!hasUserEdited) {
+              Navigator.pop(ctx);
               return;
             }
+            final discard = await showDialog<bool>(
+              context: ctx,
+              builder: (dialogCtx) => AlertDialog(
+                icon: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: AppColors.amber,
+                  size: 34,
+                ),
+                title: const Text('Discard changes?'),
+                content: const Text(
+                  'Your product changes have not been saved.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogCtx, false),
+                    child: const Text('Keep Editing'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogCtx, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.error,
+                    ),
+                    child: const Text('Discard'),
+                  ),
+                ],
+              ),
+            );
+            if (discard == true && ctx.mounted) Navigator.pop(ctx);
+          }
+
+          Future<void> saveProduct() async {
+            if (isSaving) return;
+            if (!formKey.currentState!.validate()) return;
+            setSheet(() => isSaving = true);
             try {
+              final name = nameCtrl.text.trim();
+              final unique = await DatabaseHelper.instance.isNameUnique(
+                name,
+                excludeId: product?.id,
+              );
+              if (!unique) {
+                if (ctx.mounted) {
+                  setSheet(() {
+                    nameError = '"$name" already exists';
+                    isSaving = false;
+                  });
+                }
+                return;
+              }
               final p = Product(
                 id: product?.id,
                 itemCode: product?.itemCode,
@@ -1140,9 +1200,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
               } else {
                 await DatabaseHelper.instance.insertProduct(p);
               }
+              hasUserEdited = false;
               if (ctx.mounted) Navigator.pop(ctx);
               _loadProducts();
             } catch (e) {
+              if (ctx.mounted) setSheet(() => isSaving = false);
               if (mounted) {
                 ScaffoldMessenger.of(
                   context,
@@ -1151,326 +1213,241 @@ class _ProductsScreenState extends State<ProductsScreen> {
             }
           }
 
-          return SafeArea(
-            top: false,
-            bottom: false,
-            child: Container(
-              width: double.infinity,
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
-              ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _ProductSheetHeader(
-                      title: isEditing ? 'Edit Product' : 'Add Product',
-                      onClose: () => Navigator.pop(ctx),
-                    ),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _EditorSection(
-                              title: 'Product Details',
-                              icon: Icons.inventory_2_outlined,
-                              trailing: _SourcePill(
-                                label: isEditing
-                                    ? product.sourceLabel
-                                    : 'Mobile · code auto-created',
-                                imported: product?.isImported ?? false,
-                              ),
-                              child: Column(
-                                children: [
-                                  TextFormField(
-                                    controller: nameCtrl,
-                                    textCapitalization:
-                                        TextCapitalization.words,
-                                    decoration: InputDecoration(
-                                      labelText: 'Product Name *',
-                                      errorText: nameError,
-                                      prefixIcon: const Icon(
-                                        Icons.label_outline_rounded,
-                                        size: 18,
-                                      ),
-                                    ),
-                                    validator: (v) =>
-                                        (v == null || v.trim().isEmpty)
-                                        ? 'Required'
-                                        : null,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _OptionDropdown(
-                                    label: 'Category',
-                                    value: selectedCategory,
-                                    options: _categories,
-                                    onChanged: (value) {
-                                      updateCategoryPricing(value, setSheet);
-                                    },
-                                    onAdd: () async {
-                                      final value = await _showAddOptionDialog(
-                                        'Category',
-                                      );
-                                      if (value == null ||
-                                          !mounted ||
-                                          !ctx.mounted) {
-                                        return;
-                                      }
-                                      await DatabaseHelper.instance
-                                          .addCategoryOption(value);
-                                      if (!mounted || !ctx.mounted) return;
-                                      setState(() {
-                                        if (!_categories.contains(value)) {
-                                          _categories.add(value);
-                                          _categories.sort();
-                                        }
-                                      });
-                                      await updateCategoryPricing(
-                                        value,
-                                        setSheet,
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _OptionDropdown(
-                                          label: 'Supplier',
-                                          value: selectedSupplier,
-                                          options: _suppliers,
-                                          onChanged: (value) {
-                                            setSheet(
-                                              () => selectedSupplier = value,
-                                            );
-                                          },
-                                          onAdd: () async {
-                                            final value =
-                                                await _showAddOptionDialog(
-                                                  'Supplier',
-                                                );
-                                            if (value == null ||
-                                                !mounted ||
-                                                !ctx.mounted) {
-                                              return;
-                                            }
-                                            await DatabaseHelper.instance
-                                                .addSupplierOption(value);
-                                            if (!mounted || !ctx.mounted) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              if (!_suppliers.contains(value)) {
-                                                _suppliers.add(value);
-                                                _suppliers.sort();
-                                              }
-                                            });
-                                            setSheet(
-                                              () => selectedSupplier = value,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: _OptionDropdown(
-                                          label: 'Unit',
-                                          value: selectedUnit,
-                                          options: _units,
-                                          noValueLabel: 'No Unit',
-                                          addLabel: 'Add custom',
-                                          onChanged: (value) {
-                                            setSheet(
-                                              () => selectedUnit = value,
-                                            );
-                                          },
-                                          onAdd: () async {
-                                            final value =
-                                                await _showAddOptionDialog(
-                                                  'Unit',
-                                                );
-                                            if (value == null ||
-                                                !mounted ||
-                                                !ctx.mounted) {
-                                              return;
-                                            }
-                                            await DatabaseHelper.instance
-                                                .addUnitOption(value);
-                                            if (!mounted || !ctx.mounted) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              if (!_units.any(
-                                                (unit) =>
-                                                    unit.toLowerCase() ==
-                                                    value.toLowerCase(),
-                                              )) {
-                                                _units.add(value);
-                                                _units.sort(
-                                                  (a, b) =>
-                                                      a.toLowerCase().compareTo(
-                                                        b.toLowerCase(),
-                                                      ),
-                                                );
-                                              }
-                                            });
-                                            setSheet(
-                                              () => selectedUnit = value,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            _EditorSection(
-                              title: 'Pricing',
-                              icon: Icons.payments_outlined,
-                              trailing: _ModePill(
-                                label: globalPricing.gstRegistered
-                                    ? 'GST registered'
-                                    : 'GST not registered',
-                                active: globalPricing.gstRegistered,
-                              ),
-                              child: Column(
-                                children: [
-                                  _DirectPriceControl(
-                                    directPrice: directPrice,
-                                    onChanged: (value) => setSheet(() {
-                                      directPrice = value;
-                                      updateMarginFromDirectPrice();
-                                    }),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _PricingCalculationTable(
-                                    purchaseCtrl: purchaseCtrl,
-                                    gstCtrl: gstCtrl,
-                                    overheadCtrl: overheadCtrl,
-                                    marginCtrl: marginCtrl,
-                                    manualPriceCtrl: manualPriceCtrl,
-                                    directPrice: directPrice,
-                                    breakdown: preview,
-                                    gstRegistered: globalPricing.gstRegistered,
-                                    gstSourceHint: sourceHint(
-                                      gstCustom,
-                                      selectedCategoryPricing?.gstPercent !=
-                                          null,
-                                    ),
-                                    overheadSourceHint: sourceHint(
-                                      overheadCustom,
-                                      selectedCategoryPricing?.overheadCost !=
-                                          null,
-                                    ),
-                                    marginSourceHint: sourceHint(
-                                      directPrice || marginCustom,
-                                      selectedCategoryPricing
-                                              ?.profitMarginPercent !=
-                                          null,
-                                    ),
-                                    onPurchaseChanged: () {
-                                      updateMarginFromDirectPrice();
-                                      setSheet(() {});
-                                    },
-                                    onGstChanged: () {
-                                      gstCustom = true;
-                                      updateMarginFromDirectPrice();
-                                      setSheet(() {});
-                                    },
-                                    onOverheadChanged: () {
-                                      overheadCustom = true;
-                                      updateMarginFromDirectPrice();
-                                      setSheet(() {});
-                                    },
-                                    onMarginChanged: () {
-                                      marginCustom = true;
-                                      updateMarginFromDirectPrice();
-                                      setSheet(() {});
-                                    },
-                                    onManualPriceChanged: () {
-                                      updateMarginFromDirectPrice();
-                                      setSheet(() {});
-                                    },
-                                    onResetGst: () => setSheet(() {
-                                      gstCustom = false;
-                                      setFieldText(
-                                        gstCtrl,
-                                        effectiveGst().toStringAsFixed(2),
-                                      );
-                                      updateMarginFromDirectPrice();
-                                    }),
-                                    onResetOverhead: () => setSheet(() {
-                                      overheadCustom = false;
-                                      setFieldText(
-                                        overheadCtrl,
-                                        effectiveOverhead().toStringAsFixed(2),
-                                      );
-                                      updateMarginFromDirectPrice();
-                                    }),
-                                    onResetMargin: directPrice
-                                        ? null
-                                        : () => setSheet(() {
-                                            marginCustom = false;
-                                            setFieldText(
-                                              marginCtrl,
-                                              effectiveMargin().toStringAsFixed(
-                                                2,
-                                              ),
-                                            );
-                                            updateMarginFromDirectPrice();
-                                          }),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            _EditorSection(
-                              title: 'Stock',
-                              icon: Icons.warehouse_outlined,
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: qtyCtrl,
-                                      keyboardType: TextInputType.number,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
-                                      decoration: const InputDecoration(
-                                        labelText: 'Quantity *',
-                                        prefixIcon: Icon(
-                                          Icons.layers_outlined,
+          return PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, result) {
+              if (!didPop) requestClose();
+            },
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: Container(
+                width: double.infinity,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                ),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ProductSheetHeader(
+                        title: isEditing ? 'Edit Product' : 'Add Product',
+                        onClose: requestClose,
+                      ),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _EditorSection(
+                                title: 'Product Details',
+                                icon: Icons.inventory_2_outlined,
+                                trailing: _SourcePill(
+                                  label: isEditing
+                                      ? product.sourceLabel
+                                      : 'Mobile · code auto-created',
+                                  imported: product?.isImported ?? false,
+                                ),
+                                child: Column(
+                                  children: [
+                                    TextFormField(
+                                      controller: nameCtrl,
+                                      textCapitalization:
+                                          TextCapitalization.words,
+                                      decoration: InputDecoration(
+                                        labelText: 'Product Name *',
+                                        errorText: nameError,
+                                        prefixIcon: const Icon(
+                                          Icons.label_outline_rounded,
                                           size: 18,
                                         ),
                                       ),
-                                      onChanged: (_) => setSheet(() {}),
-                                      validator: (v) {
-                                        if (v == null || v.isEmpty) {
-                                          return 'Required';
+                                      onChanged: (_) {
+                                        markEdited();
+                                        if (nameError != null) {
+                                          setSheet(() => nameError = null);
                                         }
-                                        final n = int.tryParse(v);
-                                        return (n == null || n < 0)
-                                            ? 'Invalid'
-                                            : null;
+                                      },
+                                      validator: (v) =>
+                                          (v == null || v.trim().isEmpty)
+                                          ? 'Required'
+                                          : null,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _OptionDropdown(
+                                      label: 'Category',
+                                      value: selectedCategory,
+                                      options: _categories,
+                                      onChanged: (value) {
+                                        markEdited();
+                                        updateCategoryPricing(value, setSheet);
+                                      },
+                                      onAdd: () async {
+                                        final value =
+                                            await _showAddOptionDialog(
+                                              'Category',
+                                            );
+                                        if (value == null ||
+                                            !mounted ||
+                                            !ctx.mounted) {
+                                          return;
+                                        }
+                                        await DatabaseHelper.instance
+                                            .addCategoryOption(value);
+                                        if (!mounted || !ctx.mounted) return;
+                                        setState(() {
+                                          if (!_categories.contains(value)) {
+                                            _categories.add(value);
+                                            _categories.sort();
+                                          }
+                                        });
+                                        await updateCategoryPricing(
+                                          value,
+                                          setSheet,
+                                        );
+                                        markEdited();
                                       },
                                     ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: totalCtrl,
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _OptionDropdown(
+                                            label: 'Supplier',
+                                            value: selectedSupplier,
+                                            options: _suppliers,
+                                            onChanged: (value) {
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedSupplier = value,
+                                              );
+                                            },
+                                            onAdd: () async {
+                                              final value =
+                                                  await _showAddOptionDialog(
+                                                    'Supplier',
+                                                  );
+                                              if (value == null ||
+                                                  !mounted ||
+                                                  !ctx.mounted) {
+                                                return;
+                                              }
+                                              await DatabaseHelper.instance
+                                                  .addSupplierOption(value);
+                                              if (!mounted || !ctx.mounted) {
+                                                return;
+                                              }
+                                              setState(() {
+                                                if (!_suppliers.contains(
+                                                  value,
+                                                )) {
+                                                  _suppliers.add(value);
+                                                  _suppliers.sort();
+                                                }
+                                              });
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedSupplier = value,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: _OptionDropdown(
+                                            label: 'Unit',
+                                            value: selectedUnit,
+                                            options: _units,
+                                            noValueLabel: 'No Unit',
+                                            addLabel: 'Add custom',
+                                            onChanged: (value) {
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedUnit = value,
+                                              );
+                                            },
+                                            onAdd: () async {
+                                              final value =
+                                                  await _showAddOptionDialog(
+                                                    'Unit',
+                                                  );
+                                              if (value == null ||
+                                                  !mounted ||
+                                                  !ctx.mounted) {
+                                                return;
+                                              }
+                                              await DatabaseHelper.instance
+                                                  .addUnitOption(value);
+                                              if (!mounted || !ctx.mounted) {
+                                                return;
+                                              }
+                                              setState(() {
+                                                if (!_units.any(
+                                                  (unit) =>
+                                                      unit.toLowerCase() ==
+                                                      value.toLowerCase(),
+                                                )) {
+                                                  _units.add(value);
+                                                  _units.sort(
+                                                    (a, b) => a
+                                                        .toLowerCase()
+                                                        .compareTo(
+                                                          b.toLowerCase(),
+                                                        ),
+                                                  );
+                                                }
+                                              });
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedUnit = value,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _EditorSection(
+                                title: 'Pricing',
+                                icon: Icons.payments_outlined,
+                                trailing: _ModePill(
+                                  label: globalPricing.gstRegistered
+                                      ? 'GST registered'
+                                      : 'GST not registered',
+                                  active: globalPricing.gstRegistered,
+                                ),
+                                child: Column(
+                                  children: [
+                                    _DirectPriceControl(
+                                      directPrice: directPrice,
+                                      onChanged: (value) => setSheet(() {
+                                        markEdited();
+                                        if (!directPrice) {
+                                          formulaMarginText = marginCtrl.text;
+                                        }
+                                        directPrice = value;
+                                        if (directPrice) {
+                                          updateMarginFromDirectPrice();
+                                        } else {
+                                          restoreFormulaMargin();
+                                        }
+                                      }),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextFormField(
+                                      controller: purchaseCtrl,
                                       keyboardType:
                                           const TextInputType.numberWithOptions(
                                             decimal: true,
@@ -1481,41 +1458,238 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         ),
                                       ],
                                       decoration: const InputDecoration(
-                                        labelText: 'Stock Value (₹)',
+                                        labelText: 'Purchase Price *',
+                                        prefixText: '₹',
                                         prefixIcon: Icon(
-                                          Icons.calculate_outlined,
+                                          Icons.currency_rupee_rounded,
                                           size: 18,
                                         ),
                                       ),
                                       onChanged: (_) {
-                                        updateQtyFromTotal();
+                                        markEdited();
+                                        updateMarginFromDirectPrice();
                                         setSheet(() {});
                                       },
-                                      validator: (v) {
-                                        if (v == null || v.isEmpty) {
-                                          return null;
-                                        }
-                                        final n = double.tryParse(v);
-                                        return (n == null || n < 0)
+                                      validator: (value) {
+                                        final number = double.tryParse(
+                                          value ?? '',
+                                        );
+                                        return number == null || number <= 0
                                             ? 'Invalid'
                                             : null;
                                       },
                                     ),
-                                  ),
-                                ],
+                                    if (directPrice) ...[
+                                      const SizedBox(height: 10),
+                                      TextFormField(
+                                        controller: manualPriceCtrl,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter.allow(
+                                            RegExp(r'^\d*\.?\d{0,2}'),
+                                          ),
+                                        ],
+                                        decoration: const InputDecoration(
+                                          labelText: 'Direct Selling Price *',
+                                          prefixText: '₹',
+                                          prefixIcon: Icon(
+                                            Icons.sell_outlined,
+                                            size: 18,
+                                          ),
+                                        ),
+                                        onChanged: (_) {
+                                          markEdited();
+                                          updateMarginFromDirectPrice();
+                                          setSheet(() {});
+                                        },
+                                        validator: (value) {
+                                          final number = double.tryParse(
+                                            value ?? '',
+                                          );
+                                          return number == null || number <= 0
+                                              ? 'Invalid'
+                                              : null;
+                                        },
+                                      ),
+                                    ],
+                                    const SizedBox(height: 10),
+                                    _PricingCalculationTable(
+                                      gstCtrl: gstCtrl,
+                                      overheadCtrl: overheadCtrl,
+                                      marginCtrl: marginCtrl,
+                                      directPrice: directPrice,
+                                      expanded: priceBreakdownOpen,
+                                      breakdown: preview,
+                                      gstRegistered:
+                                          globalPricing.gstRegistered,
+                                      gstSourceHint: sourceHint(
+                                        gstCustom,
+                                        selectedCategoryPricing?.gstPercent !=
+                                            null,
+                                      ),
+                                      overheadSourceHint: sourceHint(
+                                        overheadCustom,
+                                        selectedCategoryPricing?.overheadCost !=
+                                            null,
+                                      ),
+                                      marginSourceHint: sourceHint(
+                                        directPrice || marginCustom,
+                                        selectedCategoryPricing
+                                                ?.profitMarginPercent !=
+                                            null,
+                                      ),
+                                      onGstChanged: () {
+                                        markEdited();
+                                        gstCustom = true;
+                                        updateMarginFromDirectPrice();
+                                        setSheet(() {});
+                                      },
+                                      onOverheadChanged: () {
+                                        markEdited();
+                                        overheadCustom = true;
+                                        updateMarginFromDirectPrice();
+                                        setSheet(() {});
+                                      },
+                                      onMarginChanged: () {
+                                        markEdited();
+                                        marginCustom = true;
+                                        formulaMarginText = marginCtrl.text;
+                                        updateMarginFromDirectPrice();
+                                        setSheet(() {});
+                                      },
+                                      onResetGst: () => setSheet(() {
+                                        markEdited();
+                                        gstCustom = false;
+                                        setFieldText(
+                                          gstCtrl,
+                                          effectiveGst().toStringAsFixed(2),
+                                        );
+                                        updateMarginFromDirectPrice();
+                                      }),
+                                      onResetOverhead: () => setSheet(() {
+                                        markEdited();
+                                        overheadCustom = false;
+                                        setFieldText(
+                                          overheadCtrl,
+                                          effectiveOverhead().toStringAsFixed(
+                                            2,
+                                          ),
+                                        );
+                                        updateMarginFromDirectPrice();
+                                      }),
+                                      onResetMargin: directPrice
+                                          ? null
+                                          : () => setSheet(() {
+                                              markEdited();
+                                              marginCustom = false;
+                                              formulaMarginText =
+                                                  effectiveMargin()
+                                                      .toStringAsFixed(2);
+                                              setFieldText(
+                                                marginCtrl,
+                                                formulaMarginText,
+                                              );
+                                              updateMarginFromDirectPrice();
+                                            }),
+                                      onToggleExpanded: () => setSheet(
+                                        () => priceBreakdownOpen =
+                                            !priceBreakdownOpen,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 10),
+                              _EditorSection(
+                                title: 'Stock',
+                                icon: Icons.warehouse_outlined,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: qtyCtrl,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter
+                                              .digitsOnly,
+                                        ],
+                                        decoration: const InputDecoration(
+                                          labelText: 'Quantity *',
+                                          prefixIcon: Icon(
+                                            Icons.layers_outlined,
+                                            size: 18,
+                                          ),
+                                        ),
+                                        onChanged: (_) {
+                                          markEdited();
+                                          setSheet(() {});
+                                        },
+                                        validator: (v) {
+                                          if (v == null || v.isEmpty) {
+                                            return 'Required';
+                                          }
+                                          final n = int.tryParse(v);
+                                          return (n == null || n < 0)
+                                              ? 'Invalid'
+                                              : null;
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: totalCtrl,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter.allow(
+                                            RegExp(r'^\d*\.?\d{0,2}'),
+                                          ),
+                                        ],
+                                        decoration: const InputDecoration(
+                                          labelText: 'Stock Value (₹)',
+                                          prefixIcon: Icon(
+                                            Icons.calculate_outlined,
+                                            size: 18,
+                                          ),
+                                        ),
+                                        onChanged: (_) {
+                                          markEdited();
+                                          updateQtyFromTotal();
+                                          setSheet(() {});
+                                        },
+                                        validator: (v) {
+                                          if (v == null || v.isEmpty) {
+                                            return null;
+                                          }
+                                          final n = double.tryParse(v);
+                                          return (n == null || n < 0)
+                                              ? 'Invalid'
+                                              : null;
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    _ProductSheetActionBar(
-                      sellingPrice: preview.sellingPrice,
-                      unit: selectedUnit,
-                      isEditing: isEditing,
-                      onPressed: saveProduct,
-                    ),
-                  ],
+                      _ProductSheetActionBar(
+                        sellingPrice: preview.sellingPrice,
+                        unit: selectedUnit,
+                        isEditing: isEditing,
+                        isSaving: isSaving,
+                        onPressed: saveProduct,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2204,12 +2378,14 @@ class _ProductSheetActionBar extends StatelessWidget {
   final double sellingPrice;
   final String? unit;
   final bool isEditing;
+  final bool isSaving;
   final Future<void> Function() onPressed;
 
   const _ProductSheetActionBar({
     required this.sellingPrice,
     required this.unit,
     required this.isEditing,
+    required this.isSaving,
     required this.onPressed,
   });
 
@@ -2260,9 +2436,21 @@ class _ProductSheetActionBar extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           FilledButton.icon(
-            onPressed: onPressed,
-            icon: Icon(isEditing ? Icons.check_rounded : Icons.add_rounded),
-            label: Text(isEditing ? 'Update' : 'Add'),
+            onPressed: isSaving ? null : onPressed,
+            icon: isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(isEditing ? Icons.check_rounded : Icons.add_rounded),
+            label: Text(
+              isSaving
+                  ? 'Saving'
+                  : isEditing
+                  ? 'Update'
+                  : 'Add',
+            ),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.navy,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
@@ -2278,46 +2466,42 @@ class _ProductSheetActionBar extends StatelessWidget {
 }
 
 class _PricingCalculationTable extends StatelessWidget {
-  final TextEditingController purchaseCtrl;
   final TextEditingController gstCtrl;
   final TextEditingController overheadCtrl;
   final TextEditingController marginCtrl;
-  final TextEditingController manualPriceCtrl;
   final bool directPrice;
+  final bool expanded;
   final PriceBreakdown breakdown;
   final bool gstRegistered;
   final String gstSourceHint;
   final String overheadSourceHint;
   final String marginSourceHint;
-  final VoidCallback onPurchaseChanged;
   final VoidCallback onGstChanged;
   final VoidCallback onOverheadChanged;
   final VoidCallback onMarginChanged;
-  final VoidCallback onManualPriceChanged;
   final VoidCallback onResetGst;
   final VoidCallback onResetOverhead;
   final VoidCallback? onResetMargin;
+  final VoidCallback onToggleExpanded;
 
   const _PricingCalculationTable({
-    required this.purchaseCtrl,
     required this.gstCtrl,
     required this.overheadCtrl,
     required this.marginCtrl,
-    required this.manualPriceCtrl,
     required this.directPrice,
+    required this.expanded,
     required this.breakdown,
     required this.gstRegistered,
     required this.gstSourceHint,
     required this.overheadSourceHint,
     required this.marginSourceHint,
-    required this.onPurchaseChanged,
     required this.onGstChanged,
     required this.onOverheadChanged,
     required this.onMarginChanged,
-    required this.onManualPriceChanged,
     required this.onResetGst,
     required this.onResetOverhead,
     required this.onResetMargin,
+    required this.onToggleExpanded,
   });
 
   @override
@@ -2341,92 +2525,100 @@ class _PricingCalculationTable extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    gstRegistered
-                        ? 'GST registered calculation'
-                        : 'Purchase GST calculation',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Price Breakdown',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        gstRegistered
+                            ? 'GST shown on selling price'
+                            : 'GST shown on purchase cost',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 _ModePill(
                   label: breakdown.wasDirectPrice ? 'direct' : 'formula',
                   active: !breakdown.wasDirectPrice,
                 ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: onToggleExpanded,
+                  tooltip: expanded
+                      ? 'Hide price breakdown'
+                      : 'Show price breakdown',
+                  icon: Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                  ),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(34, 34),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: AppColors.textMuted,
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          _PricingInputRow(
-            label: gstRegistered ? 'Item rate (ex-GST)' : 'Item rate',
-            controller: purchaseCtrl,
-            prefixText: '₹',
-            result: breakdown.purchasePrice,
-            onChanged: onPurchaseChanged,
-            requiredPositive: true,
-          ),
-          if (!gstRegistered)
+          if (expanded) ...[
+            const SizedBox(height: 8),
+            if (!gstRegistered)
+              _PricingInputRow(
+                label: 'GST on purchase',
+                controller: gstCtrl,
+                suffixText: '%',
+                result: breakdown.landedCost,
+                delta: breakdown.gstAmount,
+                sourceHint: gstSourceHint,
+                onResetSource: onResetGst,
+                onChanged: onGstChanged,
+              ),
             _PricingInputRow(
-              label: 'GST on purchase',
-              controller: gstCtrl,
-              suffixText: '%',
-              result: breakdown.landedCost,
-              delta: breakdown.gstAmount,
-              sourceHint: gstSourceHint,
-              onResetSource: onResetGst,
-              onChanged: onGstChanged,
-            ),
-          _PricingInputRow(
-            label: 'Overhead',
-            controller: overheadCtrl,
-            prefixText: '₹',
-            result: breakdown.totalCost,
-            delta: breakdown.overheadCost,
-            sourceHint: overheadSourceHint,
-            onResetSource: onResetOverhead,
-            onChanged: onOverheadChanged,
-          ),
-          _PricingInputRow(
-            label: 'Margin',
-            controller: marginCtrl,
-            suffixText: '%',
-            result: breakdown.preGstSellingPrice,
-            delta: breakdown.profitAmount,
-            sourceHint: marginSourceHint,
-            onResetSource: onResetMargin,
-            onChanged: onMarginChanged,
-            readOnly: directPrice,
-          ),
-          if (gstRegistered)
-            _PricingInputRow(
-              label: 'GST on sell',
-              controller: gstCtrl,
-              suffixText: '%',
-              result: breakdown.sellingPrice,
-              delta: breakdown.gstAmount,
-              sourceHint: gstSourceHint,
-              onResetSource: onResetGst,
-              onChanged: onGstChanged,
-            ),
-          const Divider(height: 14),
-          if (directPrice)
-            _PricingInputRow(
-              label: 'Selling price',
-              controller: manualPriceCtrl,
+              label: 'Overhead',
+              controller: overheadCtrl,
               prefixText: '₹',
-              result: breakdown.sellingPrice,
-              onChanged: onManualPriceChanged,
-              requiredPositive: true,
-              isTotal: true,
-            )
-          else
-            _PricingResultRow(
-              label: 'Selling price',
-              value: breakdown.sellingPrice,
-              isTotal: true,
+              result: breakdown.totalCost,
+              delta: breakdown.overheadCost,
+              sourceHint: overheadSourceHint,
+              onResetSource: onResetOverhead,
+              onChanged: onOverheadChanged,
             ),
+            _PricingInputRow(
+              label: 'Margin',
+              controller: marginCtrl,
+              suffixText: '%',
+              result: breakdown.preGstSellingPrice,
+              delta: breakdown.profitAmount,
+              sourceHint: marginSourceHint,
+              onResetSource: onResetMargin,
+              onChanged: onMarginChanged,
+              readOnly: directPrice,
+            ),
+            if (gstRegistered)
+              _PricingInputRow(
+                label: 'GST on sell',
+                controller: gstCtrl,
+                suffixText: '%',
+                result: breakdown.sellingPrice,
+                delta: breakdown.gstAmount,
+                sourceHint: gstSourceHint,
+                onResetSource: onResetGst,
+                onChanged: onGstChanged,
+              ),
+          ],
         ],
       ),
     );
@@ -2441,8 +2633,6 @@ class _PricingInputRow extends StatelessWidget {
   final double result;
   final double? delta;
   final VoidCallback onChanged;
-  final bool requiredPositive;
-  final bool isTotal;
   final bool readOnly;
   final String? sourceHint;
   final VoidCallback? onResetSource;
@@ -2455,8 +2645,6 @@ class _PricingInputRow extends StatelessWidget {
     required this.result,
     this.delta,
     required this.onChanged,
-    this.requiredPositive = false,
-    this.isTotal = false,
     this.readOnly = false,
     this.sourceHint,
     this.onResetSource,
@@ -2473,14 +2661,7 @@ class _PricingInputRow extends StatelessWidget {
 
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: EdgeInsets.fromLTRB(10, isTotal ? 8 : 6, 8, isTotal ? 8 : 6),
-          decoration: BoxDecoration(
-            color: isTotal ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: isTotal
-                ? Border.all(color: AppColors.amber.withValues(alpha: 0.35))
-                : null,
-          ),
+          padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
           child: Row(
             children: [
               Expanded(
@@ -2491,9 +2672,9 @@ class _PricingInputRow extends StatelessWidget {
                       label,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: isTotal ? AppColors.navy : AppColors.textDark,
-                        fontWeight: isTotal ? FontWeight.w900 : FontWeight.w700,
+                      style: const TextStyle(
+                        color: AppColors.textDark,
+                        fontWeight: FontWeight.w700,
                         fontSize: 12.5,
                       ),
                     ),
@@ -2541,13 +2722,7 @@ class _PricingInputRow extends StatelessWidget {
                   onChanged: (_) => onChanged(),
                   validator: (value) {
                     final number = double.tryParse(value ?? '');
-                    if (requiredPositive && (number == null || number <= 0)) {
-                      return 'Invalid';
-                    }
-                    if (!requiredPositive &&
-                        value != null &&
-                        value.isNotEmpty &&
-                        number == null) {
+                    if (value != null && value.isNotEmpty && number == null) {
                       return 'Invalid';
                     }
                     return null;
@@ -2566,7 +2741,7 @@ class _PricingInputRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: isTotal ? AppColors.navy : AppColors.textMuted,
+                          color: AppColors.textMuted,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
                         ),
@@ -2576,10 +2751,10 @@ class _PricingInputRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.end,
-                      style: TextStyle(
-                        color: isTotal ? AppColors.navy : AppColors.textDark,
-                        fontWeight: isTotal ? FontWeight.w900 : FontWeight.w700,
-                        fontSize: isTotal ? 14 : 12,
+                      style: const TextStyle(
+                        color: AppColors.textDark,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -2663,52 +2838,6 @@ class _SourceResetChip extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _PricingResultRow extends StatelessWidget {
-  final String label;
-  final double value;
-  final bool isTotal;
-
-  const _PricingResultRow({
-    required this.label,
-    required this.value,
-    this.isTotal = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isTotal ? AppColors.navy : AppColors.textMuted,
-                fontWeight: isTotal ? FontWeight.w900 : FontWeight.w600,
-              ),
-            ),
-          ),
-          Text(
-            '₹${value.toStringAsFixed(2)}',
-            style: TextStyle(
-              color: isTotal ? AppColors.navy : AppColors.textDark,
-              fontWeight: isTotal ? FontWeight.w900 : FontWeight.w700,
-              fontSize: isTotal ? 15 : 13,
-            ),
-          ),
-        ],
       ),
     );
   }
