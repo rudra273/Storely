@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -20,6 +20,7 @@ mixin DatabaseSchema {
     await _createOptionTables(db);
     await _createCustomerTables(db);
     await _createBillTables(db);
+    await _createProductPurchaseTables(db);
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -47,6 +48,7 @@ mixin DatabaseSchema {
     if (oldVersion < 10) await _upgradePricingSchema(db);
     if (oldVersion < 11) await _upgradeProductPricingOverrides(db);
     if (oldVersion < 12) await _upgradeCustomerSchema(db);
+    if (oldVersion < 13) await _upgradeProductPurchaseSchema(db);
   }
 
   Future<void> _ensureSchema(Database db) async {
@@ -64,7 +66,9 @@ mixin DatabaseSchema {
     await _createOptionTables(db);
     await _createCustomerTables(db);
     await _createBillTables(db);
+    await _createProductPurchaseTables(db);
     await _upgradeCustomerSchema(db);
+    await _upgradeProductPurchaseSchema(db);
     await _upgradeUnitSchema(db);
     await _upgradePricingSchema(db);
     await _upgradeProductPricingOverrides(db);
@@ -147,6 +151,31 @@ mixin DatabaseSchema {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
+    ''');
+  }
+
+  Future<void> _createProductPurchaseTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS product_purchase_entries(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        purchase_date TEXT NOT NULL,
+        quantity_added INTEGER NOT NULL,
+        purchase_price REAL NOT NULL,
+        supplier TEXT,
+        import_batch_key TEXT,
+        source TEXT NOT NULL DEFAULT 'manual',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      )
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_product_purchase_entries_product_date
+      ON product_purchase_entries(product_id, purchase_date)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_product_purchase_entries_batch
+      ON product_purchase_entries(import_batch_key)
     ''');
   }
 
@@ -541,6 +570,35 @@ mixin DatabaseSchema {
       'profit_margin_percent',
       'profit_margin_percent REAL',
     );
+  }
+
+  Future<void> _upgradeProductPurchaseSchema(DatabaseExecutor executor) async {
+    await _createProductPurchaseTables(executor);
+    final existingEntries = await executor.rawQuery(
+      'SELECT COUNT(*) AS c FROM product_purchase_entries',
+    );
+    final count = Sqflite.firstIntValue(existingEntries) ?? 0;
+    if (count > 0) return;
+
+    final products = await executor.query('products');
+    final now = DateTime.now().toIso8601String();
+    for (final product in products) {
+      final quantity = product['quantity'] as int? ?? 0;
+      if (quantity <= 0) continue;
+      final createdAt = product['created_at'] as String? ?? now;
+      await executor.insert('product_purchase_entries', {
+        'product_id': product['id'],
+        'purchase_date': createdAt.substring(0, 10),
+        'quantity_added': quantity,
+        'purchase_price':
+            (product['purchase_price'] as num?)?.toDouble() ??
+            (product['mrp'] as num?)?.toDouble() ??
+            0,
+        'supplier': product['supplier'],
+        'source': product['source'] ?? ProductSource.mobile,
+        'created_at': now,
+      });
+    }
   }
 }
 

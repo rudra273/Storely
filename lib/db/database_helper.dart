@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
+import '../models/product_purchase.dart';
 import '../models/pricing.dart';
 
 part 'database_schema.dart';
@@ -42,6 +43,11 @@ bool _isPresetUnit(String value) {
   return Product.presetUnits.any(
     (unit) => unit.toLowerCase() == value.trim().toLowerCase(),
   );
+}
+
+String _dateOnly(DateTime value) {
+  final local = DateTime(value.year, value.month, value.day);
+  return local.toIso8601String().substring(0, 10);
 }
 
 Future<void> _addColumnIfMissing(

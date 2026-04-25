@@ -25,6 +25,14 @@ mixin DatabaseProducts {
         conflictAlgorithm: ConflictAlgorithm.abort,
       );
       await _saveProductOptions(txn, productToInsert);
+      await _insertPurchaseEntry(
+        txn,
+        productId: id,
+        product: productToInsert,
+        quantityAdded: productToInsert.quantity,
+        purchaseDate: productToInsert.createdAt,
+        source: productToInsert.source,
+      );
       return id;
     });
   }
@@ -33,6 +41,46 @@ mixin DatabaseProducts {
     final db = await database;
     final maps = await db.query('products', orderBy: 'created_at ASC');
     return maps.map((map) => Product.fromMap(map)).toList();
+  }
+
+  Future<Map<int, ProductPurchaseSummary>> getProductPurchaseSummaries() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT p.product_id,
+             p.purchase_date,
+             p.purchase_price,
+             totals.total_purchased
+      FROM product_purchase_entries p
+      JOIN (
+        SELECT product_id, MAX(purchase_date || 'T' || created_at) AS latest_key,
+               COALESCE(SUM(quantity_added), 0) AS total_purchased
+        FROM product_purchase_entries
+        GROUP BY product_id
+      ) totals
+        ON totals.product_id = p.product_id
+       AND totals.latest_key = p.purchase_date || 'T' || p.created_at
+    ''');
+    return {
+      for (final row in rows)
+        row['product_id'] as int: ProductPurchaseSummary(
+          productId: row['product_id'] as int,
+          lastPurchaseDate: DateTime.tryParse(row['purchase_date'] as String),
+          lastPurchasePrice: (row['purchase_price'] as num?)?.toDouble(),
+          totalPurchased: row['total_purchased'] as int? ?? 0,
+        ),
+    };
+  }
+
+  Future<Set<int>> getProductIdsPurchasedOn(DateTime date) async {
+    final db = await database;
+    final rows = await db.query(
+      'product_purchase_entries',
+      distinct: true,
+      columns: ['product_id'],
+      where: 'purchase_date = ?',
+      whereArgs: [_dateOnly(date)],
+    );
+    return rows.map((row) => row['product_id'] as int).toSet();
   }
 
   Future<bool> isNameUnique(String name, {int? excludeId}) async {
@@ -61,9 +109,56 @@ mixin DatabaseProducts {
     });
   }
 
+  Future<int> restockProduct(
+    Product product, {
+    required int quantityAdded,
+    required DateTime purchaseDate,
+    String source = ProductSource.mobile,
+  }) async {
+    if (product.id == null) throw ArgumentError('Product id is required');
+    final db = await database;
+    return db.transaction((txn) async {
+      final existing = await txn.query(
+        'products',
+        where: 'id = ?',
+        whereArgs: [product.id],
+        limit: 1,
+      );
+      if (existing.isEmpty) return 0;
+      final current = Product.fromMap(existing.single);
+      final updatedProduct = product.copyWith(
+        quantity: current.quantity + quantityAdded,
+        source: source,
+      );
+      final count = await txn.update(
+        'products',
+        updatedProduct.toMap(),
+        where: 'id = ?',
+        whereArgs: [product.id],
+      );
+      await _saveProductOptions(txn, updatedProduct);
+      await _insertPurchaseEntry(
+        txn,
+        productId: product.id!,
+        product: updatedProduct,
+        quantityAdded: quantityAdded,
+        purchaseDate: purchaseDate,
+        source: source,
+      );
+      return count;
+    });
+  }
+
   Future<int> deleteProduct(int id) async {
     final db = await database;
-    return db.delete('products', where: 'id = ?', whereArgs: [id]);
+    return db.transaction((txn) async {
+      await txn.delete(
+        'product_purchase_entries',
+        where: 'product_id = ?',
+        whereArgs: [id],
+      );
+      return txn.delete('products', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   Future<List<String>> getCategories() async {
@@ -230,87 +325,267 @@ mixin DatabaseProducts {
     );
   }
 
-  Future<int> replaceAllProducts(List<Product> products) async {
+  Future<int> replaceAllProducts(
+    List<Product> products, {
+    DateTime? purchaseDate,
+  }) async {
     final db = await database;
-    final cleanProducts = _uniqueProductsByName(
+    final date = purchaseDate ?? DateTime.now();
+    final cleanProducts = _uniqueProductsByIdentity(
       products,
     ).map(_asImportedProduct).toList();
+    final batchKey = _importBatchKey(cleanProducts, date);
 
     return db.transaction((txn) async {
-      await txn.delete('products');
       int count = 0;
       for (final p in cleanProducts) {
-        await txn.insert(
-          'products',
-          p.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        final existing = await _findExistingProductRows(txn, p);
+        final int id;
+        if (existing.isNotEmpty) {
+          id = existing.first['id'] as int;
+          final current = Product.fromMap(existing.first);
+          await txn.update(
+            'products',
+            p.copyWith(id: id, createdAt: current.createdAt).toMap(),
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        } else {
+          id = await txn.insert(
+            'products',
+            p.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
         await _saveProductOptions(txn, p);
+        await _insertPurchaseEntry(
+          txn,
+          productId: id,
+          product: p,
+          quantityAdded: p.quantity,
+          purchaseDate: date,
+          importBatchKey: batchKey,
+          source: ProductSource.imported,
+        );
         count++;
       }
       return count;
     });
   }
 
-  Future<Map<String, int>> mergeProducts(List<Product> products) async {
+  Future<ProductImportResult> mergeProducts(
+    List<Product> products, {
+    DateTime? purchaseDate,
+  }) async {
     final db = await database;
-    final cleanProducts = _uniqueProductsByName(
+    final date = purchaseDate ?? DateTime.now();
+    final cleanProducts = _uniqueProductsByIdentity(
       products,
     ).map(_asImportedProduct).toList();
+    final batchKey = _importBatchKey(cleanProducts, date);
+    final rowSetKey = _importRowSetKey(cleanProducts);
 
     return db.transaction((txn) async {
       int added = 0, updated = 0;
+      final possibleDuplicate = await _hasImportBatch(txn, batchKey);
+      final duplicateOnDifferentDate = !possibleDuplicate
+          ? await _hasImportRowSet(txn, rowSetKey)
+          : false;
       for (final p in cleanProducts) {
-        List<Map<String, dynamic>> existing = [];
-        if (p.itemCode != null && p.itemCode!.isNotEmpty) {
-          existing = await txn.query(
-            'products',
-            where: 'item_code = ?',
-            whereArgs: [p.itemCode],
-          );
-        }
-        if (existing.isEmpty) {
-          existing = await txn.query(
-            'products',
-            where: 'LOWER(name) = LOWER(?)',
-            whereArgs: [p.name],
-          );
-        }
+        final existing = await _findExistingProductRows(txn, p);
 
         if (existing.isNotEmpty) {
           final existingId = existing.first['id'] as int;
+          final current = Product.fromMap(existing.first);
+          final merged = p.copyWith(
+            id: existingId,
+            quantity: current.quantity + p.quantity,
+            createdAt: current.createdAt,
+          );
           await txn.update(
             'products',
-            p.copyWith(id: existingId).toMap(),
+            merged.toMap(),
             where: 'id = ?',
             whereArgs: [existingId],
           );
-          await _saveProductOptions(txn, p);
+          await _saveProductOptions(txn, merged);
+          await _insertPurchaseEntry(
+            txn,
+            productId: existingId,
+            product: merged,
+            quantityAdded: p.quantity,
+            purchaseDate: date,
+            importBatchKey: batchKey,
+            source: ProductSource.imported,
+          );
           updated++;
         } else {
-          await txn.insert(
+          final id = await txn.insert(
             'products',
             p.toMap(),
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
           await _saveProductOptions(txn, p);
+          await _insertPurchaseEntry(
+            txn,
+            productId: id,
+            product: p,
+            quantityAdded: p.quantity,
+            purchaseDate: date,
+            importBatchKey: batchKey,
+            source: ProductSource.imported,
+          );
           added++;
         }
       }
-      return {'added': added, 'updated': updated};
+      return ProductImportResult(
+        added: added,
+        updated: updated,
+        possibleDuplicate: possibleDuplicate,
+        duplicateOnDifferentDate: duplicateOnDifferentDate,
+      );
     });
   }
 
-  List<Product> _uniqueProductsByName(List<Product> products) {
-    final byName = <String, Product>{};
+  Future<ProductImportResult> previewImportDuplicate(
+    List<Product> products, {
+    DateTime? purchaseDate,
+  }) async {
+    final db = await database;
+    final cleanProducts = _uniqueProductsByIdentity(products);
+    final sameDateDuplicate = purchaseDate != null
+        ? await _hasImportBatch(
+            db,
+            _importBatchKey(cleanProducts, purchaseDate),
+          )
+        : false;
+    final differentDateDuplicate = !sameDateDuplicate
+        ? await _hasImportRowSet(db, _importRowSetKey(cleanProducts))
+        : false;
+    return ProductImportResult(
+      added: 0,
+      updated: 0,
+      possibleDuplicate: sameDateDuplicate,
+      duplicateOnDifferentDate: differentDateDuplicate,
+    );
+  }
+
+  Future<bool> wouldImportDuplicate(
+    List<Product> products, {
+    required DateTime purchaseDate,
+  }) async {
+    final result = await previewImportDuplicate(
+      products,
+      purchaseDate: purchaseDate,
+    );
+    return result.possibleDuplicate || result.duplicateOnDifferentDate;
+  }
+
+  List<Product> _uniqueProductsByIdentity(List<Product> products) {
+    final byIdentity = <String, Product>{};
     for (final product in products) {
-      byName[product.name.trim().toLowerCase()] = product;
+      byIdentity[_productIdentity(product)] = product;
     }
-    return byName.values.toList();
+    return byIdentity.values.toList();
   }
 
   Product _asImportedProduct(Product product) =>
       product.copyWith(source: ProductSource.imported);
+
+  Future<List<Map<String, dynamic>>> _findExistingProductRows(
+    DatabaseExecutor executor,
+    Product product,
+  ) async {
+    final code = _normaliseName(product.itemCode);
+    if (code != null) {
+      final rows = await executor.query(
+        'products',
+        where: 'item_code = ?',
+        whereArgs: [code],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return rows;
+    }
+
+    return executor.query(
+      'products',
+      where: 'LOWER(name) = LOWER(?)',
+      whereArgs: [product.name],
+      limit: 1,
+    );
+  }
+
+  Future<void> _insertPurchaseEntry(
+    DatabaseExecutor executor, {
+    required int productId,
+    required Product product,
+    required int quantityAdded,
+    required DateTime purchaseDate,
+    String? importBatchKey,
+    required String source,
+  }) async {
+    if (quantityAdded <= 0) return;
+    await executor.insert('product_purchase_entries', {
+      'product_id': productId,
+      'purchase_date': _dateOnly(purchaseDate),
+      'quantity_added': quantityAdded,
+      'purchase_price': product.purchasePrice,
+      'supplier': product.supplier,
+      'import_batch_key': importBatchKey,
+      'source': source,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<bool> _hasImportBatch(
+    DatabaseExecutor executor,
+    String batchKey,
+  ) async {
+    final rows = await executor.query(
+      'product_purchase_entries',
+      columns: ['id'],
+      where: 'import_batch_key = ?',
+      whereArgs: [batchKey],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<bool> _hasImportRowSet(
+    DatabaseExecutor executor,
+    String rowSetKey,
+  ) async {
+    final rows = await executor.query(
+      'product_purchase_entries',
+      columns: ['id'],
+      where: 'import_batch_key LIKE ?',
+      whereArgs: ['%::$rowSetKey'],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  String _importBatchKey(List<Product> products, DateTime purchaseDate) {
+    return '${_dateOnly(purchaseDate)}::${_importRowSetKey(products)}';
+  }
+
+  String _importRowSetKey(List<Product> products) {
+    final rowKeys = products.map((product) {
+      return [
+        _productIdentity(product),
+        product.quantity,
+        product.purchasePrice.toStringAsFixed(2),
+        (product.supplier ?? '').trim().toLowerCase(),
+      ].join('|');
+    }).toList()..sort();
+    return rowKeys.join(';;');
+  }
+
+  String _productIdentity(Product product) {
+    final code = _normaliseName(product.itemCode);
+    if (code != null) return 'code:${code.toLowerCase()}';
+    return 'name:${product.name.trim().toLowerCase()}';
+  }
 
   Future<String> _nextMobileItemCode(DatabaseExecutor executor) async {
     final rows = await executor.query(

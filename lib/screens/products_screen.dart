@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
+import '../models/product_purchase.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import 'qr_sheet_screen.dart';
@@ -33,6 +34,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
   List<String> _categories = [];
   List<String> _suppliers = [];
   List<String> _units = [];
+  Map<int, ProductPurchaseSummary> _purchaseSummaries = {};
+  Set<int> _purchaseDateProductIds = {};
   final Set<String> _selectedCategories = {};
   final Set<String> _selectedSuppliers = {};
   final Set<int> _selectedProductIds = {};
@@ -41,6 +44,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   bool _searchOpen = false;
   bool _isUpdatingPrices = false;
   int _lowStockThreshold = 5;
+  DateTime? _selectedPurchaseDate;
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
 
   bool get _selectionMode => _selectedProductIds.isNotEmpty;
@@ -81,6 +85,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final categories = await db.getCategories();
     final suppliers = await db.getSuppliers();
     final units = await db.getUnits();
+    final purchaseSummaries = await db.getProductPurchaseSummaries();
+    final purchaseDateProductIds = _selectedPurchaseDate == null
+        ? <int>{}
+        : await db.getProductIdsPurchasedOn(_selectedPurchaseDate!);
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
@@ -88,6 +96,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
       _categories = categories;
       _suppliers = suppliers;
       _units = units;
+      _purchaseSummaries = purchaseSummaries;
+      _purchaseDateProductIds = purchaseDateProductIds;
       _lowStockThreshold = lowStockThreshold;
       _selectedCategories.removeWhere((value) => !_categories.contains(value));
       _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
@@ -113,6 +123,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
         final matchesSupplier =
             _selectedSuppliers.isEmpty ||
             (p.supplier != null && _selectedSuppliers.contains(p.supplier));
+        final matchesPurchaseDate =
+            _selectedPurchaseDate == null ||
+            (p.id != null && _purchaseDateProductIds.contains(p.id));
         final matchesSearch =
             query.isEmpty ||
             p.name.toLowerCase().contains(query) ||
@@ -121,7 +134,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
             (p.unit?.toLowerCase().contains(query) ?? false) ||
             (p.supplier?.toLowerCase().contains(query) ?? false) ||
             p.sourceLabel.toLowerCase().contains(query);
-        return matchesCategory && matchesSupplier && matchesSearch;
+        return matchesCategory &&
+            matchesSupplier &&
+            matchesPurchaseDate &&
+            matchesSearch;
       }).toList();
       filtered.sort(_compareProducts);
       _filtered = filtered;
@@ -216,6 +232,58 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (selected == null || selected == _sortMode) return;
     setState(() => _sortMode = selected);
     _applyFilter();
+  }
+
+  Future<void> _pickPurchaseDateFilter() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedPurchaseDate ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null) return;
+    final ids = await DatabaseHelper.instance.getProductIdsPurchasedOn(picked);
+    if (!mounted) return;
+    setState(() {
+      _selectedPurchaseDate = picked;
+      _purchaseDateProductIds = ids;
+    });
+    _applyFilter();
+  }
+
+  List<Product> _matchingProducts(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.length < 2) return const [];
+    return _allProducts
+        .where((product) {
+          return product.name.toLowerCase().contains(q) ||
+              (product.itemCode?.toLowerCase().contains(q) ?? false);
+        })
+        .take(5)
+        .toList();
+  }
+
+  int _countImportMatches(List<Product> products) {
+    var count = 0;
+    final byCode = {
+      for (final product in _allProducts)
+        if (product.itemCode != null && product.itemCode!.trim().isNotEmpty)
+          product.itemCode!.trim().toLowerCase(): product,
+    };
+    final byName = {
+      for (final product in _allProducts)
+        product.name.trim().toLowerCase(): product,
+    };
+
+    for (final product in products) {
+      final code = product.itemCode?.trim().toLowerCase();
+      if (code != null && code.isNotEmpty && byCode.containsKey(code)) {
+        count++;
+        continue;
+      }
+      if (byName.containsKey(product.name.trim().toLowerCase())) count++;
+    }
+    return count;
   }
 
   Future<void> _showBulkCategoryPicker() async {
@@ -712,257 +780,410 @@ class _ProductsScreenState extends State<ProductsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        var useDirectPrice = true;
+        var useDirectPrice = false;
+        DateTime? purchaseDate;
+        var possibleDuplicate = false;
+        var duplicateDateMismatch = false;
+        var existingMatchCount = _countImportMatches(products);
+        var duplicateChecked = false;
         List<Product> importProducts() => products
             .map(
               (product) => _productWithImportPricing(product, useDirectPrice),
             )
             .toList();
 
+        Future<void> refreshDuplicateFlag(StateSetter setSheet) async {
+          final matches = _countImportMatches(importProducts());
+          final duplicate = await DatabaseHelper.instance
+              .previewImportDuplicate(
+                importProducts(),
+                purchaseDate: purchaseDate,
+              );
+          if (ctx.mounted) {
+            setSheet(() {
+              existingMatchCount = matches;
+              possibleDuplicate = duplicate.possibleDuplicate;
+              duplicateDateMismatch = duplicate.duplicateOnDifferentDate;
+            });
+          }
+        }
+
         return StatefulBuilder(
-          builder: (ctx, setSheet) => SafeArea(
-            top: false,
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
-              ),
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Handle
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: AppColors.creamDark,
-                          borderRadius: BorderRadius.circular(2),
+          builder: (ctx, setSheet) {
+            if (!duplicateChecked) {
+              duplicateChecked = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (ctx.mounted) refreshDuplicateFlag(setSheet);
+              });
+            }
+            return SafeArea(
+              top: false,
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
+                ),
+                margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Handle
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.creamDark,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Icon + Title
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.amber.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
+                      const SizedBox(height: 20),
+                      // Icon + Title
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.amber.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.upload_file_rounded,
+                          color: AppColors.amber,
+                          size: 36,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.upload_file_rounded,
-                        color: AppColors.amber,
-                        size: 36,
+                      const SizedBox(height: 16),
+                      Text(
+                        'Import ${products.length} Products',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Import ${products.length} Products',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
+                      const SizedBox(height: 6),
+                      Text(
+                        'Choose how to import the data',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 14,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Choose how to import the data',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.cream,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            useDirectPrice
-                                ? Icons.edit_note_rounded
-                                : Icons.auto_graph_rounded,
-                            color: useDirectPrice
-                                ? AppColors.amber
-                                : AppColors.navy,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Direct Price',
-                                  style: TextStyle(fontWeight: FontWeight.w800),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  useDirectPrice
-                                      ? 'Use imported MRP as selling price'
-                                      : 'Recalculate selling price from formula',
-                                  style: const TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: ctx,
+                            initialDate: purchaseDate ?? DateTime.now(),
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 365),
                             ),
+                          );
+                          if (picked == null || !ctx.mounted) return;
+                          setSheet(() => purchaseDate = picked);
+                          await refreshDuplicateFlag(setSheet);
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.cream,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          Switch.adaptive(
-                            value: useDirectPrice,
-                            activeThumbColor: AppColors.navy,
-                            onChanged: (value) =>
-                                setSheet(() => useDirectPrice = value),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    // Preview
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.cream,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      constraints: const BoxConstraints(maxHeight: 120),
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: importProducts()
-                            .take(5)
-                            .map(
-                              (p) => Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 3,
-                                ),
-                                child: Row(
+                          child: Row(
+                            children: [
+                              const Icon(Icons.event_outlined),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (p.itemCode != null) ...[
-                                      Text(
-                                        p.itemCode!,
-                                        style: TextStyle(
-                                          color: AppColors.textMuted,
-                                          fontSize: 12,
-                                          fontFamily: 'monospace',
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        p.name,
-                                        style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    Text(
-                                      p.directPriceToggle
-                                          ? 'direct'
-                                          : 'formula',
+                                    const Text(
+                                      'Purchase Date',
                                       style: TextStyle(
-                                        color: p.directPriceToggle
-                                            ? AppColors.amber
-                                            : AppColors.success,
-                                        fontSize: 11,
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
+                                    const SizedBox(height: 2),
                                     Text(
-                                      p.priceLabel,
-                                      style: const TextStyle(
+                                      purchaseDate == null
+                                          ? 'Required before import'
+                                          : _formatFullDate(purchaseDate!),
+                                      style: TextStyle(
+                                        color: purchaseDate == null
+                                            ? AppColors.error
+                                            : AppColors.textMuted,
                                         fontSize: 12,
-                                        fontWeight: FontWeight.w600,
+                                        fontWeight: purchaseDate == null
+                                            ? FontWeight.w700
+                                            : FontWeight.w400,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-                    if (products.length > 5)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '...and ${products.length - 5} more',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
+                              const Icon(Icons.edit_calendar_rounded),
+                            ],
                           ),
                         ),
                       ),
-                    const SizedBox(height: 20),
-                    // Replace All
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () => _runImportAction(ctx, () async {
-                          final count = await DatabaseHelper.instance
-                              .replaceAllProducts(importProducts());
-                          return '✓ Replaced with $count products';
-                        }),
-                        icon: const Icon(Icons.swap_horiz_rounded),
-                        label: const Text(
-                          'Replace All',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                      if (possibleDuplicate || duplicateDateMismatch) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.error.withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.warning_amber_rounded,
+                                color: AppColors.error,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  possibleDuplicate
+                                      ? 'This looks like a duplicate purchase batch. Same date, same products, quantities, prices, and suppliers were imported before.'
+                                      : 'Check the purchase date. These rows look like a duplicate batch already imported on a different date.',
+                                  style: const TextStyle(
+                                    color: AppColors.error,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                      ],
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+                        decoration: BoxDecoration(
+                          color: AppColors.cream,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              useDirectPrice
+                                  ? Icons.edit_note_rounded
+                                  : Icons.auto_graph_rounded,
+                              color: useDirectPrice
+                                  ? AppColors.amber
+                                  : AppColors.navy,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Direct Price',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    useDirectPrice
+                                        ? 'Use imported MRP as selling price'
+                                        : 'Recalculate selling price from formula',
+                                    style: const TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch.adaptive(
+                              value: useDirectPrice,
+                              activeThumbColor: AppColors.navy,
+                              onChanged: (value) async {
+                                setSheet(() => useDirectPrice = value);
+                                await refreshDuplicateFlag(setSheet);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Preview
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.cream,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        constraints: const BoxConstraints(maxHeight: 120),
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: importProducts()
+                              .take(5)
+                              .map(
+                                (p) => Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 3,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      if (p.itemCode != null) ...[
+                                        Text(
+                                          p.itemCode!,
+                                          style: TextStyle(
+                                            color: AppColors.textMuted,
+                                            fontSize: 12,
+                                            fontFamily: 'monospace',
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ],
+                                      Expanded(
+                                        child: Text(
+                                          p.name,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Text(
+                                        p.directPriceToggle
+                                            ? 'direct'
+                                            : 'formula',
+                                        style: TextStyle(
+                                          color: p.directPriceToggle
+                                              ? AppColors.amber
+                                              : AppColors.success,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        p.priceLabel,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ),
+                      if (products.length > 5)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '...and ${products.length - 5} more',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+                      if (existingMatchCount > 0) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: () => _runImportAction(ctx, () async {
+                              if (purchaseDate == null) {
+                                throw Exception(
+                                  'Please choose a purchase date before importing.',
+                                );
+                              }
+                              final count = await DatabaseHelper.instance
+                                  .replaceAllProducts(
+                                    importProducts(),
+                                    purchaseDate: purchaseDate!,
+                                  );
+                              return '✓ Replaced $count imported products';
+                            }),
+                            icon: const Icon(Icons.swap_horiz_rounded),
+                            label: const Text(
+                              'Replace',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.error,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () => _runImportAction(ctx, () async {
+                            if (purchaseDate == null) {
+                              throw Exception(
+                                'Please choose a purchase date before importing.',
+                              );
+                            }
+                            final result = await DatabaseHelper.instance
+                                .mergeProducts(
+                                  importProducts(),
+                                  purchaseDate: purchaseDate!,
+                                );
+                            final warning =
+                                result.possibleDuplicate ||
+                                    result.duplicateOnDifferentDate
+                                ? ' Possible duplicate batch was appended.'
+                                : '';
+                            return '✓ Added ${result.added}, updated ${result.updated}.$warning';
+                          }),
+                          icon: Icon(
+                            existingMatchCount == 0
+                                ? Icons.add_rounded
+                                : Icons.merge_rounded,
+                          ),
+                          label: Text(
+                            existingMatchCount == 0 ? 'Add' : 'Update Stock',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.navy,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    // Merge
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () => _runImportAction(ctx, () async {
-                          final result = await DatabaseHelper.instance
-                              .mergeProducts(importProducts());
-                          return '✓ Added ${result['added']}, updated ${result['updated']}';
-                        }),
-                        icon: const Icon(Icons.merge_rounded),
-                        label: const Text(
-                          'Merge & Update',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.navy,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel'),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel'),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -1000,6 +1221,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier;
     String? selectedUnit = product?.unit;
+    Product? selectedExistingProduct;
+    var purchaseDate = DateTime.now();
+    var hideProductSuggestions = false;
     double effectiveGst() =>
         selectedCategoryPricing?.gstPercent ?? globalPricing.defaultGstPercent;
     double effectiveOverhead() =>
@@ -1217,10 +1441,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
             setSheet(() => isSaving = true);
             try {
               final name = nameCtrl.text.trim();
-              final unique = await DatabaseHelper.instance.isNameUnique(
-                name,
-                excludeId: product?.id,
-              );
+              final restockingExisting =
+                  !isEditing && selectedExistingProduct != null;
+              final unique =
+                  restockingExisting ||
+                  await DatabaseHelper.instance.isNameUnique(
+                    name,
+                    excludeId: product?.id,
+                  );
               if (!unique) {
                 if (ctx.mounted) {
                   setSheet(() {
@@ -1228,6 +1456,43 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     isSaving = false;
                   });
                 }
+                return;
+              }
+              if (restockingExisting) {
+                final existing = selectedExistingProduct!;
+                final updated = Product(
+                  id: existing.id,
+                  itemCode: existing.itemCode,
+                  name: existing.name,
+                  category: selectedCategory,
+                  mrp: preview.sellingPrice,
+                  purchasePrice: double.parse(purchaseCtrl.text),
+                  gstPercent: gstCustom ? double.tryParse(gstCtrl.text) : null,
+                  overheadCost: overheadCustom
+                      ? double.tryParse(overheadCtrl.text)
+                      : null,
+                  profitMarginPercent: marginCustom
+                      ? double.tryParse(marginCtrl.text)
+                      : null,
+                  directPriceToggle: directPrice,
+                  manualPrice: directPrice
+                      ? double.tryParse(manualPriceCtrl.text)
+                      : null,
+                  quantity: existing.quantity,
+                  unit: selectedUnit,
+                  supplier: selectedSupplier,
+                  source: existing.source,
+                  createdAt: existing.createdAt,
+                );
+                await DatabaseHelper.instance.restockProduct(
+                  updated,
+                  quantityAdded: int.parse(qtyCtrl.text),
+                  purchaseDate: purchaseDate,
+                  source: ProductSource.mobile,
+                );
+                hasUserEdited = false;
+                if (ctx.mounted) Navigator.pop(ctx);
+                _loadProducts();
                 return;
               }
               final p = Product(
@@ -1310,12 +1575,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               _EditorSection(
                                 title: 'Product Details',
                                 icon: Icons.inventory_2_outlined,
-                                trailing: _SourcePill(
-                                  label: isEditing
-                                      ? product.sourceLabel
-                                      : 'Mobile · code auto-created',
-                                  imported: product?.isImported ?? false,
-                                ),
+                                trailing: selectedExistingProduct != null
+                                    ? const _ModePill(
+                                        label: 'Update stock',
+                                        active: true,
+                                      )
+                                    : _SourcePill(
+                                        label: isEditing
+                                            ? product.sourceLabel
+                                            : 'Mobile · code auto-created',
+                                        imported: product?.isImported ?? false,
+                                      ),
                                 child: Column(
                                   children: [
                                     TextFormField(
@@ -1332,8 +1602,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                       ),
                                       onChanged: (_) {
                                         markEdited();
+                                        hideProductSuggestions = false;
+                                        selectedExistingProduct = null;
                                         if (nameError != null) {
                                           setSheet(() => nameError = null);
+                                        } else {
+                                          setSheet(() {});
                                         }
                                       },
                                       validator: (v) =>
@@ -1341,6 +1615,69 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           ? 'Required'
                                           : null,
                                     ),
+                                    if (!isEditing &&
+                                        !hideProductSuggestions &&
+                                        _matchingProducts(
+                                          nameCtrl.text,
+                                        ).isNotEmpty) ...[
+                                      const SizedBox(height: 10),
+                                      _ProductSuggestionList(
+                                        products: _matchingProducts(
+                                          nameCtrl.text,
+                                        ),
+                                        summaries: _purchaseSummaries,
+                                        onSelected: (match) {
+                                          setSheet(() {
+                                            selectedExistingProduct = match;
+                                            hideProductSuggestions = true;
+                                            nameError = null;
+                                            setFieldText(nameCtrl, match.name);
+                                            setFieldText(
+                                              purchaseCtrl,
+                                              match.purchasePrice
+                                                  .toStringAsFixed(2),
+                                            );
+                                            setFieldText(
+                                              manualPriceCtrl,
+                                              (match.manualPrice ?? match.mrp)
+                                                  .toStringAsFixed(2),
+                                            );
+                                            setFieldText(qtyCtrl, '');
+                                            setFieldText(totalCtrl, '');
+                                            selectedCategory = match.category;
+                                            selectedSupplier = match.supplier;
+                                            selectedUnit = match.unit;
+                                            gstCustom =
+                                                match.gstPercent != null;
+                                            overheadCustom =
+                                                match.overheadCost != null;
+                                            marginCustom =
+                                                match.profitMarginPercent !=
+                                                null;
+                                            setFieldText(
+                                              gstCtrl,
+                                              (match.gstPercent ??
+                                                      effectiveGst())
+                                                  .toStringAsFixed(2),
+                                            );
+                                            setFieldText(
+                                              overheadCtrl,
+                                              (match.overheadCost ??
+                                                      effectiveOverhead())
+                                                  .toStringAsFixed(2),
+                                            );
+                                            setFieldText(
+                                              marginCtrl,
+                                              (match.profitMarginPercent ??
+                                                      effectiveMargin())
+                                                  .toStringAsFixed(2),
+                                            );
+                                            directPrice =
+                                                match.directPriceToggle;
+                                          });
+                                        },
+                                      ),
+                                    ],
                                     const SizedBox(height: 10),
                                     _OptionDropdown(
                                       label: 'Category',
@@ -1665,73 +2002,109 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               _EditorSection(
                                 title: 'Stock',
                                 icon: Icons.warehouse_outlined,
-                                child: Row(
+                                child: Column(
                                   children: [
-                                    Expanded(
-                                      child: TextFormField(
-                                        controller: qtyCtrl,
-                                        keyboardType: TextInputType.number,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter
-                                              .digitsOnly,
-                                        ],
+                                    InkWell(
+                                      onTap: () async {
+                                        final picked = await showDatePicker(
+                                          context: ctx,
+                                          initialDate: purchaseDate,
+                                          firstDate: DateTime(2020),
+                                          lastDate: DateTime.now().add(
+                                            const Duration(days: 365),
+                                          ),
+                                        );
+                                        if (picked == null) return;
+                                        markEdited();
+                                        setSheet(() => purchaseDate = picked);
+                                      },
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: InputDecorator(
                                         decoration: const InputDecoration(
-                                          labelText: 'Quantity *',
+                                          labelText: 'Purchase Date',
                                           prefixIcon: Icon(
-                                            Icons.layers_outlined,
+                                            Icons.event_outlined,
                                             size: 18,
                                           ),
                                         ),
-                                        onChanged: (_) {
-                                          markEdited();
-                                          setSheet(() {});
-                                        },
-                                        validator: (v) {
-                                          if (v == null || v.isEmpty) {
-                                            return 'Required';
-                                          }
-                                          final n = int.tryParse(v);
-                                          return (n == null || n < 0)
-                                              ? 'Invalid'
-                                              : null;
-                                        },
+                                        child: Text(
+                                          _formatFullDate(purchaseDate),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: TextFormField(
-                                        controller: totalCtrl,
-                                        keyboardType:
-                                            const TextInputType.numberWithOptions(
-                                              decimal: true,
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: qtyCtrl,
+                                            keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Quantity *',
+                                              prefixIcon: Icon(
+                                                Icons.layers_outlined,
+                                                size: 18,
+                                              ),
                                             ),
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter.allow(
-                                            RegExp(r'^\d*\.?\d{0,2}'),
-                                          ),
-                                        ],
-                                        decoration: const InputDecoration(
-                                          labelText: 'Stock Value (₹)',
-                                          prefixIcon: Icon(
-                                            Icons.calculate_outlined,
-                                            size: 18,
+                                            onChanged: (_) {
+                                              markEdited();
+                                              setSheet(() {});
+                                            },
+                                            validator: (v) {
+                                              if (v == null || v.isEmpty) {
+                                                return 'Required';
+                                              }
+                                              final n = int.tryParse(v);
+                                              return (n == null || n < 0)
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
                                           ),
                                         ),
-                                        onChanged: (_) {
-                                          markEdited();
-                                          updateQtyFromTotal();
-                                          setSheet(() {});
-                                        },
-                                        validator: (v) {
-                                          if (v == null || v.isEmpty) {
-                                            return null;
-                                          }
-                                          final n = double.tryParse(v);
-                                          return (n == null || n < 0)
-                                              ? 'Invalid'
-                                              : null;
-                                        },
-                                      ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: totalCtrl,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,2}'),
+                                              ),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Stock Value (₹)',
+                                              prefixIcon: Icon(
+                                                Icons.calculate_outlined,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              updateQtyFromTotal();
+                                              setSheet(() {});
+                                            },
+                                            validator: (v) {
+                                              if (v == null || v.isEmpty) {
+                                                return null;
+                                              }
+                                              final n = double.tryParse(v);
+                                              return (n == null || n < 0)
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -1996,6 +2369,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
               const SizedBox(width: 8),
               Expanded(
                 flex: 3,
+                child: _FilterDropdownButton(
+                  label: _selectedPurchaseDate == null
+                      ? 'Date'
+                      : _formatShortDate(_selectedPurchaseDate!),
+                  count: _selectedPurchaseDate == null ? 0 : 1,
+                  onTap: _pickPurchaseDateFilter,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
                 child: _SortDropdownButton(
                   label: _sortMode.label,
                   onTap: _showSortOptions,
@@ -2027,7 +2411,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
               ],
             ),
           ),
-        if (_selectedCategories.isNotEmpty || _selectedSuppliers.isNotEmpty)
+        if (_selectedCategories.isNotEmpty ||
+            _selectedSuppliers.isNotEmpty ||
+            _selectedPurchaseDate != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Align(
@@ -2037,6 +2423,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   setState(() {
                     _selectedCategories.clear();
                     _selectedSuppliers.clear();
+                    _selectedPurchaseDate = null;
+                    _purchaseDateProductIds = {};
                   });
                   _applyFilter();
                 },
@@ -2078,6 +2466,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   itemCount: _filtered.length,
                   itemBuilder: (_, i) => _ProductCard(
                     product: _filtered[i],
+                    purchaseSummary: _filtered[i].id == null
+                        ? null
+                        : _purchaseSummaries[_filtered[i].id],
                     lowStockThreshold: _lowStockThreshold,
                     selectionMode: _selectionMode,
                     isSelected:
@@ -2099,6 +2490,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
 String? _normaliseOptionName(String value) {
   final trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
   return trimmed.isEmpty ? null : trimmed;
+}
+
+String _formatShortDate(DateTime date) {
+  return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}';
+}
+
+String _formatFullDate(DateTime date) {
+  return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 }
 
 class _AddOptionDialog extends StatefulWidget {
@@ -3162,9 +3561,70 @@ class _BulkActionChip extends StatelessWidget {
   }
 }
 
+class _ProductSuggestionList extends StatelessWidget {
+  final List<Product> products;
+  final Map<int, ProductPurchaseSummary> summaries;
+  final ValueChanged<Product> onSelected;
+
+  const _ProductSuggestionList({
+    required this.products,
+    required this.summaries,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 220),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        itemCount: products.length,
+        separatorBuilder: (_, index) =>
+            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+        itemBuilder: (_, index) {
+          final product = products[index];
+          final summary = product.id == null ? null : summaries[product.id];
+          final lastDate = summary?.lastPurchaseDate == null
+              ? 'No purchase date'
+              : 'Last ${_formatFullDate(summary!.lastPurchaseDate!)}';
+          return ListTile(
+            dense: true,
+            leading: const CircleAvatar(
+              radius: 17,
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              child: Icon(Icons.inventory_2_outlined, size: 17),
+            ),
+            title: Text(
+              product.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              '${product.quantityLabel} • $lastDate • ₹${product.purchasePrice.toStringAsFixed(2)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.add_box_outlined),
+            onTap: () => onSelected(product),
+          );
+        },
+      ),
+    );
+  }
+}
+
 // ── Product Card (Professional Design) ──
 class _ProductCard extends StatelessWidget {
   final Product product;
+  final ProductPurchaseSummary? purchaseSummary;
   final int lowStockThreshold;
   final bool selectionMode;
   final bool isSelected;
@@ -3174,6 +3634,7 @@ class _ProductCard extends StatelessWidget {
 
   const _ProductCard({
     required this.product,
+    this.purchaseSummary,
     required this.lowStockThreshold,
     required this.selectionMode,
     required this.isSelected,
@@ -3279,6 +3740,37 @@ class _ProductCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 10),
+              if (purchaseSummary?.lastPurchaseDate != null) ...[
+                Row(
+                  children: [
+                    Icon(
+                      Icons.event_available_outlined,
+                      size: 14,
+                      color: AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Last purchase ${_formatFullDate(purchaseSummary!.lastPurchaseDate!)}',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (purchaseSummary!.lastPurchasePrice != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '₹${purchaseSummary!.lastPurchasePrice!.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
               // Bottom row: price + qty + supplier
               Row(
                 children: [
