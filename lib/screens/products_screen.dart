@@ -255,6 +255,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
       builder: (ctx) => SafeArea(
         top: false,
         child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+          ),
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           decoration: BoxDecoration(
@@ -290,11 +293,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 title: Text(emptyLabel),
                 onTap: () => Navigator.pop(ctx, ''),
               ),
-              ...options.map(
-                (option) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(option, overflow: TextOverflow.ellipsis),
-                  onTap: () => Navigator.pop(ctx, option),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (_, index) {
+                    final option = options[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(option, overflow: TextOverflow.ellipsis),
+                      onTap: () => Navigator.pop(ctx, option),
+                    );
+                  },
                 ),
               ),
               const Divider(),
@@ -347,6 +357,55 @@ class _ProductsScreenState extends State<ProductsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Updated ${selectedIds.length} products'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      _showImportError(e);
+    }
+  }
+
+  Future<void> _deleteSelectedProducts() async {
+    final selectedIds = Set<int>.from(_selectedProductIds);
+    if (selectedIds.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(
+          Icons.delete_outline,
+          color: AppColors.error,
+          size: 34,
+        ),
+        title: const Text('Delete Selected Products'),
+        content: Text(
+          'Remove ${selectedIds.length} selected product${selectedIds.length == 1 ? '' : 's'}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      for (final id in selectedIds) {
+        await DatabaseHelper.instance.deleteProduct(id);
+      }
+      _clearProductSelection();
+      await _loadProducts();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Deleted ${selectedIds.length} products'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1740,116 +1799,117 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: _selectionMode
-            ? Text(
-                '${_selectedProductIds.length} selected',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              )
-            : _searchOpen
-            ? TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-                decoration: InputDecoration(
-                  hintText: 'Search products...',
-                  hintStyle: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
+    return PopScope(
+      canPop: !_selectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _selectionMode) _clearProductSelection();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.cream,
+        appBar: AppBar(
+          title: _selectionMode
+              ? Text(
+                  '${_selectedProductIds.length} selected',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                )
+              : _searchOpen
+              ? TextField(
+                  controller: _searchCtrl,
+                  autofocus: true,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  decoration: InputDecoration(
+                    hintText: 'Search products...',
+                    hintStyle: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                    ),
+                    border: InputBorder.none,
+                    filled: false,
                   ),
-                  border: InputBorder.none,
-                  filled: false,
+                )
+              : const Text(
+                  'Products',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
-              )
-            : const Text(
-                'Products',
-                style: TextStyle(fontWeight: FontWeight.w700),
+          actions: [
+            if (_selectionMode) ...[
+              IconButton(
+                onPressed: _clearProductSelection,
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Clear selection',
               ),
-        actions: [
-          if (_selectionMode) ...[
-            IconButton(
-              onPressed: _selectAllFilteredProducts,
-              icon: const Icon(Icons.select_all_rounded),
-              tooltip: 'Select all visible',
-            ),
-            IconButton(
-              onPressed: _clearProductSelection,
-              icon: const Icon(Icons.close_rounded),
-              tooltip: 'Clear selection',
-            ),
-          ] else ...[
-            // Search toggle
-            IconButton(
-              onPressed: () {
-                setState(() {
-                  _searchOpen = !_searchOpen;
-                  if (!_searchOpen) {
-                    _searchCtrl.clear();
-                  }
-                });
-              },
-              icon: Icon(_searchOpen ? Icons.close : Icons.search),
-            ),
-            // QR Sheet
-            IconButton(
-              onPressed: _openQrSheet,
-              icon: const Icon(Icons.qr_code_2),
-              tooltip: 'QR Sheet',
-            ),
-            if (_allProducts.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.amber,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${_allProducts.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
+            ] else ...[
+              // Search toggle
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _searchOpen = !_searchOpen;
+                    if (!_searchOpen) {
+                      _searchCtrl.clear();
+                    }
+                  });
+                },
+                icon: Icon(_searchOpen ? Icons.close : Icons.search),
+              ),
+              // QR Sheet
+              IconButton(
+                onPressed: _openQrSheet,
+                icon: const Icon(Icons.qr_code_2),
+                tooltip: 'QR Sheet',
+              ),
+              if (_allProducts.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.amber,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${_allProducts.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+            ],
           ],
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _allProducts.isEmpty
-          ? _buildEmpty()
-          : _buildContent(),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: _selectionMode
-            ? []
-            : [
-                FloatingActionButton.small(
-                  heroTag: 'import',
-                  onPressed: _importCsv,
-                  backgroundColor: AppColors.amber,
-                  foregroundColor: Colors.white,
-                  child: const Icon(Icons.upload_file_rounded),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton(
-                  heroTag: 'add',
-                  onPressed: () => _showAddEditSheet(),
-                  backgroundColor: AppColors.navy,
-                  foregroundColor: Colors.white,
-                  child: const Icon(Icons.add_rounded),
-                ),
-              ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _allProducts.isEmpty
+            ? _buildEmpty()
+            : _buildContent(),
+        floatingActionButton: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _selectionMode
+              ? []
+              : [
+                  FloatingActionButton.small(
+                    heroTag: 'import',
+                    onPressed: _importCsv,
+                    backgroundColor: AppColors.amber,
+                    foregroundColor: Colors.white,
+                    child: const Icon(Icons.upload_file_rounded),
+                  ),
+                  const SizedBox(height: 10),
+                  FloatingActionButton(
+                    heroTag: 'add',
+                    onPressed: () => _showAddEditSheet(),
+                    backgroundColor: AppColors.navy,
+                    foregroundColor: Colors.white,
+                    child: const Icon(Icons.add_rounded),
+                  ),
+                ],
+        ),
       ),
     );
   }
@@ -2002,6 +2062,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             onClear: _clearProductSelection,
             onSetCategory: _showBulkCategoryPicker,
             onSetSupplier: _showBulkSupplierPicker,
+            onDelete: _deleteSelectedProducts,
           ),
         // ── Product List ──
         Expanded(
@@ -2961,6 +3022,7 @@ class _BulkSelectionBar extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onSetCategory;
   final VoidCallback onSetSupplier;
+  final VoidCallback onDelete;
 
   const _BulkSelectionBar({
     required this.count,
@@ -2969,6 +3031,7 @@ class _BulkSelectionBar extends StatelessWidget {
     required this.onClear,
     required this.onSetCategory,
     required this.onSetSupplier,
+    required this.onDelete,
   });
 
   @override
@@ -2982,18 +3045,9 @@ class _BulkSelectionBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: const Icon(
-              Icons.checklist_rounded,
-              color: Colors.white,
-              size: 17,
-            ),
+          _SelectionToggleButton(
+            allVisibleSelected: allVisibleSelected,
+            onTap: allVisibleSelected ? onClear : onSelectAll,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -3005,33 +3059,105 @@ class _BulkSelectionBar extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(
-            onPressed: onSetCategory,
-            tooltip: 'Set category',
-            icon: const Icon(Icons.category_outlined),
-            color: Colors.white,
-            visualDensity: VisualDensity.compact,
-          ),
-          IconButton(
-            onPressed: onSetSupplier,
-            tooltip: 'Set supplier',
-            icon: const Icon(Icons.storefront_outlined),
-            color: Colors.white,
-            visualDensity: VisualDensity.compact,
-          ),
-          IconButton(
-            onPressed: allVisibleSelected ? onClear : onSelectAll,
-            tooltip: allVisibleSelected ? 'Clear selection' : 'Select all',
-            icon: Icon(
-              allVisibleSelected
-                  ? Icons.deselect_rounded
-                  : Icons.select_all_rounded,
+          Expanded(
+            flex: 2,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _BulkActionChip(
+                    icon: Icons.category_outlined,
+                    label: 'Category',
+                    onTap: onSetCategory,
+                  ),
+                  const SizedBox(width: 8),
+                  _BulkActionChip(
+                    icon: Icons.storefront_outlined,
+                    label: 'Supplier',
+                    onTap: onSetSupplier,
+                  ),
+                  const SizedBox(width: 8),
+                  _BulkActionChip(
+                    icon: Icons.delete_outline,
+                    label: 'Delete',
+                    onTap: onDelete,
+                    destructive: true,
+                  ),
+                ],
+              ),
             ),
-            color: Colors.white,
-            visualDensity: VisualDensity.compact,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SelectionToggleButton extends StatelessWidget {
+  final bool allVisibleSelected;
+  final VoidCallback onTap;
+
+  const _SelectionToggleButton({
+    required this.allVisibleSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: allVisibleSelected ? 'Clear selection' : 'Select all visible',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(
+            allVisibleSelected
+                ? Icons.deselect_rounded
+                : Icons.select_all_rounded,
+            color: Colors.white,
+            size: 17,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BulkActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  const _BulkActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = destructive ? AppColors.error : AppColors.navy;
+    return ActionChip(
+      onPressed: onTap,
+      avatar: Icon(icon, size: 16, color: foreground),
+      label: Text(label),
+      labelStyle: TextStyle(color: foreground, fontWeight: FontWeight.w800),
+      backgroundColor: Colors.white,
+      side: BorderSide(
+        color: destructive
+            ? AppColors.error.withValues(alpha: 0.25)
+            : Colors.white,
+      ),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 }
