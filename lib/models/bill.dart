@@ -1,5 +1,6 @@
 class Bill {
   final int? id;
+  final int? customerId;
   final String customerName;
   final String? customerPhone;
   final double subtotalAmount;
@@ -14,6 +15,7 @@ class Bill {
 
   Bill({
     this.id,
+    this.customerId,
     this.customerName = 'Walk-in Customer',
     this.customerPhone,
     double? subtotalAmount,
@@ -30,6 +32,7 @@ class Bill {
 
   Map<String, dynamic> toMap() => {
     'id': id,
+    'customer_id': customerId,
     'customer_name': customerName,
     'customer_phone': customerPhone,
     'subtotal_amount': subtotalAmount,
@@ -47,6 +50,7 @@ class Bill {
     final discountAmount = (map['discount_amount'] as num?)?.toDouble() ?? 0;
     return Bill(
       id: map['id'] as int?,
+      customerId: map['customer_id'] as int?,
       customerName: (map['customer_name'] as String?)?.trim().isNotEmpty == true
           ? (map['customer_name'] as String).trim()
           : 'Walk-in Customer',

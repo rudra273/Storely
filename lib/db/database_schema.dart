@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -18,6 +18,7 @@ mixin DatabaseSchema {
     await _createProductTable(db);
     await _createSettingsTable(db);
     await _createOptionTables(db);
+    await _createCustomerTables(db);
     await _createBillTables(db);
   }
 
@@ -45,6 +46,7 @@ mixin DatabaseSchema {
     if (oldVersion < 9) await _upgradeUnitSchema(db);
     if (oldVersion < 10) await _upgradePricingSchema(db);
     if (oldVersion < 11) await _upgradeProductPricingOverrides(db);
+    if (oldVersion < 12) await _upgradeCustomerSchema(db);
   }
 
   Future<void> _ensureSchema(Database db) async {
@@ -60,7 +62,9 @@ mixin DatabaseSchema {
       "source TEXT NOT NULL DEFAULT 'mobile'",
     );
     await _createOptionTables(db);
+    await _createCustomerTables(db);
     await _createBillTables(db);
+    await _upgradeCustomerSchema(db);
     await _upgradeUnitSchema(db);
     await _upgradePricingSchema(db);
     await _upgradeProductPricingOverrides(db);
@@ -131,6 +135,21 @@ mixin DatabaseSchema {
     ''');
   }
 
+  Future<void> _createCustomerTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS customers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT 'Walk-in Customer',
+        phone TEXT NOT NULL UNIQUE,
+        total_purchase_amount REAL NOT NULL DEFAULT 0,
+        bill_count INTEGER NOT NULL DEFAULT 0,
+        last_purchase_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
   Future<void> _seedOptionsFromProducts(DatabaseExecutor executor) async {
     final categories = await executor.rawQuery(
       "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ''",
@@ -158,6 +177,7 @@ mixin DatabaseSchema {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS bills(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER,
         customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer',
         customer_phone TEXT,
         subtotal_amount REAL NOT NULL DEFAULT 0,
@@ -167,7 +187,8 @@ mixin DatabaseSchema {
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
     ''');
     await executor.execute('''
@@ -193,6 +214,12 @@ mixin DatabaseSchema {
   }
 
   Future<void> _upgradeBillTables(DatabaseExecutor executor) async {
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'customer_id',
+      'customer_id INTEGER',
+    );
     await _addColumnIfMissing(
       executor,
       'bills',
@@ -240,6 +267,122 @@ mixin DatabaseSchema {
       SET subtotal_amount = total_amount + discount_amount
       WHERE subtotal_amount = 0
     ''');
+  }
+
+  Future<void> _upgradeCustomerSchema(DatabaseExecutor executor) async {
+    await _createCustomerTables(executor);
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'customer_id',
+      'customer_id INTEGER',
+    );
+    await _syncCustomersFromBills(executor);
+  }
+
+  Future<void> _syncCustomersFromBills(DatabaseExecutor executor) async {
+    final bills = await executor.query(
+      'bills',
+      where: "customer_phone IS NOT NULL AND TRIM(customer_phone) != ''",
+      orderBy: 'created_at ASC',
+    );
+    final ledgers = <String, _CustomerLedgerDraft>{};
+    final invalidBillIds = <int>[];
+
+    for (final bill in bills) {
+      final billId = bill['id'] as int;
+      final phone = _normaliseCustomerPhone(bill['customer_phone']);
+      if (phone == null) {
+        invalidBillIds.add(billId);
+        continue;
+      }
+      final name =
+          _normaliseName(bill['customer_name']?.toString()) ??
+          'Walk-in Customer';
+      final total = (bill['total_amount'] as num?)?.toDouble() ?? 0;
+      final createdAt =
+          bill['created_at']?.toString() ?? DateTime.now().toIso8601String();
+
+      final ledger = ledgers.putIfAbsent(
+        phone,
+        () => _CustomerLedgerDraft(
+          name: name,
+          phone: phone,
+          lastPurchaseAt: createdAt,
+        ),
+      );
+      ledger.addBill(
+        billId: billId,
+        name: name,
+        totalAmount: total,
+        createdAt: createdAt,
+      );
+    }
+
+    for (final billId in invalidBillIds) {
+      await executor.update(
+        'bills',
+        {'customer_id': null},
+        where: 'id = ?',
+        whereArgs: [billId],
+      );
+    }
+    await executor.update('bills', {
+      'customer_id': null,
+    }, where: "customer_phone IS NULL OR TRIM(customer_phone) = ''");
+
+    if (ledgers.isEmpty) {
+      await executor.delete('customers');
+      return;
+    }
+
+    final existingCustomers = await executor.query('customers');
+    final customerIdsByPhone = {
+      for (final customer in existingCustomers)
+        customer['phone'] as String: customer['id'] as int,
+    };
+    final now = DateTime.now().toIso8601String();
+
+    for (final ledger in ledgers.values) {
+      final existingId = customerIdsByPhone[ledger.phone];
+      final data = {
+        'name': ledger.name,
+        'phone': ledger.phone,
+        'total_purchase_amount': ledger.totalPurchaseAmount,
+        'bill_count': ledger.billCount,
+        'last_purchase_at': ledger.lastPurchaseAt,
+        'updated_at': now,
+      };
+
+      final customerId =
+          existingId ??
+          await executor.insert('customers', {...data, 'created_at': now});
+      if (existingId != null) {
+        await executor.update(
+          'customers',
+          data,
+          where: 'id = ?',
+          whereArgs: [existingId],
+        );
+      }
+
+      for (final billId in ledger.billIds) {
+        await executor.update(
+          'bills',
+          {'customer_id': customerId},
+          where: 'id = ?',
+          whereArgs: [billId],
+        );
+      }
+    }
+
+    final activePhones = ledgers.keys.toList();
+    await executor.delete(
+      'customers',
+      where:
+          'phone NOT IN (${List.filled(activePhones.length, '?').join(', ')})',
+      whereArgs: activePhones,
+    );
   }
 
   Future<void> _upgradeUnitSchema(DatabaseExecutor executor) async {
@@ -398,5 +541,37 @@ mixin DatabaseSchema {
       'profit_margin_percent',
       'profit_margin_percent REAL',
     );
+  }
+}
+
+class _CustomerLedgerDraft {
+  String name;
+  final String phone;
+  String lastPurchaseAt;
+  final List<int> billIds = [];
+  double totalPurchaseAmount = 0;
+  int billCount = 0;
+
+  _CustomerLedgerDraft({
+    required this.name,
+    required this.phone,
+    required this.lastPurchaseAt,
+  });
+
+  void addBill({
+    required int billId,
+    required String name,
+    required double totalAmount,
+    required String createdAt,
+  }) {
+    billIds.add(billId);
+    totalPurchaseAmount += totalAmount;
+    billCount += 1;
+    if (createdAt.compareTo(lastPurchaseAt) >= 0) {
+      lastPurchaseAt = createdAt;
+      if (name != 'Walk-in Customer') {
+        this.name = name;
+      }
+    }
   }
 }

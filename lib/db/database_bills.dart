@@ -2,11 +2,14 @@ part of 'database_helper.dart';
 
 mixin DatabaseBills {
   Future<Database> get database;
+  Future<void> _syncCustomersFromBills(DatabaseExecutor executor);
 
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
     return db.transaction((txn) async {
-      final billId = await txn.insert('bills', bill.toMap());
+      final customerId = await _upsertCustomerForBill(txn, bill);
+      final billMap = bill.toMap()..['customer_id'] = customerId;
+      final billId = await txn.insert('bills', billMap);
       for (final item in items) {
         await txn.insert('bill_items', item.toMap(billId));
         await _deductProductStock(txn, item);
@@ -31,10 +34,42 @@ mixin DatabaseBills {
     return bills;
   }
 
+  Future<List<Customer>> getAllCustomers() async {
+    final db = await database;
+    await _syncCustomersFromBills(db);
+    final maps = await db.query(
+      'customers',
+      orderBy: 'total_purchase_amount DESC, updated_at DESC',
+    );
+    return maps.map((map) => Customer.fromMap(map)).toList();
+  }
+
   Future<int> deleteBill(int id) async {
     final db = await database;
-    await db.delete('bill_items', where: 'bill_id = ?', whereArgs: [id]);
-    return db.delete('bills', where: 'id = ?', whereArgs: [id]);
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['customer_id', 'total_amount'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        final customerId = rows.single['customer_id'] as int?;
+        final totalAmount =
+            (rows.single['total_amount'] as num?)?.toDouble() ?? 0;
+        if (customerId != null) {
+          await _adjustCustomerLedger(
+            txn,
+            customerId: customerId,
+            amountDelta: -totalAmount,
+            billCountDelta: -1,
+          );
+        }
+      }
+      await txn.delete('bill_items', where: 'bill_id = ?', whereArgs: [id]);
+      return txn.delete('bills', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   Future<int> updateBillPaidStatus(int id, bool isPaid) async {
@@ -120,4 +155,99 @@ mixin DatabaseBills {
       [item.quantity, item.productId ?? item.productName],
     );
   }
+
+  Future<int?> _upsertCustomerForBill(DatabaseExecutor executor, Bill bill) {
+    final phone = _normaliseCustomerPhone(bill.customerPhone);
+    if (phone == null) return Future.value(null);
+    final name = _normaliseName(bill.customerName) ?? 'Walk-in Customer';
+    return _upsertCustomerLedger(
+      executor,
+      name: name,
+      phone: phone,
+      amountDelta: bill.totalAmount,
+      billCountDelta: 1,
+      purchaseAt: bill.createdAt.toIso8601String(),
+    );
+  }
+}
+
+Future<int> _upsertCustomerLedger(
+  DatabaseExecutor executor, {
+  required String name,
+  required String phone,
+  required double amountDelta,
+  required int billCountDelta,
+  required String purchaseAt,
+}) async {
+  final existing = await executor.query(
+    'customers',
+    columns: ['id', 'name'],
+    where: 'phone = ?',
+    whereArgs: [phone],
+    limit: 1,
+  );
+  final now = DateTime.now().toIso8601String();
+  if (existing.isEmpty) {
+    return executor.insert('customers', {
+      'name': name,
+      'phone': phone,
+      'total_purchase_amount': amountDelta,
+      'bill_count': billCountDelta,
+      'last_purchase_at': purchaseAt,
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  final id = existing.single['id'] as int;
+  final updateName = name.trim().isNotEmpty && name != 'Walk-in Customer';
+  await executor.rawUpdate(
+    '''
+    UPDATE customers
+    SET
+      name = CASE WHEN ? THEN ? ELSE name END,
+      total_purchase_amount = MAX(total_purchase_amount + ?, 0),
+      bill_count = MAX(bill_count + ?, 0),
+      last_purchase_at = ?,
+      updated_at = ?
+    WHERE id = ?
+    ''',
+    [
+      updateName ? 1 : 0,
+      name,
+      amountDelta,
+      billCountDelta,
+      purchaseAt,
+      now,
+      id,
+    ],
+  );
+  return id;
+}
+
+Future<void> _adjustCustomerLedger(
+  DatabaseExecutor executor, {
+  required int customerId,
+  required double amountDelta,
+  required int billCountDelta,
+}) async {
+  final now = DateTime.now().toIso8601String();
+  await executor.rawUpdate(
+    '''
+    UPDATE customers
+    SET
+      total_purchase_amount = MAX(total_purchase_amount + ?, 0),
+      bill_count = MAX(bill_count + ?, 0),
+      updated_at = ?
+    WHERE id = ?
+    ''',
+    [amountDelta, billCountDelta, now, customerId],
+  );
+}
+
+String? _normaliseCustomerPhone(Object? value) {
+  final digits = value?.toString().replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits == null || digits.isEmpty || digits == '91') return null;
+  if (digits.length == 10) return '91$digits';
+  return digits;
 }

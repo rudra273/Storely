@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/bill.dart';
+import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
 

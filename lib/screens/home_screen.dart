@@ -3,6 +3,7 @@ import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/product.dart';
+import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -215,8 +216,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: AppColors.textMuted,
                           filled: false,
                           onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Coming soon!')),
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const AnalyticsScreen(),
+                              ),
                             );
                           },
                         ),

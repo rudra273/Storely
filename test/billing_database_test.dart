@@ -68,8 +68,10 @@ void main() {
         final bill = bills.single;
         final savedItem = bill.items.single;
         final updatedProduct = await db.getProductById(productId);
+        final customerRows = await _customerRows();
 
         expect(bill.id, billId);
+        expect(bill.customerId, isNotNull);
         expect(bill.customerName, 'Anita Store');
         expect(bill.customerPhone, '+91 9876543210');
         expect(bill.subtotalAmount, 472.5);
@@ -88,6 +90,12 @@ void main() {
         expect(savedItem.profitSnapshot, 52.5);
         expect(savedItem.wasDirectPrice, isFalse);
         expect(updatedProduct!.quantity, 7);
+        expect(customerRows, hasLength(1));
+        expect(customerRows.single['id'], bill.customerId);
+        expect(customerRows.single['name'], 'Anita Store');
+        expect(customerRows.single['phone'], '919876543210');
+        expect(customerRows.single['total_purchase_amount'], 425.25);
+        expect(customerRows.single['bill_count'], 1);
       },
     );
 
@@ -131,6 +139,89 @@ void main() {
       expect(bill.isPaid, isTrue);
     });
 
+    test('same customer phone is unique and accumulates bill totals', () async {
+      await db.insertBill(
+        Bill(
+          customerName: 'Ravi',
+          customerPhone: '9876543210',
+          totalAmount: 100,
+          itemCount: 1,
+        ),
+        [BillItem(productName: 'Item A', mrp: 100)],
+      );
+      await db.insertBill(
+        Bill(
+          customerName: 'Ravi Traders',
+          customerPhone: '+91 98765 43210',
+          totalAmount: 250,
+          itemCount: 2,
+        ),
+        [BillItem(productName: 'Item B', mrp: 125, quantity: 2)],
+      );
+
+      final customerRows = await _customerRows();
+      final bills = await db.getAllBills();
+
+      expect(customerRows, hasLength(1));
+      expect(customerRows.single['name'], 'Ravi Traders');
+      expect(customerRows.single['phone'], '919876543210');
+      expect(customerRows.single['total_purchase_amount'], 350);
+      expect(customerRows.single['bill_count'], 2);
+      expect(bills.map((bill) => bill.customerId).toSet(), hasLength(1));
+    });
+
+    test(
+      'customer ledger is recalculated on reopen without doubling',
+      () async {
+        await db.insertBill(
+          Bill(
+            customerName: 'Ravi',
+            customerPhone: '9876543210',
+            totalAmount: 100,
+            itemCount: 1,
+          ),
+          [BillItem(productName: 'Item A', mrp: 100)],
+        );
+        await db.insertBill(
+          Bill(
+            customerName: 'Ravi Traders',
+            customerPhone: '+91 98765 43210',
+            totalAmount: 250,
+            itemCount: 2,
+          ),
+          [BillItem(productName: 'Item B', mrp: 125, quantity: 2)],
+        );
+
+        final database = await db.database;
+        await database.update('customers', {
+          'total_purchase_amount': 700,
+          'bill_count': 4,
+        });
+        await db.close();
+
+        final customers = await DatabaseHelper.instance.getAllCustomers();
+
+        expect(customers, hasLength(1));
+        expect(customers.single.name, 'Ravi Traders');
+        expect(customers.single.phone, '919876543210');
+        expect(customers.single.totalPurchaseAmount, 350);
+        expect(customers.single.billCount, 2);
+      },
+    );
+
+    test('customer data remains optional for walk-in bills', () async {
+      await db.insertBill(
+        Bill(customerName: 'Walk-in Customer', totalAmount: 50, itemCount: 1),
+        [BillItem(productName: 'Loose Item', mrp: 50)],
+      );
+
+      final bills = await db.getAllBills();
+      final customerRows = await _customerRows();
+
+      expect(bills.single.customerId, isNull);
+      expect(customerRows, isEmpty);
+    });
+
     test('deleting a bill removes its stored line items', () async {
       final billId = await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 120, itemCount: 2),
@@ -150,6 +241,34 @@ void main() {
         whereArgs: [billId],
       );
       expect(itemRows, isEmpty);
+    });
+
+    test('deleting a customer bill reduces customer purchase total', () async {
+      final firstBillId = await db.insertBill(
+        Bill(
+          customerName: 'Asha',
+          customerPhone: '9123456789',
+          totalAmount: 300,
+          itemCount: 1,
+        ),
+        [BillItem(productName: 'Item A', mrp: 300)],
+      );
+      await db.insertBill(
+        Bill(
+          customerName: 'Asha',
+          customerPhone: '9123456789',
+          totalAmount: 150,
+          itemCount: 1,
+        ),
+        [BillItem(productName: 'Item B', mrp: 150)],
+      );
+
+      await db.deleteBill(firstBillId);
+
+      final customerRows = await _customerRows();
+      expect(customerRows, hasLength(1));
+      expect(customerRows.single['total_purchase_amount'], 150);
+      expect(customerRows.single['bill_count'], 1);
     });
 
     test('stock deduction never makes product quantity negative', () async {
@@ -178,4 +297,9 @@ void main() {
 Future<void> _deleteStorelyDb() async {
   final dbPath = await getDatabasesPath();
   await deleteDatabase(p.join(dbPath, 'storely.db'));
+}
+
+Future<List<Map<String, Object?>>> _customerRows() async {
+  final database = await DatabaseHelper.instance.database;
+  return database.query('customers', orderBy: 'id ASC');
 }

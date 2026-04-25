@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/customer.dart';
 import '../models/product.dart';
 
 enum BillingEntryMode { scan, manual }
@@ -221,8 +222,16 @@ class _ScanScreenState extends State<ScanScreen> {
     final customerController = TextEditingController();
     final phoneController = TextEditingController(text: '+91 ');
     final discountController = TextEditingController();
+    final customers = await DatabaseHelper.instance.getAllCustomers();
+    if (!mounted) {
+      customerController.dispose();
+      phoneController.dispose();
+      discountController.dispose();
+      return;
+    }
     var discountPercent = 0.0;
     var isPaid = true;
+    var hideCustomerSuggestions = false;
 
     try {
       final draft = await showModalBottomSheet<_BillDraft>(
@@ -238,6 +247,13 @@ class _ScanScreenState extends State<ScanScreen> {
               final percent = discountPercent.clamp(0, 100).toDouble();
               final discount = _subtotal * percent / 100;
               final total = _subtotal - discount;
+              final customerMatches = hideCustomerSuggestions
+                  ? <Customer>[]
+                  : _matchingCustomers(
+                      customers,
+                      customerController.text,
+                      phoneController.text,
+                    );
               return SingleChildScrollView(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
@@ -270,6 +286,9 @@ class _ScanScreenState extends State<ScanScreen> {
                       TextField(
                         controller: customerController,
                         textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => setSheetState(
+                          () => hideCustomerSuggestions = false,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'Customer name',
                           prefixIcon: Icon(Icons.person_outline_rounded),
@@ -282,11 +301,33 @@ class _ScanScreenState extends State<ScanScreen> {
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
                         ],
+                        onChanged: (_) => setSheetState(
+                          () => hideCustomerSuggestions = false,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'Phone number (optional)',
                           prefixIcon: Icon(Icons.phone_outlined),
                         ),
                       ),
+                      if (customerMatches.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _CustomerSuggestionList(
+                          customers: customerMatches,
+                          onSelected: (customer) {
+                            setSheetState(() {
+                              _setControllerText(
+                                customerController,
+                                customer.name,
+                              );
+                              _setControllerText(
+                                phoneController,
+                                _formatCustomerPhoneInput(customer.phone),
+                              );
+                              hideCustomerSuggestions = true;
+                            });
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       _BillSummaryRow(
                         label: 'Subtotal',
@@ -484,6 +525,47 @@ class _ScanScreenState extends State<ScanScreen> {
     return trimmed;
   }
 
+  List<Customer> _matchingCustomers(
+    List<Customer> customers,
+    String nameQuery,
+    String phoneQuery,
+  ) {
+    final name = nameQuery.trim().toLowerCase();
+    final phone = phoneQuery.replaceAll(RegExp(r'[^0-9]'), '');
+    final hasNameQuery = name.length >= 2;
+    final hasPhoneQuery = phone.length >= 3 && phone != '91';
+    if (!hasNameQuery && !hasPhoneQuery) return [];
+
+    return customers
+        .where((customer) {
+          final customerName = customer.name.toLowerCase();
+          final customerPhone = customer.phone.replaceAll(
+            RegExp(r'[^0-9]'),
+            '',
+          );
+          return (hasNameQuery && customerName.contains(name)) ||
+              (hasPhoneQuery && customerPhone.contains(phone));
+        })
+        .take(5)
+        .toList();
+  }
+
+  String _formatCustomerPhoneInput(String phone) {
+    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return '+91 ${digits.substring(2)}';
+    }
+    if (digits.length == 10) return '+91 $digits';
+    return phone;
+  }
+
+  void _setControllerText(TextEditingController controller, String value) {
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
   Widget _buildModeSelector() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -517,15 +599,15 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Widget _buildEntryPanel() {
+  Widget _buildEntryPanel(double height) {
     return _entryMode == BillingEntryMode.scan
-        ? _buildScanPanel()
-        : _buildManualPanel();
+        ? _buildScanPanel(height)
+        : _buildManualPanel(height);
   }
 
-  Widget _buildScanPanel() {
+  Widget _buildScanPanel(double height) {
     return Container(
-      height: 280,
+      height: height,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -581,9 +663,9 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Widget _buildManualPanel() {
+  Widget _buildManualPanel(double height) {
     return Container(
-      height: 280,
+      height: height,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -595,7 +677,6 @@ class _ScanScreenState extends State<ScanScreen> {
         children: [
           TextField(
             controller: _productSearchCtrl,
-            autofocus: _entryMode == BillingEntryMode.manual,
             textInputAction: TextInputAction.search,
             decoration: const InputDecoration(
               labelText: 'Search products',
@@ -669,157 +750,36 @@ class _ScanScreenState extends State<ScanScreen> {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 8),
-          _buildModeSelector(),
-          _buildEntryPanel(),
-          const SizedBox(height: 8),
-          Text(
-            _entryHintText(),
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // ── Bill Items List ──
           Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: AppColors.cream,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: _items.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.qr_code_scanner,
-                            size: 48,
-                            color: AppColors.textMuted.withValues(alpha: 0.3),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No items added yet',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxHeight < 520;
+                final panelHeight = (constraints.maxHeight * 0.42).clamp(
+                  180.0,
+                  280.0,
+                );
+
+                return Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    _buildModeSelector(),
+                    _buildEntryPanel(panelHeight),
+                    if (!compact) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _entryHintText(),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 13,
+                        ),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                      itemCount: _items.length,
-                      itemBuilder: (_, i) {
-                        final item = _items[i];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.productName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      item.priceLabel,
-                                      style: TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Qty controls
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.cream,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      onPressed: () => _updateQty(i, -1),
-                                      icon: const Icon(Icons.remove, size: 18),
-                                      constraints: const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36,
-                                      ),
-                                    ),
-                                    SizedBox(
-                                      width: 44,
-                                      child: TextFormField(
-                                        key: ValueKey(
-                                          '${item.productName}-${item.mrp}-${item.quantity}',
-                                        ),
-                                        initialValue: '${item.quantity}',
-                                        textAlign: TextAlign.center,
-                                        keyboardType: TextInputType.number,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter
-                                              .digitsOnly,
-                                        ],
-                                        decoration: const InputDecoration(
-                                          isDense: true,
-                                          filled: false,
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 8,
-                                          ),
-                                          border: InputBorder.none,
-                                        ),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 16,
-                                        ),
-                                        onChanged: (value) {
-                                          final quantity = int.tryParse(value);
-                                          if (quantity != null) {
-                                            _setQty(i, quantity);
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                    IconButton(
-                                      onPressed: () => _updateQty(i, 1),
-                                      icon: const Icon(Icons.add, size: 18),
-                                      constraints: const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // Subtotal
-                              Text(
-                                '₹${item.subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
+                      const SizedBox(height: 12),
+                    ] else
+                      const SizedBox(height: 8),
+                    Expanded(child: _buildBillItemsPanel()),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -888,6 +848,143 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             )
           : null,
+    );
+  }
+
+  Widget _buildBillItemsPanel() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: _items.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.qr_code_scanner,
+                    size: 48,
+                    color: AppColors.textMuted.withValues(alpha: 0.3),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No items added yet',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+              itemCount: _items.length,
+              itemBuilder: (_, i) {
+                final item = _items[i];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.productName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              item.priceLabel,
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Qty controls
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.cream,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              onPressed: () => _updateQty(i, -1),
+                              icon: const Icon(Icons.remove, size: 18),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 44,
+                              child: TextFormField(
+                                key: ValueKey(
+                                  '${item.productName}-${item.mrp}-${item.quantity}',
+                                ),
+                                initialValue: '${item.quantity}',
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  filled: false,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 8,
+                                  ),
+                                  border: InputBorder.none,
+                                ),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                                onChanged: (value) {
+                                  final quantity = int.tryParse(value);
+                                  if (quantity != null) {
+                                    _setQty(i, quantity);
+                                  }
+                                },
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => _updateQty(i, 1),
+                              icon: const Icon(Icons.add, size: 18),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Subtotal
+                      Text(
+                        '₹${item.subtotal.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 }
@@ -994,6 +1091,76 @@ class _ManualProductTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _CustomerSuggestionList extends StatelessWidget {
+  final List<Customer> customers;
+  final ValueChanged<Customer> onSelected;
+
+  const _CustomerSuggestionList({
+    required this.customers,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 220),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        itemCount: customers.length,
+        separatorBuilder: (_, index) =>
+            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+        itemBuilder: (_, index) {
+          final customer = customers[index];
+          return ListTile(
+            dense: true,
+            leading: CircleAvatar(
+              radius: 17,
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              child: Text(
+                customer.name.trim().isEmpty
+                    ? '?'
+                    : customer.name.trim().substring(0, 1).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            title: Text(
+              customer.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.check_circle_outline_rounded),
+            onTap: () => onSelected(customer),
+          );
+        },
+      ),
+    );
+  }
+
+  static String _displayPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return '+91 ${digits.substring(2, 7)} ${digits.substring(7)}';
+    }
+    return phone;
   }
 }
 
