@@ -23,6 +23,13 @@ class DatabaseHelper
     _database = await _initDB('storely.db');
     return _database!;
   }
+
+  Future<void> close() async {
+    final db = _database;
+    if (db == null) return;
+    await db.close();
+    _database = null;
+  }
 }
 
 String? _normaliseName(String? value) {

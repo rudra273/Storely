@@ -70,7 +70,7 @@ mixin DatabaseSettings {
     final values = <String>{...Product.presetUnits};
     final optionRows = await db.query('unit_options', orderBy: 'name ASC');
     final productRows = await db.rawQuery(
-      'SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ""',
+      "SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ''",
     );
 
     for (final row in optionRows) {

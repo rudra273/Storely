@@ -133,21 +133,21 @@ mixin DatabaseSchema {
 
   Future<void> _seedOptionsFromProducts(DatabaseExecutor executor) async {
     final categories = await executor.rawQuery(
-      'SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ""',
+      "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ''",
     );
     for (final row in categories) {
       await _insertOption(executor, 'category_options', row['category']);
     }
 
     final suppliers = await executor.rawQuery(
-      'SELECT DISTINCT supplier FROM products WHERE supplier IS NOT NULL AND TRIM(supplier) != ""',
+      "SELECT DISTINCT supplier FROM products WHERE supplier IS NOT NULL AND TRIM(supplier) != ''",
     );
     for (final row in suppliers) {
       await _insertOption(executor, 'supplier_options', row['supplier']);
     }
 
     final units = await executor.rawQuery(
-      'SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ""',
+      "SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ''",
     );
     for (final row in units) {
       await _insertUnitOption(executor, row['unit']);

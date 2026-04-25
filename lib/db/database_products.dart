@@ -365,7 +365,7 @@ Future<List<String>> _getOptions(
 ) async {
   final optionRows = await executor.query(table, orderBy: 'name ASC');
   final productRows = await executor.rawQuery(
-    'SELECT DISTINCT $productColumn FROM products WHERE $productColumn IS NOT NULL AND TRIM($productColumn) != ""',
+    "SELECT DISTINCT $productColumn FROM products WHERE $productColumn IS NOT NULL AND TRIM($productColumn) != ''",
   );
   final values = <String>{};
   for (final row in optionRows) {
