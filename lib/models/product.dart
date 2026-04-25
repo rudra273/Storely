@@ -6,12 +6,32 @@ class ProductSource {
 }
 
 class Product {
+  static const presetUnits = [
+    'pcs',
+    'pkt',
+    'kg',
+    'g',
+    'mtr',
+    'sqft',
+    'box',
+    'dozen',
+    'ltr',
+    'ml',
+  ];
+
   final int? id;
   final String? itemCode;
   final String name;
   final String? category;
   final double mrp;
+  final double purchasePrice;
+  final double? gstPercent;
+  final double? overheadCost;
+  final double? profitMarginPercent;
+  final bool directPriceToggle;
+  final double? manualPrice;
   final int quantity;
+  final String? unit;
   final String? supplier;
   final String source;
   final DateTime createdAt;
@@ -22,14 +42,32 @@ class Product {
     required this.name,
     this.category,
     required this.mrp,
+    double? purchasePrice,
+    this.gstPercent,
+    this.overheadCost,
+    this.profitMarginPercent,
+    this.directPriceToggle = false,
+    this.manualPrice,
     required this.quantity,
+    this.unit,
     this.supplier,
     this.source = ProductSource.mobile,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+  }) : purchasePrice = purchasePrice ?? mrp,
+       createdAt = createdAt ?? DateTime.now();
 
   bool get isImported => source == ProductSource.imported;
   String get sourceLabel => isImported ? 'Imported' : 'Mobile';
+  String get priceLabel {
+    final amount = mrp.toStringAsFixed(mrp == mrp.roundToDouble() ? 0 : 2);
+    return unit == null || unit!.trim().isEmpty
+        ? '₹$amount'
+        : '₹$amount / ${unit!.trim()}';
+  }
+
+  String get quantityLabel => unit == null || unit!.trim().isEmpty
+      ? '$quantity'
+      : '$quantity ${unit!.trim()}';
 
   Map<String, dynamic> toMap() => {
     'id': id,
@@ -37,7 +75,14 @@ class Product {
     'name': name,
     'category': category,
     'mrp': mrp,
+    'purchase_price': purchasePrice,
+    'gst_percent': gstPercent,
+    'overhead_cost': overheadCost,
+    'profit_margin_percent': profitMarginPercent,
+    'direct_price_toggle': directPriceToggle ? 1 : 0,
+    'manual_price': manualPrice,
     'quantity': quantity,
+    'unit': unit,
     'supplier': supplier,
     'source': source,
     'created_at': createdAt.toIso8601String(),
@@ -49,7 +94,16 @@ class Product {
     name: map['name'] as String,
     category: map['category'] as String?,
     mrp: (map['mrp'] as num).toDouble(),
+    purchasePrice:
+        (map['purchase_price'] as num?)?.toDouble() ??
+        (map['mrp'] as num).toDouble(),
+    gstPercent: (map['gst_percent'] as num?)?.toDouble(),
+    overheadCost: (map['overhead_cost'] as num?)?.toDouble(),
+    profitMarginPercent: (map['profit_margin_percent'] as num?)?.toDouble(),
+    directPriceToggle: (map['direct_price_toggle'] as int? ?? 1) == 1,
+    manualPrice: (map['manual_price'] as num?)?.toDouble(),
     quantity: map['quantity'] as int,
+    unit: _cleanOptional(map['unit'] as String?),
     supplier: map['supplier'] as String?,
     source: map['source'] as String? ?? ProductSource.mobile,
     createdAt: DateTime.parse(map['created_at'] as String),
@@ -61,7 +115,14 @@ class Product {
     String? name,
     String? category,
     double? mrp,
+    double? purchasePrice,
+    double? gstPercent,
+    double? overheadCost,
+    double? profitMarginPercent,
+    bool? directPriceToggle,
+    double? manualPrice,
     int? quantity,
+    String? unit,
     String? supplier,
     String? source,
     DateTime? createdAt,
@@ -71,7 +132,14 @@ class Product {
     name: name ?? this.name,
     category: category ?? this.category,
     mrp: mrp ?? this.mrp,
+    purchasePrice: purchasePrice ?? this.purchasePrice,
+    gstPercent: gstPercent ?? this.gstPercent,
+    overheadCost: overheadCost ?? this.overheadCost,
+    profitMarginPercent: profitMarginPercent ?? this.profitMarginPercent,
+    directPriceToggle: directPriceToggle ?? this.directPriceToggle,
+    manualPrice: manualPrice ?? this.manualPrice,
     quantity: quantity ?? this.quantity,
+    unit: unit ?? this.unit,
     supplier: supplier ?? this.supplier,
     source: source ?? this.source,
     createdAt: createdAt ?? this.createdAt,
@@ -79,8 +147,16 @@ class Product {
 
   String toQrData() {
     final map = <String, dynamic>{'name': name, 'mrp': mrp, 'qty': quantity};
+    if (id != null) map['id'] = id;
+    final unitValue = unit?.trim();
+    if (unitValue != null && unitValue.isNotEmpty) map['unit'] = unitValue;
     if (itemCode != null) map['code'] = itemCode;
     if (category != null) map['cat'] = category;
     return jsonEncode(map);
+  }
+
+  static String? _cleanOptional(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 }

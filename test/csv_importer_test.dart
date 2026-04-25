@@ -10,9 +10,18 @@ import 'package:storely/utils/csv_importer.dart';
 void main() {
   test('parses xlsx product rows from bytes', () async {
     final bytes = _xlsxBytes([
-      ['Code', 'Name', 'Category', 'MRP', 'Quantity', 'Supplier'],
-      ['A1', 'Notebook', 'Stationery', 55.5, 12, 'Acme'],
-      ['B2', 'Pen', 'Stationery', 10, 40, 'Acme'],
+      [
+        'Code',
+        'Name',
+        'Category',
+        'Purchase Price',
+        'MRP',
+        'Quantity',
+        'Unit',
+        'Supplier',
+      ],
+      ['A1', 'Notebook', 'Stationery', 40, 55.5, 12, 'pcs', 'Acme'],
+      ['B2', 'Pen', 'Stationery', 7, 10, 40, 'box', 'Acme'],
     ]);
 
     final products = await CsvImporter.parseBytes(
@@ -24,8 +33,12 @@ void main() {
     expect(products.first.itemCode, 'A1');
     expect(products.first.name, 'Notebook');
     expect(products.first.category, 'Stationery');
+    expect(products.first.purchasePrice, 40);
     expect(products.first.mrp, 55.5);
+    expect(products.first.directPriceToggle, isFalse);
+    expect(products.first.manualPrice, 55.5);
     expect(products.first.quantity, 12);
+    expect(products.first.unit, 'pcs');
     expect(products.first.supplier, 'Acme');
     expect(products.first.source, ProductSource.imported);
   });

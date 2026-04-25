@@ -76,7 +76,11 @@ class CsvImporter {
             name: name,
             category: _getString(row, mapping['category']),
             mrp: _getDouble(row, mapping['mrp']) ?? 0,
+            purchasePrice: _getDouble(row, mapping['purchase_price']),
+            directPriceToggle: mapping['purchase_price'] == null,
+            manualPrice: _getDouble(row, mapping['mrp']) ?? 0,
             quantity: _getInt(row, mapping['quantity']) ?? 0,
+            unit: _getString(row, mapping['unit']),
             supplier: _getString(row, mapping['supplier']),
             source: ProductSource.imported,
           ),
@@ -413,7 +417,9 @@ class CsvImporter {
       'name': null,
       'category': null,
       'mrp': null,
+      'purchase_price': null,
       'quantity': null,
+      'unit': null,
       'supplier': null,
     };
 
@@ -447,6 +453,15 @@ class CsvImporter {
       } else if (_matches(h, ['category', 'cat', 'group', 'type', 'class'])) {
         mapping['category'] = i;
       } else if (_matches(h, [
+        'purchase price',
+        'purchase_price',
+        'buying price',
+        'buying_price',
+        'cost price',
+        'cost_price',
+      ])) {
+        mapping['purchase_price'] = i;
+      } else if (_matches(h, [
         'price',
         'mrp',
         'rate',
@@ -466,6 +481,15 @@ class CsvImporter {
         'available',
       ])) {
         mapping['quantity'] = i;
+      } else if (_matches(h, [
+        'unit',
+        'uom',
+        'measure',
+        'measurement',
+        'unit of measure',
+        'unit_of_measure',
+      ])) {
+        mapping['unit'] = i;
       } else if (_matches(h, [
         'supplier',
         'vendor',

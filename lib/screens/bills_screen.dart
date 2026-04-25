@@ -106,7 +106,7 @@ class _BillsScreenState extends State<BillsScreen> {
       ..writeln('Items:');
     for (final item in bill.items) {
       buffer.writeln(
-        '- ${item.productName} x${item.quantity}: ₹${item.subtotal.toStringAsFixed(2)}',
+        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ₹${item.subtotal.toStringAsFixed(2)}',
       );
     }
     buffer
@@ -253,6 +253,15 @@ class _BillCard extends StatefulWidget {
 class _BillCardState extends State<_BillCard> {
   bool _expanded = false;
 
+  Future<void> _showProfitSummary() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillProfitSheet(bill: widget.bill),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bill = widget.bill;
@@ -381,7 +390,7 @@ class _BillCardState extends State<_BillCard> {
                             ),
                           ),
                           Text(
-                            '×${item.quantity}',
+                            '${item.quantityLabel} x ${item.priceLabel}',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 13,
@@ -456,6 +465,17 @@ class _BillCardState extends State<_BillCard> {
                                   foregroundColor: AppColors.success,
                                 ),
                               ),
+                            TextButton.icon(
+                              onPressed: _showProfitSummary,
+                              icon: const Icon(
+                                Icons.trending_up_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('View Profit'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.navy,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -473,6 +493,204 @@ class _BillCardState extends State<_BillCard> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BillProfitSheet extends StatefulWidget {
+  final Bill bill;
+
+  const _BillProfitSheet({required this.bill});
+
+  @override
+  State<_BillProfitSheet> createState() => _BillProfitSheetState();
+}
+
+class _BillProfitSheetState extends State<_BillProfitSheet> {
+  late final TextEditingController _commissionCtrl;
+  late double _commissionPercent;
+
+  @override
+  void initState() {
+    super.initState();
+    _commissionPercent = widget.bill.profitCommissionPercent;
+    _commissionCtrl = TextEditingController(
+      text: _commissionPercent == 0
+          ? ''
+          : _commissionPercent.toStringAsFixed(2),
+    );
+  }
+
+  @override
+  void dispose() {
+    _commissionCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveCommission() async {
+    final billId = widget.bill.id;
+    if (billId == null) return;
+    await DatabaseHelper.instance.updateBillProfitCommissionPercent(
+      billId,
+      _commissionPercent,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Commission saved for this bill')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bill = widget.bill;
+    final revenue = bill.items.fold(0.0, (sum, item) => sum + item.subtotal);
+    final cost = bill.items.fold(0.0, (sum, item) => sum + item.totalCost);
+    final profit = bill.items.fold(0.0, (sum, item) => sum + item.totalProfit);
+    final commission = profit > 0 ? profit * _commissionPercent / 100 : 0.0;
+    final gst = bill.items.fold(0.0, (sum, item) => sum + item.totalGst);
+    final net = profit - commission;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.creamDark,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Bill #${bill.id} Profit',
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ...bill.items.map((item) => _ProfitItemRow(item: item)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _commissionCtrl,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Commission % from profit (optional)',
+                  suffixText: '%',
+                ),
+                onChanged: (value) => setState(() {
+                  _commissionPercent = (double.tryParse(value) ?? 0)
+                      .clamp(0, 100)
+                      .toDouble();
+                }),
+              ),
+              const Divider(height: 24),
+              _ProfitTotalRow('Total Revenue', revenue),
+              _ProfitTotalRow('Total Cost', cost),
+              _ProfitTotalRow('Gross Profit', profit),
+              _ProfitTotalRow('Commission Payable', commission),
+              _ProfitTotalRow('Your Net Profit', net),
+              _ProfitTotalRow('GST Collected', gst),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _saveCommission,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save Commission'),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfitItemRow extends StatelessWidget {
+  final BillItem item;
+
+  const _ProfitItemRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.productName,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Text(
+                item.wasDirectPrice ? 'direct' : 'formula',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${item.quantityLabel}    Sold: ₹${item.sellingPriceSnapshot.toStringAsFixed(2)}    Cost: ₹${item.costSnapshot.toStringAsFixed(2)}    Profit: ₹${item.profitSnapshot.toStringAsFixed(2)}',
+            style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfitTotalRow extends StatelessWidget {
+  final String label;
+  final double value;
+
+  const _ProfitTotalRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textMuted)),
+          const Spacer(),
+          Text(
+            '₹${value.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
         ],
       ),
     );
