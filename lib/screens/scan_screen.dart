@@ -5,9 +5,14 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/product.dart';
+
+enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final BillingEntryMode initialMode;
+
+  const ScanScreen({super.key, this.initialMode = BillingEntryMode.scan});
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -16,10 +21,14 @@ class _ScanScreenState extends State<ScanScreen> {
   static const _scanCooldown = Duration(seconds: 1);
   static const _invalidScanCooldown = Duration(seconds: 2);
 
-  final MobileScannerController _camController = MobileScannerController();
+  final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
+  List<Product> _allProducts = [];
+  List<Product> _filteredProducts = [];
+  late BillingEntryMode _entryMode;
   bool _isProcessing = false;
   bool _isSavingBill = false;
+  bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   String? _lastScanned;
 
@@ -27,9 +36,44 @@ class _ScanScreenState extends State<ScanScreen> {
   int get _itemCount => _items.fold(0, (sum, i) => sum + i.quantity);
 
   @override
+  void initState() {
+    super.initState();
+    _entryMode = widget.initialMode;
+    _productSearchCtrl.addListener(_applyProductSearch);
+    _loadProducts();
+  }
+
+  @override
   void dispose() {
-    _camController.dispose();
+    _productSearchCtrl.removeListener(_applyProductSearch);
+    _productSearchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadProducts() async {
+    final products = await DatabaseHelper.instance.getAllProducts();
+    if (!mounted) return;
+    setState(() {
+      _allProducts = products;
+      _isLoadingProducts = false;
+    });
+    _applyProductSearch();
+  }
+
+  void _applyProductSearch() {
+    final query = _productSearchCtrl.text.trim().toLowerCase();
+    if (!mounted) return;
+    setState(() {
+      final products = query.isEmpty
+          ? _allProducts
+          : _allProducts.where((product) {
+              return product.name.toLowerCase().contains(query) ||
+                  (product.itemCode?.toLowerCase().contains(query) ?? false) ||
+                  (product.category?.toLowerCase().contains(query) ?? false) ||
+                  (product.supplier?.toLowerCase().contains(query) ?? false);
+            }).toList();
+      _filteredProducts = products.take(40).toList();
+    });
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
@@ -60,22 +104,7 @@ class _ScanScreenState extends State<ScanScreen> {
           : await DatabaseHelper.instance.buildBillItemForProduct(product);
       if (!mounted) return;
 
-      // Check if already in list
-      final existing = _items.indexWhere(
-        (i) =>
-            i.productName.toLowerCase() ==
-            scannedItem.productName.toLowerCase(),
-      );
-
-      setState(() {
-        if (existing >= 0) {
-          _items[existing].quantity++;
-          _items[existing].unit ??= scannedItem.unit;
-        } else {
-          _items.add(scannedItem);
-        }
-        _showAddedStatus = true;
-      });
+      _addBillItem(scannedItem);
 
       HapticFeedback.mediumImpact();
       _allowNextScanAfter(_scanCooldown);
@@ -92,6 +121,34 @@ class _ScanScreenState extends State<ScanScreen> {
         );
       _allowNextScanAfter(_invalidScanCooldown);
     }
+  }
+
+  Future<void> _addProductToBill(Product product) async {
+    final item = await DatabaseHelper.instance.buildBillItemForProduct(product);
+    if (!mounted) return;
+    _addBillItem(item);
+    HapticFeedback.selectionClick();
+  }
+
+  void _addBillItem(BillItem item) {
+    final existing = _items.indexWhere(
+      (existingItem) =>
+          (item.productId != null &&
+              existingItem.productId == item.productId) ||
+          (item.productId == null &&
+              existingItem.productName.toLowerCase() ==
+                  item.productName.toLowerCase()),
+    );
+
+    setState(() {
+      if (existing >= 0) {
+        _items[existing].quantity++;
+        _items[existing].unit ??= item.unit;
+      } else {
+        _items.add(item);
+      }
+      _showAddedStatus = _entryMode == BillingEntryMode.scan;
+    });
   }
 
   void _allowNextScanAfter(Duration duration) {
@@ -427,13 +484,174 @@ class _ScanScreenState extends State<ScanScreen> {
     return trimmed;
   }
 
+  Widget _buildModeSelector() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: SegmentedButton<BillingEntryMode>(
+        segments: const [
+          ButtonSegment(
+            value: BillingEntryMode.scan,
+            icon: Icon(Icons.qr_code_scanner_rounded),
+            label: Text('Scan'),
+          ),
+          ButtonSegment(
+            value: BillingEntryMode.manual,
+            icon: Icon(Icons.search_rounded),
+            label: Text('Search'),
+          ),
+        ],
+        selected: {_entryMode},
+        style: SegmentedButton.styleFrom(
+          backgroundColor: AppColors.navyLight,
+          selectedBackgroundColor: AppColors.amber,
+          foregroundColor: Colors.white,
+          selectedForegroundColor: Colors.white,
+        ),
+        onSelectionChanged: (selection) {
+          setState(() {
+            _entryMode = selection.first;
+            _showAddedStatus = false;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildEntryPanel() {
+    return _entryMode == BillingEntryMode.scan
+        ? _buildScanPanel()
+        : _buildManualPanel();
+  }
+
+  Widget _buildScanPanel() {
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppColors.amber.withValues(alpha: 0.5),
+          width: 2,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          MobileScanner(onDetect: _onDetect),
+          Center(
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: AppColors.amber.withValues(alpha: 0.7),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          if (_showAddedStatus)
+            Positioned(
+              bottom: 12,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.success,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'Item added!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildManualPanel() {
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _productSearchCtrl,
+            autofocus: _entryMode == BillingEntryMode.manual,
+            textInputAction: TextInputAction.search,
+            decoration: const InputDecoration(
+              labelText: 'Search products',
+              prefixIcon: Icon(Icons.search_rounded),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: _isLoadingProducts
+                ? const Center(child: CircularProgressIndicator())
+                : _allProducts.isEmpty
+                ? _ManualEmptyState(
+                    icon: Icons.inventory_2_outlined,
+                    message: 'Add products before manual billing',
+                  )
+                : _filteredProducts.isEmpty
+                ? _ManualEmptyState(
+                    icon: Icons.search_off_rounded,
+                    message: 'No matching products',
+                  )
+                : ListView.separated(
+                    itemCount: _filteredProducts.length,
+                    separatorBuilder: (_, index) => const SizedBox(height: 8),
+                    itemBuilder: (_, index) {
+                      final product = _filteredProducts[index];
+                      return _ManualProductTile(
+                        product: product,
+                        onAdd: () => _addProductToBill(product),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _entryHintText() {
+    if (_entryMode == BillingEntryMode.scan) {
+      return _items.isEmpty
+          ? 'Point camera at product QR code'
+          : '${_items.length} item${_items.length != 1 ? 's' : ''} added';
+    }
+    if (_items.isNotEmpty) {
+      return '${_items.length} item${_items.length != 1 ? 's' : ''} in bill';
+    }
+    return 'Search by product name, code, category or supplier';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.navy,
       appBar: AppBar(
-        title: const Text(
-          'Scan & Bill',
+        title: Text(
+          _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: AppColors.navy,
@@ -451,76 +669,19 @@ class _ScanScreenState extends State<ScanScreen> {
       ),
       body: Column(
         children: [
-          // ── Camera Preview ──
-          Container(
-            height: 280,
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.amber.withValues(alpha: 0.5),
-                width: 2,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                MobileScanner(controller: _camController, onDetect: _onDetect),
-                // Scan overlay
-                Center(
-                  child: Container(
-                    width: 200,
-                    height: 200,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: AppColors.amber.withValues(alpha: 0.7),
-                        width: 2,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-                // Status indicator
-                if (_showAddedStatus)
-                  Positioned(
-                    bottom: 12,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.success,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          '✓ Item added!',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 8),
+          _buildModeSelector(),
+          _buildEntryPanel(),
           const SizedBox(height: 8),
           Text(
-            _items.isEmpty
-                ? 'Point camera at product QR code'
-                : '${_items.length} item${_items.length != 1 ? 's' : ''} scanned',
+            _entryHintText(),
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.6),
               fontSize: 13,
             ),
           ),
           const SizedBox(height: 12),
-          // ── Scanned Items List ──
+          // ── Bill Items List ──
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
@@ -539,7 +700,7 @@ class _ScanScreenState extends State<ScanScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'No items scanned yet',
+                            'No items added yet',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 14,
@@ -727,6 +888,111 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             )
           : null,
+    );
+  }
+}
+
+class _ManualEmptyState extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _ManualEmptyState({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 38,
+            color: AppColors.textMuted.withValues(alpha: 0.4),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualProductTile extends StatelessWidget {
+  final Product product;
+  final VoidCallback onAdd;
+
+  const _ManualProductTile({required this.product, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOut = product.quantity == 0;
+    return Material(
+      color: AppColors.cream,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onAdd,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        product.priceLabel,
+                        if (product.itemCode != null) product.itemCode!,
+                      ].join(' • '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    isOut ? 'Out' : product.quantityLabel,
+                    style: TextStyle(
+                      color: isOut ? AppColors.error : AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Icon(
+                    Icons.add_circle_rounded,
+                    color: AppColors.navy,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

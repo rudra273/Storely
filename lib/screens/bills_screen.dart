@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import 'scan_screen.dart';
 
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
@@ -73,6 +74,70 @@ class _BillsScreenState extends State<BillsScreen> {
     await _loadBills();
   }
 
+  Future<void> _openBillCreator(BillingEntryMode mode) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ScanScreen(initialMode: mode)),
+    );
+    await _loadBills();
+  }
+
+  Future<void> _showCreateBillOptions() async {
+    final mode = await showModalBottomSheet<BillingEntryMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.creamDark,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Create Bill',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.search_rounded),
+                title: const Text('Search Products'),
+                subtitle: const Text('Build a bill manually from product list'),
+                onTap: () => Navigator.pop(ctx, BillingEntryMode.manual),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.qr_code_scanner_rounded),
+                title: const Text('Scan QR'),
+                subtitle: const Text('Use product QR labels'),
+                onTap: () => Navigator.pop(ctx, BillingEntryMode.scan),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (mode == null || !mounted) return;
+    await _openBillCreator(mode);
+  }
+
   Future<void> _sendBillOnWhatsApp(Bill bill) async {
     final phone = _whatsAppPhone(bill.customerPhone);
     if (phone == null) return;
@@ -140,9 +205,18 @@ class _BillsScreenState extends State<BillsScreen> {
           : RefreshIndicator(
               onRefresh: _loadBills,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                 children: _buildGroupedBillCards(),
               ),
+            ),
+      floatingActionButton: _isLoading || _bills.isEmpty
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showCreateBillOptions,
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.receipt_long_rounded),
+              label: const Text('New Bill'),
             ),
     );
   }
@@ -205,8 +279,15 @@ class _BillsScreenState extends State<BillsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Scan products to create your first bill',
+            'Search or scan products to create your first bill',
             style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: _showCreateBillOptions,
+            icon: const Icon(Icons.receipt_long_rounded),
+            label: const Text('Create Bill'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
           ),
         ],
       ),
