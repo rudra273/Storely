@@ -60,6 +60,7 @@ void main() {
             totalAmount: item.subtotal * 0.90,
             itemCount: item.quantity,
             isPaid: false,
+            paymentMethod: 'online',
           ),
           [item],
         );
@@ -80,6 +81,7 @@ void main() {
         expect(bill.totalAmount, 425.25);
         expect(bill.itemCount, 3);
         expect(bill.isPaid, isFalse);
+        expect(bill.paymentMethod, 'online');
         expect(savedItem.productId, productId);
         expect(savedItem.productName, 'Notebook');
         expect(savedItem.quantity, 3);
@@ -137,6 +139,16 @@ void main() {
 
       final bill = (await db.getAllBills()).single;
       expect(bill.isPaid, isTrue);
+    });
+
+    test('bill payment method defaults to cash', () async {
+      await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 80, itemCount: 1),
+        [BillItem(productName: 'Loose Item', mrp: 80)],
+      );
+
+      final bill = (await db.getAllBills()).single;
+      expect(bill.paymentMethod, 'cash');
     });
 
     test('same customer phone is unique and accumulates bill totals', () async {
@@ -270,6 +282,30 @@ void main() {
       expect(customerRows.single['total_purchase_amount'], 150);
       expect(customerRows.single['bill_count'], 1);
     });
+
+    test(
+      'deleting last customer bill keeps customer identity with zero total',
+      () async {
+        final billId = await db.insertBill(
+          Bill(
+            customerName: 'Nila',
+            customerPhone: '9876500000',
+            totalAmount: 200,
+            itemCount: 1,
+          ),
+          [BillItem(productName: 'Item A', mrp: 200)],
+        );
+
+        await db.deleteBill(billId);
+        final customers = await db.getAllCustomers();
+
+        expect(customers, hasLength(1));
+        expect(customers.single.name, 'Nila');
+        expect(customers.single.phone, '919876500000');
+        expect(customers.single.totalPurchaseAmount, 0);
+        expect(customers.single.billCount, 0);
+      },
+    );
 
     test('stock deduction never makes product quantity negative', () async {
       final productId = await db.insertProduct(

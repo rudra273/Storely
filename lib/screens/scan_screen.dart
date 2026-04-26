@@ -168,6 +168,7 @@ class _ScanScreenState extends State<ScanScreen> {
     required String? customerPhone,
     required double discountPercent,
     required bool isPaid,
+    required String paymentMethod,
   }) async {
     if (_items.isEmpty) return null;
     if (_isSavingBill) return null;
@@ -207,6 +208,7 @@ class _ScanScreenState extends State<ScanScreen> {
       totalAmount: total,
       itemCount: _itemCount,
       isPaid: isPaid,
+      paymentMethod: paymentMethod,
     );
 
     try {
@@ -231,6 +233,7 @@ class _ScanScreenState extends State<ScanScreen> {
     }
     var discountPercent = 0.0;
     var isPaid = true;
+    var paymentMethod = 'cash';
     var hideCustomerSuggestions = false;
 
     try {
@@ -376,6 +379,24 @@ class _ScanScreenState extends State<ScanScreen> {
                         onSelectionChanged: (value) =>
                             setSheetState(() => isPaid = value.first),
                       ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 'cash',
+                            icon: Icon(Icons.payments_outlined),
+                            label: Text('Cash'),
+                          ),
+                          ButtonSegment(
+                            value: 'online',
+                            icon: Icon(Icons.account_balance_wallet_outlined),
+                            label: Text('Online'),
+                          ),
+                        ],
+                        selected: {paymentMethod},
+                        onSelectionChanged: (value) =>
+                            setSheetState(() => paymentMethod = value.first),
+                      ),
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -411,6 +432,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                 customerPhone: phoneController.text,
                                 discountPercent: percent,
                                 isPaid: isPaid,
+                                paymentMethod: paymentMethod,
                               ),
                             );
                           },
@@ -437,6 +459,7 @@ class _ScanScreenState extends State<ScanScreen> {
         customerPhone: draft.customerPhone,
         discountPercent: draft.discountPercent,
         isPaid: draft.isPaid,
+        paymentMethod: draft.paymentMethod,
       );
       if (billId == null || !mounted) return;
       await _showBillCreatedDialog(
@@ -1209,11 +1232,13 @@ class _BillDraft {
   final String? customerPhone;
   final double discountPercent;
   final bool isPaid;
+  final String paymentMethod;
 
   const _BillDraft({
     required this.customerName,
     required this.customerPhone,
     required this.discountPercent,
     required this.isPaid,
+    required this.paymentMethod,
   });
 }

@@ -68,7 +68,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
-                  _CustomerReportTable(customers: _customers),
+                  _CustomerReportTable(
+                    customers: _customers
+                        .where((customer) => customer.totalPurchaseAmount > 0)
+                        .toList(),
+                  ),
                   const SizedBox(height: 12),
                   _AnalyticsPanel(
                     title: 'Business Overview',

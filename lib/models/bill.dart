@@ -10,6 +10,7 @@ class Bill {
   final double totalAmount;
   final int itemCount;
   final bool isPaid;
+  final String paymentMethod;
   final DateTime createdAt;
   final List<BillItem> items;
 
@@ -25,6 +26,7 @@ class Bill {
     required this.totalAmount,
     required this.itemCount,
     this.isPaid = true,
+    this.paymentMethod = 'cash',
     DateTime? createdAt,
     this.items = const [],
   }) : subtotalAmount = subtotalAmount ?? totalAmount + discountAmount,
@@ -42,6 +44,7 @@ class Bill {
     'total_amount': totalAmount,
     'item_count': itemCount,
     'is_paid': isPaid ? 1 : 0,
+    'payment_method': paymentMethod,
     'created_at': createdAt.toIso8601String(),
   };
 
@@ -68,6 +71,7 @@ class Bill {
       totalAmount: totalAmount,
       itemCount: map['item_count'] as int,
       isPaid: (map['is_paid'] as int?) != 0,
+      paymentMethod: map['payment_method'] as String? ?? 'cash',
       createdAt: DateTime.parse(map['created_at'] as String),
       items: items ?? [],
     );

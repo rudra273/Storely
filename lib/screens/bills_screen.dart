@@ -128,7 +128,8 @@ class _BillsScreenState extends State<BillsScreen> {
     }
     buffer
       ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}');
+      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}')
+      ..writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
     return buffer.toString();
   }
 
@@ -347,6 +348,8 @@ class _BillCardState extends State<_BillCard> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       _PaymentChip(isPaid: bill.isPaid),
+                      const SizedBox(height: 4),
+                      _MethodChip(method: bill.paymentMethod),
                       const SizedBox(height: 4),
                       Text(
                         '₹${bill.totalAmount.toStringAsFixed(2)}',
@@ -745,6 +748,37 @@ class _PaymentChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MethodChip extends StatelessWidget {
+  final String method;
+  const _MethodChip({required this.method});
+
+  @override
+  Widget build(BuildContext context) {
+    final online = method == 'online';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: (online ? AppColors.navy : AppColors.amber).withValues(
+          alpha: 0.12,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        _paymentMethodLabel(method),
+        style: TextStyle(
+          color: online ? AppColors.navy : AppColors.amber,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+String _paymentMethodLabel(String method) {
+  return method == 'online' ? 'Online' : 'Cash';
 }
 
 class _AmountRow extends StatelessWidget {

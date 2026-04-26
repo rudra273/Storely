@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../main.dart';
+import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
 import 'analytics_screen.dart';
@@ -21,6 +22,7 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _categories = [];
   List<String> _suppliers = [];
   List<String> _units = [];
+  List<Customer> _customers = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
   int _lowStockThreshold = 5;
   bool _isLoading = true;
@@ -45,6 +47,7 @@ class _StoreScreenState extends State<StoreScreen> {
     final categories = await db.getCategories();
     final suppliers = await db.getSuppliers();
     final units = await db.getUnits();
+    final customers = await db.getAllCustomers();
     final pricingSettings = await db.getGlobalPricingSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
@@ -53,6 +56,7 @@ class _StoreScreenState extends State<StoreScreen> {
       _categories = categories;
       _suppliers = suppliers;
       _units = units;
+      _customers = customers;
       _pricingSettings = pricingSettings;
       _lowStockThreshold = lowStockThreshold;
       _isLoading = false;
@@ -175,6 +179,15 @@ class _StoreScreenState extends State<StoreScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+    );
+  }
+
+  Future<void> _showCustomerTable() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CustomerTableSheet(customers: _customers),
     );
   }
 
@@ -432,6 +445,13 @@ class _StoreScreenState extends State<StoreScreen> {
                     subtitle: 'Show stock at $_lowStockThreshold or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
+                  ),
+                  const SizedBox(height: 10),
+                  _StoreActionRow(
+                    title: 'Customers',
+                    subtitle: '${_customers.length} saved',
+                    icon: Icons.people_outline_rounded,
+                    onTap: _showCustomerTable,
                   ),
                   const SizedBox(height: 10),
                   _StoreActionRow(
@@ -1136,5 +1156,154 @@ class _NumberDialogState extends State<_NumberDialog> {
         ),
       ],
     );
+  }
+}
+
+class _CustomerTableSheet extends StatefulWidget {
+  final List<Customer> customers;
+
+  const _CustomerTableSheet({required this.customers});
+
+  @override
+  State<_CustomerTableSheet> createState() => _CustomerTableSheetState();
+}
+
+class _CustomerTableSheetState extends State<_CustomerTableSheet> {
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Customer> get _filtered {
+    final query = _searchCtrl.text.trim().toLowerCase();
+    if (query.isEmpty) return widget.customers;
+    final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
+    return widget.customers.where((customer) {
+      return customer.name.toLowerCase().contains(query) ||
+          customer.phone.contains(digits.isEmpty ? query : digits);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final customers = _filtered;
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.creamDark,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                _PanelIcon(icon: Icons.people_outline_rounded),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Customers',
+                    style: TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _searchCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Search customers',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: customers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No matching customers',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        headingRowHeight: 38,
+                        dataRowMinHeight: 44,
+                        dataRowMaxHeight: 54,
+                        columnSpacing: 22,
+                        columns: const [
+                          DataColumn(label: Text('Name')),
+                          DataColumn(label: Text('Phone')),
+                          DataColumn(numeric: true, label: Text('Bills')),
+                          DataColumn(numeric: true, label: Text('Total')),
+                        ],
+                        rows: customers
+                            .map(
+                              (customer) => DataRow(
+                                cells: [
+                                  DataCell(
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 150,
+                                      ),
+                                      child: Text(
+                                        customer.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(Text(_displayPhone(customer.phone))),
+                                  DataCell(Text('${customer.billCount}')),
+                                  DataCell(
+                                    Text(
+                                      '₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _displayPhone(String phone) {
+    if (phone.length == 12 && phone.startsWith('91')) {
+      return '+91 ${phone.substring(2, 7)} ${phone.substring(7)}';
+    }
+    return phone;
   }
 }

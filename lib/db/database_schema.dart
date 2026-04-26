@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 13,
+      version: 14,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -49,6 +49,7 @@ mixin DatabaseSchema {
     if (oldVersion < 11) await _upgradeProductPricingOverrides(db);
     if (oldVersion < 12) await _upgradeCustomerSchema(db);
     if (oldVersion < 13) await _upgradeProductPurchaseSchema(db);
+    if (oldVersion < 14) await _upgradeBillPaymentMethodSchema(db);
   }
 
   Future<void> _ensureSchema(Database db) async {
@@ -73,6 +74,7 @@ mixin DatabaseSchema {
     await _upgradePricingSchema(db);
     await _upgradeProductPricingOverrides(db);
     await _upgradeBillTables(db);
+    await _upgradeBillPaymentMethodSchema(db);
     await _seedOptionsFromProducts(db);
   }
 
@@ -216,6 +218,7 @@ mixin DatabaseSchema {
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
+        payment_method TEXT NOT NULL DEFAULT 'cash',
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
@@ -291,6 +294,12 @@ mixin DatabaseSchema {
       'is_paid',
       'is_paid INTEGER NOT NULL DEFAULT 1',
     );
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'payment_method',
+      "payment_method TEXT NOT NULL DEFAULT 'cash'",
+    );
     await executor.execute('''
       UPDATE bills
       SET subtotal_amount = total_amount + discount_amount
@@ -307,6 +316,17 @@ mixin DatabaseSchema {
       'customer_id INTEGER',
     );
     await _syncCustomersFromBills(executor);
+  }
+
+  Future<void> _upgradeBillPaymentMethodSchema(
+    DatabaseExecutor executor,
+  ) async {
+    await _addColumnIfMissing(
+      executor,
+      'bills',
+      'payment_method',
+      "payment_method TEXT NOT NULL DEFAULT 'cash'",
+    );
   }
 
   Future<void> _syncCustomersFromBills(DatabaseExecutor executor) async {
@@ -360,17 +380,21 @@ mixin DatabaseSchema {
       'customer_id': null,
     }, where: "customer_phone IS NULL OR TRIM(customer_phone) = ''");
 
-    if (ledgers.isEmpty) {
-      await executor.delete('customers');
-      return;
-    }
-
     final existingCustomers = await executor.query('customers');
     final customerIdsByPhone = {
       for (final customer in existingCustomers)
         customer['phone'] as String: customer['id'] as int,
     };
     final now = DateTime.now().toIso8601String();
+
+    await executor.update('customers', {
+      'total_purchase_amount': 0,
+      'bill_count': 0,
+      'last_purchase_at': null,
+      'updated_at': now,
+    });
+
+    if (ledgers.isEmpty) return;
 
     for (final ledger in ledgers.values) {
       final existingId = customerIdsByPhone[ledger.phone];
@@ -404,14 +428,6 @@ mixin DatabaseSchema {
         );
       }
     }
-
-    final activePhones = ledgers.keys.toList();
-    await executor.delete(
-      'customers',
-      where:
-          'phone NOT IN (${List.filled(activePhones.length, '?').join(', ')})',
-      whereArgs: activePhones,
-    );
   }
 
   Future<void> _upgradeUnitSchema(DatabaseExecutor executor) async {
