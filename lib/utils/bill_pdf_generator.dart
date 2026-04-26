@@ -128,9 +128,9 @@ class BillPdfGenerator {
     final headers = [
       '#',
       'Item',
-      'Qty',
       'Rate',
-      if (gstRegistered) 'Taxable',
+      'Qty',
+      if (gstRegistered) 'Net Amount',
       if (gstRegistered) 'GST',
       'Amount',
     ];
@@ -145,8 +145,8 @@ class BillPdfGenerator {
       return [
         '$index',
         item.productName,
-        item.quantityLabel,
         _money(item.sellingPriceSnapshot),
+        item.quantityLabel,
         if (gstRegistered) _money(taxable),
         if (gstRegistered) _money(gst),
         _money(item.subtotal),
@@ -199,7 +199,7 @@ class BillPdfGenerator {
         width: 240,
         child: pw.Column(
           children: [
-            if (gstRegistered) _totalRow('Taxable value', taxableTotal),
+            if (gstRegistered) _totalRow('Net Amount', taxableTotal),
             if (gstRegistered) _totalRow('GST total', gstTotal),
             _totalRow('Subtotal', bill.subtotalAmount),
             if (bill.discountAmount > 0)
@@ -288,7 +288,10 @@ class BillPdfGenerator {
   }
 
   static String _billTitle(Bill bill) {
-    return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}';
+    if (bill.billNumber.startsWith('SHOP-LOCAL-')) {
+      return 'Bill #${bill.id ?? ''}';
+    }
+    return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id ?? ''}';
   }
 
   static String _money(double value) {
