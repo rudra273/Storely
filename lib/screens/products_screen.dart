@@ -989,57 +989,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         ),
                       ],
                       const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-                        decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              useDirectPrice
-                                  ? Icons.edit_note_rounded
-                                  : Icons.auto_graph_rounded,
-                              color: useDirectPrice
-                                  ? AppColors.amber
-                                  : AppColors.navy,
-                              size: 22,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Direct Price',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    useDirectPrice
-                                        ? 'Use imported MRP as selling price'
-                                        : 'Recalculate selling price from formula',
-                                    style: const TextStyle(
-                                      color: AppColors.textMuted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Switch.adaptive(
-                              value: useDirectPrice,
-                              activeThumbColor: AppColors.navy,
-                              onChanged: (value) async {
-                                setSheet(() => useDirectPrice = value);
-                                await refreshDuplicateFlag(setSheet);
-                              },
-                            ),
-                          ],
-                        ),
+                      _DirectPriceControl(
+                        directPrice: useDirectPrice,
+                        onChanged: (value) async {
+                          setSheet(() => useDirectPrice = value);
+                          await refreshDuplicateFlag(setSheet);
+                        },
                       ),
                       const SizedBox(height: 12),
                       // Preview
@@ -2981,46 +2936,114 @@ class _DirectPriceControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: AppColors.cream,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(
-            directPrice ? Icons.edit_note_rounded : Icons.auto_graph_rounded,
-            size: 20,
-            color: directPrice ? AppColors.amber : AppColors.navy,
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Direct Price',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  directPrice
-                      ? 'Manual selling price adjusts margin'
-                      : 'Formula uses GST, overhead and margin',
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+            child: _PriceModeSegment(
+              icon: Icons.auto_graph_rounded,
+              title: 'Formula',
+              subtitle: 'GST + margin',
+              selected: !directPrice,
+              onTap: () {
+                if (directPrice) onChanged(false);
+              },
             ),
           ),
-          Switch.adaptive(
-            value: directPrice,
-            activeThumbColor: AppColors.navy,
-            onChanged: onChanged,
+          const SizedBox(width: 6),
+          Expanded(
+            child: _PriceModeSegment(
+              icon: Icons.edit_note_rounded,
+              title: 'Direct',
+              subtitle: 'Manual price',
+              selected: directPrice,
+              onTap: () {
+                if (!directPrice) onChanged(true);
+              },
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PriceModeSegment extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PriceModeSegment({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? Colors.white : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 58),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: selected
+                ? Border.all(color: AppColors.navy.withValues(alpha: 0.18))
+                : null,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 19,
+                color: selected ? AppColors.navy : AppColors.textMuted,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? AppColors.navy : AppColors.textDark,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
