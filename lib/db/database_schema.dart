@@ -45,6 +45,7 @@ mixin DatabaseSchema {
       'category_options',
       'units',
       'unit_options',
+      'cloud_sync_state',
       'app_settings',
       'shops',
     ]) {
@@ -60,6 +61,7 @@ mixin DatabaseSchema {
     await _createCustomerTables(executor);
     await _createBillTables(executor);
     await _createStockMovementTables(executor);
+    await _createCloudSyncTables(executor);
     await _seedPresetUnits(executor);
   }
 
@@ -398,6 +400,16 @@ mixin DatabaseSchema {
     await executor.execute('''
       CREATE INDEX IF NOT EXISTS idx_stock_movements_import_batch
       ON stock_movements(import_batch_key)
+    ''');
+  }
+
+  Future<void> _createCloudSyncTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS cloud_sync_state(
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT NOT NULL
+      )
     ''');
   }
 

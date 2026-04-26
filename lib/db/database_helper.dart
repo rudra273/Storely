@@ -14,12 +14,18 @@ part 'database_schema.dart';
 part 'database_settings.dart';
 part 'database_products.dart';
 part 'database_bills.dart';
+part 'database_sync.dart';
 
 const _uuid = Uuid();
 const _defaultShopId = 'local-shop';
 
 class DatabaseHelper
-    with DatabaseSchema, DatabaseSettings, DatabaseProducts, DatabaseBills {
+    with
+        DatabaseSchema,
+        DatabaseSettings,
+        DatabaseProducts,
+        DatabaseBills,
+        DatabaseSync {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 

@@ -60,6 +60,9 @@ dependencies:
   xml: ^6.6.1
   url_launcher: ^6.3.2
   uuid: ^4.5.1
+  supabase_flutter: ^2.12.4
+  shared_preferences: ^2.5.5
+  connectivity_plus: ^7.1.1
 
 dev_dependencies:
   flutter_test:
