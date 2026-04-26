@@ -524,7 +524,7 @@ class _UnpaidBillItem extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  'Bill #${bill.id} • ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''} pending',
+                  '${bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}'} • ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''} pending',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
               ],

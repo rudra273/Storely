@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/shop_profile.dart';
 import 'scan_screen.dart';
 
 class BillsScreen extends StatefulWidget {
@@ -48,7 +49,7 @@ class _BillsScreenState extends State<BillsScreen> {
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.delete_outline, color: AppColors.error, size: 32),
         title: const Text('Delete Bill'),
-        content: Text('Delete bill #${bill.id}?'),
+        content: Text('Delete ${_billDisplayId(bill)}?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -87,7 +88,10 @@ class _BillsScreenState extends State<BillsScreen> {
     if (phone == null) return;
 
     final uri = Uri.https('wa.me', '/$phone', {
-      'text': _buildBillMessage(bill),
+      'text': _buildBillMessage(
+        bill,
+        await DatabaseHelper.instance.getShopProfile(),
+      ),
     });
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
@@ -104,13 +108,17 @@ class _BillsScreenState extends State<BillsScreen> {
     return phone;
   }
 
-  String _buildBillMessage(Bill bill) {
+  String _buildBillMessage(Bill bill, ShopProfile? shop) {
     final buffer = StringBuffer()
-      ..writeln('Storely Bill #${bill.id}')
+      ..writeln(shop?.name ?? 'Storely')
+      ..writeln(_billDisplayId(bill))
       ..writeln('Customer: ${bill.customerName}')
       ..writeln(
         'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}',
-      )
+      );
+    if (shop?.gstin != null) buffer.writeln('GSTIN: ${shop!.gstin}');
+    if (shop?.address != null) buffer.writeln(shop!.address);
+    buffer
       ..writeln('')
       ..writeln('Items:');
     for (final item in bill.items) {
@@ -335,7 +343,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Bill #${bill.id} • $dateStr',
+                          '${_billDisplayId(bill)} • $dateStr',
                           style: TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 12,
@@ -609,7 +617,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Bill #${bill.id} Profit',
+                '${_billDisplayId(bill)} Profit',
                 style: const TextStyle(
                   color: AppColors.navy,
                   fontSize: 20,
@@ -779,6 +787,10 @@ class _MethodChip extends StatelessWidget {
 
 String _paymentMethodLabel(String method) {
   return method == 'online' ? 'Online' : 'Cash';
+}
+
+String _billDisplayId(Bill bill) {
+  return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}';
 }
 
 class _AmountRow extends StatelessWidget {

@@ -4,6 +4,8 @@ import '../main.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
+import '../models/shop_profile.dart';
+import '../models/supplier.dart';
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -19,8 +21,10 @@ class StoreScreen extends StatefulWidget {
 
 class _StoreScreenState extends State<StoreScreen> {
   String? _shopName;
+  ShopProfile? _shopProfile;
   List<String> _categories = [];
   List<String> _suppliers = [];
+  List<SupplierProfile> _supplierProfiles = [];
   List<String> _units = [];
   List<Customer> _customers = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
@@ -43,9 +47,13 @@ class _StoreScreenState extends State<StoreScreen> {
 
   Future<void> _loadStoreData() async {
     final db = DatabaseHelper.instance;
-    final shopName = await db.getShopName();
+    final shopProfile = await db.getShopProfile();
+    final shopName = shopProfile?.name;
     final categories = await db.getCategories();
-    final suppliers = await db.getSuppliers();
+    final supplierProfiles = await db.getSupplierProfiles();
+    final suppliers = supplierProfiles
+        .map((supplier) => supplier.name)
+        .toList();
     final units = await db.getUnits();
     final customers = await db.getAllCustomers();
     final pricingSettings = await db.getGlobalPricingSettings();
@@ -53,8 +61,10 @@ class _StoreScreenState extends State<StoreScreen> {
     if (!mounted) return;
     setState(() {
       _shopName = shopName;
+      _shopProfile = shopProfile;
       _categories = categories;
       _suppliers = suppliers;
+      _supplierProfiles = supplierProfiles;
       _units = units;
       _customers = customers;
       _pricingSettings = pricingSettings;
@@ -63,17 +73,25 @@ class _StoreScreenState extends State<StoreScreen> {
     });
   }
 
-  Future<void> _editShopName() async {
-    final value = await showDialog<String>(
+  Future<void> _editShopProfile() async {
+    final value = await showModalBottomSheet<ShopProfile>(
       context: context,
-      builder: (_) => _NameDialog(
-        title: _shopName == null ? 'Add Shop Name' : 'Update Shop Name',
-        label: 'Shop Name',
-        initialValue: _shopName,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ShopProfileSheet(
+        profile:
+            _shopProfile ??
+            ShopProfile(
+              name: _shopName ?? '',
+              gstRegistered: _pricingSettings.gstRegistered,
+            ),
       ),
     );
     if (value == null) return;
-    await _runStoreAction(() => DatabaseHelper.instance.saveShopName(value));
+    await _runStoreAction(() async {
+      await DatabaseHelper.instance.saveShopProfile(value);
+      await DatabaseHelper.instance.refreshAllProductSellingPrices();
+    });
   }
 
   Future<void> _addCategory() async {
@@ -112,29 +130,35 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _addSupplier() async {
-    final value = await showDialog<String>(
+    final value = await showModalBottomSheet<SupplierProfile>(
       context: context,
-      builder: (_) =>
-          const _NameDialog(title: 'Add Supplier', label: 'Supplier Name'),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _SupplierProfileSheet(),
     );
     if (value == null) return;
     await _runStoreAction(
-      () => DatabaseHelper.instance.addSupplierOption(value),
+      () => DatabaseHelper.instance.saveSupplierProfile(value),
     );
   }
 
   Future<void> _editSupplier(String currentName) async {
-    final value = await showDialog<String>(
+    final current =
+        await DatabaseHelper.instance.getSupplierProfile(currentName) ??
+        SupplierProfile(name: currentName);
+    if (!mounted) return;
+    final value = await showModalBottomSheet<SupplierProfile>(
       context: context,
-      builder: (_) => _NameDialog(
-        title: 'Update Supplier',
-        label: 'Supplier Name',
-        initialValue: currentName,
-      ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SupplierProfileSheet(supplier: current),
     );
     if (value == null) return;
     await _runStoreAction(
-      () => DatabaseHelper.instance.updateSupplierOption(currentName, value),
+      () => DatabaseHelper.instance.saveSupplierProfile(
+        value,
+        oldName: currentName,
+      ),
     );
   }
 
@@ -183,11 +207,39 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showCustomerTable() async {
+    var customers = await DatabaseHelper.instance.getAllCustomers();
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _CustomerTableSheet(customers: _customers),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Future<void> refreshSheet() async {
+            customers = await DatabaseHelper.instance.getAllCustomers();
+            if (ctx.mounted) setSheet(() {});
+          }
+
+          Future<void> saveCustomer(Customer? current) async {
+            final result = await showModalBottomSheet<Customer>(
+              context: ctx,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => _CustomerProfileSheet(customer: current),
+            );
+            if (result == null) return;
+            await DatabaseHelper.instance.saveCustomerProfile(result);
+            await refreshSheet();
+            await _loadStoreData();
+          }
+
+          return _CustomerTableSheet(
+            customers: customers,
+            onAdd: () => saveCustomer(null),
+            onEdit: saveCustomer,
+          );
+        },
+      ),
     );
   }
 
@@ -237,15 +289,36 @@ class _StoreScreenState extends State<StoreScreen> {
     });
   }
 
-  Future<void> _showSupplierManager() {
-    return _showOptionManager(
-      title: 'Suppliers',
-      emptyText: 'No suppliers yet',
-      icon: Icons.local_shipping_outlined,
-      loadOptions: DatabaseHelper.instance.getSuppliers,
-      onAdd: _addSupplier,
-      onEdit: _editSupplier,
-      onDelete: _deleteSupplier,
+  Future<void> _showSupplierManager() async {
+    var suppliers = await DatabaseHelper.instance.getSupplierProfiles();
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Future<void> refreshSheet() async {
+            suppliers = await DatabaseHelper.instance.getSupplierProfiles();
+            if (ctx.mounted) setSheet(() {});
+          }
+
+          Future<void> runAndRefresh(Future<void> Function() action) async {
+            await action();
+            await refreshSheet();
+          }
+
+          return _SupplierManagerSheet(
+            suppliers: suppliers,
+            onAdd: () => runAndRefresh(_addSupplier),
+            onEdit: (supplier) =>
+                runAndRefresh(() => _editSupplier(supplier.name)),
+            onDelete: (supplier) =>
+                runAndRefresh(() => _deleteSupplier(supplier.name)),
+          );
+        },
+      ),
     );
   }
 
@@ -416,7 +489,11 @@ class _StoreScreenState extends State<StoreScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                 children: [
-                  _ShopPanel(shopName: _shopName, onEdit: _editShopName),
+                  _ShopPanel(
+                    profile: _shopProfile,
+                    gstRegistered: _pricingSettings.gstRegistered,
+                    onEdit: _editShopProfile,
+                  ),
                   const SizedBox(height: 10),
                   _StoreActionRow(
                     title: 'Categories',
@@ -427,7 +504,8 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: 10),
                   _StoreActionRow(
                     title: 'Suppliers',
-                    subtitle: '${_suppliers.length} saved',
+                    subtitle:
+                        '${_suppliers.length} saved${_supplierProfiles.any((supplier) => supplier.phone != null || supplier.email != null || supplier.gstin != null) ? ' • profiles enabled' : ''}',
                     icon: Icons.local_shipping_outlined,
                     onTap: _showSupplierManager,
                   ),
@@ -435,7 +513,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   _StoreActionRow(
                     title: 'Pricing Defaults',
                     subtitle:
-                        '${_pricingSettings.gstRegistered ? 'GST registered' : 'GST not registered'} • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
+                        'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
                     icon: Icons.calculate_outlined,
                     onTap: _showGlobalPricingSettings,
                   ),
@@ -505,14 +583,30 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
+String? _cleanOptional(String value) {
+  final trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 class _ShopPanel extends StatelessWidget {
-  final String? shopName;
+  final ShopProfile? profile;
+  final bool gstRegistered;
   final VoidCallback onEdit;
 
-  const _ShopPanel({required this.shopName, required this.onEdit});
+  const _ShopPanel({
+    required this.profile,
+    required this.gstRegistered,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final details = [
+      if (profile?.phone != null) profile!.phone!,
+      if (profile?.email != null) profile!.email!,
+      if (profile?.gstin != null) 'GSTIN ${profile!.gstin}',
+      gstRegistered ? 'GST registered' : 'GST not registered',
+    ];
     return _StorePanel(
       child: Row(
         children: [
@@ -528,7 +622,7 @@ class _ShopPanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  shopName ?? 'No shop name',
+                  profile?.name ?? 'No shop name',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -537,13 +631,25 @@ class _ShopPanel extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    details.join(' • '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           IconButton.filledTonal(
             onPressed: onEdit,
             icon: const Icon(Icons.edit_rounded),
-            tooltip: 'Edit shop name',
+            tooltip: 'Edit shop profile',
           ),
         ],
       ),
@@ -664,6 +770,165 @@ class _OptionRow extends StatelessWidget {
   }
 }
 
+class _SupplierManagerSheet extends StatelessWidget {
+  final List<SupplierProfile> suppliers;
+  final Future<void> Function() onAdd;
+  final Future<void> Function(SupplierProfile supplier) onEdit;
+  final Future<void> Function(SupplierProfile supplier) onDelete;
+
+  const _SupplierManagerSheet({
+    required this.suppliers,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.creamDark,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const _PanelIcon(icon: Icons.local_shipping_outlined),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Suppliers',
+                    style: TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton.filledTonal(
+                  onPressed: onAdd,
+                  icon: const Icon(Icons.add_rounded),
+                  tooltip: 'Add supplier',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: suppliers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No suppliers yet',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: suppliers.length,
+                      itemBuilder: (_, index) {
+                        final supplier = suppliers[index];
+                        return _SupplierProfileRow(
+                          supplier: supplier,
+                          onEdit: () => onEdit(supplier),
+                          onDelete: () => onDelete(supplier),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupplierProfileRow extends StatelessWidget {
+  final SupplierProfile supplier;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _SupplierProfileRow({
+    required this.supplier,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final details = [
+      if (supplier.phone != null) supplier.phone!,
+      if (supplier.email != null) supplier.email!,
+      if (supplier.gstin != null) 'GSTIN ${supplier.gstin}',
+      if (supplier.address != null) supplier.address!,
+    ];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  supplier.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    details.join(' • '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            tooltip: 'Edit',
+          ),
+          IconButton(
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline, size: 20),
+            color: AppColors.error,
+            tooltip: 'Delete',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StorePanel extends StatelessWidget {
   final Widget child;
 
@@ -715,7 +980,6 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
   late final TextEditingController _gstCtrl;
   late final TextEditingController _overheadCtrl;
   late final TextEditingController _marginCtrl;
-  late bool _gstRegistered;
   late List<String> _units;
 
   @override
@@ -730,7 +994,6 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
     _marginCtrl = TextEditingController(
       text: widget.settings.defaultProfitMarginPercent.toStringAsFixed(2),
     );
-    _gstRegistered = widget.settings.gstRegistered;
     _units = List.of(widget.units);
   }
 
@@ -766,7 +1029,7 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
         defaultGstPercent: double.tryParse(_gstCtrl.text) ?? 0,
         defaultOverheadCost: double.tryParse(_overheadCtrl.text) ?? 0,
         defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
-        gstRegistered: _gstRegistered,
+        gstRegistered: widget.settings.gstRegistered,
         showPurchasePriceGlobally: widget.settings.showPurchasePriceGlobally,
       ),
     );
@@ -786,18 +1049,6 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
           _MoneyField(
             controller: _marginCtrl,
             label: 'Default Profit Margin %',
-          ),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Shop is GST registered'),
-            subtitle: Text(
-              _gstRegistered
-                  ? 'GST is added on selling price'
-                  : 'Purchase GST is included in cost',
-            ),
-            value: _gstRegistered,
-            activeThumbColor: AppColors.navy,
-            onChanged: (value) => setState(() => _gstRegistered = value),
           ),
           const SizedBox(height: 8),
           Row(
@@ -993,6 +1244,312 @@ class _SettingsSheetFrame extends StatelessWidget {
   }
 }
 
+class _ShopProfileSheet extends StatefulWidget {
+  final ShopProfile profile;
+
+  const _ShopProfileSheet({required this.profile});
+
+  @override
+  State<_ShopProfileSheet> createState() => _ShopProfileSheetState();
+}
+
+class _ShopProfileSheetState extends State<_ShopProfileSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
+  late final TextEditingController _emailCtrl;
+  late final TextEditingController _gstinCtrl;
+  late final TextEditingController _addressCtrl;
+  late bool _gstRegistered;
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    _nameCtrl = TextEditingController(text: profile.name);
+    _phoneCtrl = TextEditingController(text: profile.phone ?? '');
+    _emailCtrl = TextEditingController(text: profile.email ?? '');
+    _gstinCtrl = TextEditingController(text: profile.gstin ?? '');
+    _addressCtrl = TextEditingController(text: profile.address ?? '');
+    _gstRegistered = profile.gstRegistered;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _gstinCtrl.dispose();
+    _addressCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final current = widget.profile;
+    Navigator.pop(
+      context,
+      ShopProfile(
+        id: current.id,
+        uuid: current.uuid,
+        name: _nameCtrl.text.trim(),
+        phone: _cleanOptional(_phoneCtrl.text),
+        email: _cleanOptional(_emailCtrl.text),
+        gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
+        address: _cleanOptional(_addressCtrl.text),
+        gstRegistered: _gstRegistered,
+        createdAt: current.createdAt,
+        updatedAt: current.updatedAt,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsSheetFrame(
+      title: 'Shop Profile',
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _nameCtrl,
+              autofocus: widget.profile.name.isEmpty,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Shop Name *',
+                prefixIcon: Icon(Icons.storefront_outlined, size: 18),
+              ),
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? 'Required' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone',
+                prefixIcon: Icon(Icons.phone_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined, size: 18),
+              ),
+              validator: (value) {
+                final email = value?.trim() ?? '';
+                if (email.isEmpty) return null;
+                return email.contains('@') ? null : 'Invalid email';
+              },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _gstinCtrl,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'GSTIN',
+                prefixIcon: Icon(Icons.receipt_long_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _addressCtrl,
+              minLines: 2,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Address',
+                prefixIcon: Icon(Icons.location_on_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Shop is GST registered'),
+              subtitle: Text(
+                _gstRegistered
+                    ? 'GST is added on selling price'
+                    : 'Purchase GST is included in cost',
+              ),
+              value: _gstRegistered,
+              activeThumbColor: AppColors.navy,
+              onChanged: (value) => setState(() => _gstRegistered = value),
+            ),
+            const SizedBox(height: 14),
+            FilledButton(
+              onPressed: _submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.navy,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Save Shop'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupplierProfileSheet extends StatefulWidget {
+  final SupplierProfile? supplier;
+
+  const _SupplierProfileSheet({this.supplier});
+
+  @override
+  State<_SupplierProfileSheet> createState() => _SupplierProfileSheetState();
+}
+
+class _SupplierProfileSheetState extends State<_SupplierProfileSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
+  late final TextEditingController _emailCtrl;
+  late final TextEditingController _gstinCtrl;
+  late final TextEditingController _addressCtrl;
+  late final TextEditingController _notesCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final supplier = widget.supplier;
+    _nameCtrl = TextEditingController(text: supplier?.name ?? '');
+    _phoneCtrl = TextEditingController(text: supplier?.phone ?? '');
+    _emailCtrl = TextEditingController(text: supplier?.email ?? '');
+    _gstinCtrl = TextEditingController(text: supplier?.gstin ?? '');
+    _addressCtrl = TextEditingController(text: supplier?.address ?? '');
+    _notesCtrl = TextEditingController(text: supplier?.notes ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _gstinCtrl.dispose();
+    _addressCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final current = widget.supplier;
+    Navigator.pop(
+      context,
+      SupplierProfile(
+        id: current?.id,
+        uuid: current?.uuid,
+        shopId: current?.shopId ?? 'local-shop',
+        name: _nameCtrl.text.trim(),
+        phone: _cleanOptional(_phoneCtrl.text),
+        email: _cleanOptional(_emailCtrl.text),
+        gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
+        address: _cleanOptional(_addressCtrl.text),
+        notes: _cleanOptional(_notesCtrl.text),
+        deviceId: current?.deviceId,
+        createdAt: current?.createdAt,
+        updatedAt: current?.updatedAt,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.supplier != null;
+    return _SettingsSheetFrame(
+      title: isEditing ? 'Edit Supplier' : 'Add Supplier',
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _nameCtrl,
+              autofocus: !isEditing,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Supplier Name *',
+                prefixIcon: Icon(Icons.local_shipping_outlined, size: 18),
+              ),
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? 'Required' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone',
+                prefixIcon: Icon(Icons.phone_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined, size: 18),
+              ),
+              validator: (value) {
+                final email = value?.trim() ?? '';
+                if (email.isEmpty) return null;
+                return email.contains('@') ? null : 'Invalid email';
+              },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _gstinCtrl,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'GSTIN',
+                prefixIcon: Icon(Icons.receipt_long_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _addressCtrl,
+              minLines: 2,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Address',
+                prefixIcon: Icon(Icons.location_on_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _notesCtrl,
+              minLines: 2,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Notes',
+                prefixIcon: Icon(Icons.notes_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.navy,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text(isEditing ? 'Update Supplier' : 'Add Supplier'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MoneyField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -1161,8 +1718,14 @@ class _NumberDialogState extends State<_NumberDialog> {
 
 class _CustomerTableSheet extends StatefulWidget {
   final List<Customer> customers;
+  final Future<void> Function() onAdd;
+  final Future<void> Function(Customer customer) onEdit;
 
-  const _CustomerTableSheet({required this.customers});
+  const _CustomerTableSheet({
+    required this.customers,
+    required this.onAdd,
+    required this.onEdit,
+  });
 
   @override
   State<_CustomerTableSheet> createState() => _CustomerTableSheetState();
@@ -1183,7 +1746,9 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
     final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
     return widget.customers.where((customer) {
       return customer.name.toLowerCase().contains(query) ||
-          customer.phone.contains(digits.isEmpty ? query : digits);
+          customer.phone.contains(digits.isEmpty ? query : digits) ||
+          (customer.email?.toLowerCase().contains(query) ?? false) ||
+          (customer.address?.toLowerCase().contains(query) ?? false);
     }).toList();
   }
 
@@ -1214,11 +1779,11 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            const Row(
+            Row(
               children: [
-                _PanelIcon(icon: Icons.people_outline_rounded),
-                SizedBox(width: 12),
-                Expanded(
+                const _PanelIcon(icon: Icons.people_outline_rounded),
+                const SizedBox(width: 12),
+                const Expanded(
                   child: Text(
                     'Customers',
                     style: TextStyle(
@@ -1227,6 +1792,11 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                ),
+                IconButton.filledTonal(
+                  onPressed: widget.onAdd,
+                  icon: const Icon(Icons.add_rounded),
+                  tooltip: 'Add customer',
                 ),
               ],
             ),
@@ -1258,8 +1828,10 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
                         columns: const [
                           DataColumn(label: Text('Name')),
                           DataColumn(label: Text('Phone')),
+                          DataColumn(label: Text('Email')),
                           DataColumn(numeric: true, label: Text('Bills')),
                           DataColumn(numeric: true, label: Text('Total')),
+                          DataColumn(label: Text('')),
                         ],
                         rows: customers
                             .map(
@@ -1278,6 +1850,7 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
                                     ),
                                   ),
                                   DataCell(Text(_displayPhone(customer.phone))),
+                                  DataCell(Text(customer.email ?? '-')),
                                   DataCell(Text('${customer.billCount}')),
                                   DataCell(
                                     Text(
@@ -1285,6 +1858,16 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w800,
                                       ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    IconButton(
+                                      onPressed: () => widget.onEdit(customer),
+                                      icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 19,
+                                      ),
+                                      tooltip: 'Edit customer',
                                     ),
                                   ),
                                 ],
@@ -1305,5 +1888,149 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
       return '+91 ${phone.substring(2, 7)} ${phone.substring(7)}';
     }
     return phone;
+  }
+}
+
+class _CustomerProfileSheet extends StatefulWidget {
+  final Customer? customer;
+
+  const _CustomerProfileSheet({this.customer});
+
+  @override
+  State<_CustomerProfileSheet> createState() => _CustomerProfileSheetState();
+}
+
+class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
+  late final TextEditingController _emailCtrl;
+  late final TextEditingController _addressCtrl;
+  late final TextEditingController _notesCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final customer = widget.customer;
+    _nameCtrl = TextEditingController(text: customer?.name ?? '');
+    _phoneCtrl = TextEditingController(text: customer?.phone ?? '');
+    _emailCtrl = TextEditingController(text: customer?.email ?? '');
+    _addressCtrl = TextEditingController(text: customer?.address ?? '');
+    _notesCtrl = TextEditingController(text: customer?.notes ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _addressCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final current = widget.customer;
+    Navigator.pop(
+      context,
+      Customer(
+        id: current?.id,
+        uuid: current?.uuid ?? '',
+        shopId: current?.shopId ?? 'local-shop',
+        name: _nameCtrl.text.trim(),
+        phone: _phoneCtrl.text.trim(),
+        email: _cleanOptional(_emailCtrl.text),
+        address: _cleanOptional(_addressCtrl.text),
+        notes: _cleanOptional(_notesCtrl.text),
+        totalPurchaseAmount: current?.totalPurchaseAmount ?? 0,
+        billCount: current?.billCount ?? 0,
+        lastPurchaseAt: current?.lastPurchaseAt,
+        deviceId: current?.deviceId,
+        createdAt: current?.createdAt ?? DateTime.now(),
+        updatedAt: current?.updatedAt ?? DateTime.now(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.customer != null;
+    return _SettingsSheetFrame(
+      title: isEditing ? 'Edit Customer' : 'Add Customer',
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _nameCtrl,
+              autofocus: !isEditing,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Customer Name *',
+                prefixIcon: Icon(Icons.person_outline_rounded, size: 18),
+              ),
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? 'Required' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone',
+                prefixIcon: Icon(Icons.phone_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined, size: 18),
+              ),
+              validator: (value) {
+                final email = value?.trim() ?? '';
+                if (email.isEmpty) return null;
+                return email.contains('@') ? null : 'Invalid email';
+              },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _addressCtrl,
+              minLines: 2,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Address',
+                prefixIcon: Icon(Icons.location_on_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _notesCtrl,
+              minLines: 2,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Notes',
+                prefixIcon: Icon(Icons.notes_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.navy,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text(isEditing ? 'Update Customer' : 'Add Customer'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

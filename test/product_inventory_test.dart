@@ -163,5 +163,10 @@ Future<void> _deleteStorelyDb() async {
 
 Future<List<Map<String, Object?>>> _purchaseRows() async {
   final database = await DatabaseHelper.instance.database;
-  return database.query('product_purchase_entries', orderBy: 'id ASC');
+  return database.query(
+    'stock_movements',
+    where: 'movement_type = ? AND deleted_at IS NULL',
+    whereArgs: ['purchase'],
+    orderBy: 'id ASC',
+  );
 }

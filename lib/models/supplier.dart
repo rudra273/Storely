@@ -1,53 +1,52 @@
-class Customer {
+class SupplierProfile {
   final int? id;
   final String uuid;
   final String shopId;
   final String name;
-  final String phone;
+  final String? phone;
   final String? email;
+  final String? gstin;
   final String? address;
   final String? notes;
-  final double totalPurchaseAmount;
-  final int billCount;
-  final DateTime? lastPurchaseAt;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
 
-  const Customer({
+  SupplierProfile({
     this.id,
-    this.uuid = '',
+    String? uuid,
     this.shopId = 'local-shop',
     required this.name,
-    required this.phone,
-    this.email,
-    this.address,
-    this.notes,
-    required this.totalPurchaseAmount,
-    required this.billCount,
-    this.lastPurchaseAt,
+    String? phone,
+    String? email,
+    String? gstin,
+    String? address,
+    String? notes,
     this.deviceId,
-    required this.createdAt,
-    required this.updatedAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     this.deletedAt,
-  });
+  }) : uuid = uuid ?? '',
+       phone = _cleanOptional(phone),
+       email = _cleanOptional(email),
+       gstin = _cleanOptional(gstin),
+       address = _cleanOptional(address),
+       notes = _cleanOptional(notes),
+       createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
-  factory Customer.fromMap(Map<String, dynamic> map) {
-    return Customer(
+  factory SupplierProfile.fromMap(Map<String, dynamic> map) {
+    return SupplierProfile(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
       shopId: map['shop_id'] as String? ?? 'local-shop',
       name: map['name'] as String,
-      phone: map['phone'] as String? ?? '',
+      phone: map['phone'] as String?,
       email: map['email'] as String?,
+      gstin: map['gstin'] as String?,
       address: map['address'] as String?,
       notes: map['notes'] as String?,
-      totalPurchaseAmount: (map['total_purchase_amount'] as num).toDouble(),
-      billCount: map['bill_count'] as int,
-      lastPurchaseAt: map['last_purchase_at'] == null
-          ? null
-          : DateTime.parse(map['last_purchase_at'] as String),
       deviceId: map['device_id'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt:
@@ -64,55 +63,48 @@ class Customer {
     'uuid': uuid,
     'shop_id': shopId,
     'name': name,
-    'phone': phone.trim().isEmpty ? null : phone,
-    'email': _cleanOptional(email),
-    'address': _cleanOptional(address),
-    'notes': _cleanOptional(notes),
-    'total_purchase_amount': totalPurchaseAmount,
-    'bill_count': billCount,
-    'last_purchase_at': lastPurchaseAt?.toIso8601String(),
+    'phone': phone,
+    'email': email,
+    'gstin': gstin,
+    'address': address,
+    'notes': notes,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
     'deleted_at': deletedAt?.toIso8601String(),
   };
 
-  Customer copyWith({
+  SupplierProfile copyWith({
     int? id,
     String? uuid,
     String? shopId,
     String? name,
     String? phone,
     String? email,
+    String? gstin,
     String? address,
     String? notes,
-    double? totalPurchaseAmount,
-    int? billCount,
-    DateTime? lastPurchaseAt,
     String? deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
+    bool clearPhone = false,
     bool clearEmail = false,
+    bool clearGstin = false,
     bool clearAddress = false,
     bool clearNotes = false,
-    bool clearLastPurchaseAt = false,
     bool clearDeletedAt = false,
   }) {
-    return Customer(
+    return SupplierProfile(
       id: id ?? this.id,
       uuid: uuid ?? this.uuid,
       shopId: shopId ?? this.shopId,
       name: name ?? this.name,
-      phone: phone ?? this.phone,
+      phone: clearPhone ? null : phone ?? this.phone,
       email: clearEmail ? null : email ?? this.email,
+      gstin: clearGstin ? null : gstin ?? this.gstin,
       address: clearAddress ? null : address ?? this.address,
       notes: clearNotes ? null : notes ?? this.notes,
-      totalPurchaseAmount: totalPurchaseAmount ?? this.totalPurchaseAmount,
-      billCount: billCount ?? this.billCount,
-      lastPurchaseAt: clearLastPurchaseAt
-          ? null
-          : lastPurchaseAt ?? this.lastPurchaseAt,
       deviceId: deviceId ?? this.deviceId,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

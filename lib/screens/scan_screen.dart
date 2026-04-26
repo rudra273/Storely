@@ -34,7 +34,8 @@ class _ScanScreenState extends State<ScanScreen> {
   String? _lastScanned;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
-  int get _itemCount => _items.fold(0, (sum, i) => sum + i.quantity);
+  int get _itemCount =>
+      _items.fold<double>(0, (sum, i) => sum + i.quantity).round();
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _ScanScreenState extends State<ScanScreen> {
           : _allProducts.where((product) {
               return product.name.toLowerCase().contains(query) ||
                   (product.itemCode?.toLowerCase().contains(query) ?? false) ||
+                  (product.barcode?.toLowerCase().contains(query) ?? false) ||
                   (product.category?.toLowerCase().contains(query) ?? false) ||
                   (product.supplier?.toLowerCase().contains(query) ?? false);
             }).toList();
@@ -93,11 +95,13 @@ class _ScanScreenState extends State<ScanScreen> {
       final name = data['name'] as String? ?? 'Unknown';
       final id = (data['id'] as num?)?.toInt();
       final code = data['code'] as String?;
+      final barcode = data['barcode'] as String?;
       final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
       final unit = _cleanOptionalText(data['unit'] as String?);
       final product = await DatabaseHelper.instance.findProductForBilling(
         id: id,
         itemCode: code,
+        barcode: barcode,
         name: name,
       );
       final scannedItem = product == null
@@ -110,6 +114,21 @@ class _ScanScreenState extends State<ScanScreen> {
       HapticFeedback.mediumImpact();
       _allowNextScanAfter(_scanCooldown);
     } catch (_) {
+      final product = await DatabaseHelper.instance.findProductForBilling(
+        barcode: raw,
+        itemCode: raw,
+        name: raw,
+      );
+      if (product != null) {
+        final item = await DatabaseHelper.instance.buildBillItemForProduct(
+          product,
+        );
+        if (!mounted) return;
+        _addBillItem(item);
+        HapticFeedback.mediumImpact();
+        _allowNextScanAfter(_scanCooldown);
+        return;
+      }
       if (!mounted) return;
       setState(() => _showAddedStatus = false);
       ScaffoldMessenger.of(context)
@@ -181,7 +200,10 @@ class _ScanScreenState extends State<ScanScreen> {
     final itemCopies = _items
         .map(
           (item) => BillItem(
+            uuid: item.uuid,
+            shopId: item.shopId,
             productId: item.productId,
+            productUuid: item.productUuid,
             productName: item.productName,
             mrp: item.mrp,
             unit: item.unit,
@@ -486,6 +508,11 @@ class _ScanScreenState extends State<ScanScreen> {
     required int itemCount,
     required bool isPaid,
   }) async {
+    final bills = await DatabaseHelper.instance.getAllBills();
+    final bill = bills.where((bill) => bill.id == billId).firstOrNull;
+    final billLabel = bill?.billNumber.isNotEmpty == true
+        ? bill!.billNumber
+        : 'Bill #$billId';
     if (mounted) {
       await showDialog(
         context: context,
@@ -509,7 +536,7 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                '$customerName\nBill #$billId • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+                '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
                 style: TextStyle(color: AppColors.textMuted),
                 textAlign: TextAlign.center,
               ),
@@ -537,8 +564,8 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  void _setQty(int index, int quantity) {
-    if (quantity < 1) return;
+  void _setQty(int index, double quantity) {
+    if (quantity <= 0) return;
     setState(() => _items[index].quantity = quantity);
   }
 
@@ -956,11 +983,18 @@ class _ScanScreenState extends State<ScanScreen> {
                                 key: ValueKey(
                                   '${item.productName}-${item.mrp}-${item.quantity}',
                                 ),
-                                initialValue: '${item.quantity}',
+                                initialValue: _formatQuantityInput(
+                                  item.quantity,
+                                ),
                                 textAlign: TextAlign.center,
-                                keyboardType: TextInputType.number,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'^\d*\.?\d{0,3}'),
+                                  ),
                                 ],
                                 decoration: const InputDecoration(
                                   isDense: true,
@@ -976,7 +1010,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                   fontSize: 16,
                                 ),
                                 onChanged: (value) {
-                                  final quantity = int.tryParse(value);
+                                  final quantity = double.tryParse(value);
                                   if (quantity != null) {
                                     _setQty(i, quantity);
                                   }
@@ -1078,6 +1112,7 @@ class _ManualProductTile extends StatelessWidget {
                       [
                         product.priceLabel,
                         if (product.itemCode != null) product.itemCode!,
+                        if (product.barcode != null) product.barcode!,
                       ].join(' • '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1225,6 +1260,14 @@ class _BillSummaryRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatQuantityInput(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
 }
 
 class _BillDraft {

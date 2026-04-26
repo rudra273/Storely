@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
@@ -134,6 +135,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             query.isEmpty ||
             p.name.toLowerCase().contains(query) ||
             (p.itemCode?.toLowerCase().contains(query) ?? false) ||
+            (p.barcode?.toLowerCase().contains(query) ?? false) ||
             (p.category?.toLowerCase().contains(query) ?? false) ||
             (p.unit?.toLowerCase().contains(query) ?? false) ||
             (p.supplier?.toLowerCase().contains(query) ?? false) ||
@@ -244,7 +246,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return _allProducts
         .where((product) {
           return product.name.toLowerCase().contains(q) ||
-              (product.itemCode?.toLowerCase().contains(q) ?? false);
+              (product.itemCode?.toLowerCase().contains(q) ?? false) ||
+              (product.barcode?.toLowerCase().contains(q) ?? false);
         })
         .take(5)
         .toList();
@@ -257,6 +260,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
         if (product.itemCode != null && product.itemCode!.trim().isNotEmpty)
           product.itemCode!.trim().toLowerCase(): product,
     };
+    final byBarcode = {
+      for (final product in _allProducts)
+        if (product.barcode != null && product.barcode!.trim().isNotEmpty)
+          product.barcode!.trim().toLowerCase(): product,
+    };
     final byName = {
       for (final product in _allProducts)
         product.name.trim().toLowerCase(): product,
@@ -265,6 +273,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
     for (final product in products) {
       final code = product.itemCode?.trim().toLowerCase();
       if (code != null && code.isNotEmpty && byCode.containsKey(code)) {
+        count++;
+        continue;
+      }
+      final barcode = product.barcode?.trim().toLowerCase();
+      if (barcode != null &&
+          barcode.isNotEmpty &&
+          byBarcode.containsKey(barcode)) {
         count++;
         continue;
       }
@@ -476,23 +491,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
     required bool changeSupplier,
     String? supplier,
   }) {
-    return Product(
-      id: product.id,
-      itemCode: product.itemCode,
-      name: product.name,
-      category: changeCategory ? category : product.category,
-      mrp: product.mrp,
-      purchasePrice: product.purchasePrice,
-      gstPercent: product.gstPercent,
-      overheadCost: product.overheadCost,
-      profitMarginPercent: product.profitMarginPercent,
-      directPriceToggle: product.directPriceToggle,
-      manualPrice: product.manualPrice,
-      quantity: product.quantity,
-      unit: product.unit,
-      supplier: changeSupplier ? supplier : product.supplier,
-      source: product.source,
-      createdAt: product.createdAt,
+    return product.copyWith(
+      clearCategory: changeCategory && category == null,
+      category: changeCategory ? category : null,
+      clearSupplier: changeSupplier && supplier == null,
+      supplier: changeSupplier ? supplier : null,
     );
   }
 
@@ -585,23 +588,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Product _productWithImportPricing(Product product, bool useDirectPrice) {
-    return Product(
-      id: product.id,
-      itemCode: product.itemCode,
-      name: product.name,
-      category: product.category,
-      mrp: product.mrp,
-      purchasePrice: product.purchasePrice,
-      gstPercent: product.gstPercent,
-      overheadCost: product.overheadCost,
-      profitMarginPercent: product.profitMarginPercent,
+    return product.copyWith(
+      sellingPrice: product.mrp,
       directPriceToggle: useDirectPrice,
+      clearManualPrice: !useDirectPrice,
       manualPrice: useDirectPrice ? product.mrp : null,
-      quantity: product.quantity,
-      unit: product.unit,
-      supplier: product.supplier,
       source: ProductSource.imported,
-      createdAt: product.createdAt,
     );
   }
 
@@ -615,6 +607,82 @@ class _ProductsScreenState extends State<ProductsScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => QrSheetScreen(products: _allProducts)),
+    );
+  }
+
+  Future<void> _showStockHistory(Product product) async {
+    final id = product.id;
+    if (id == null) return;
+    final movements = await DatabaseHelper.instance.getStockMovementsForProduct(
+      id,
+    );
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _StockMovementHistorySheet(product: product, movements: movements),
+    );
+  }
+
+  Future<String?> _scanBarcodeValue(BuildContext sheetContext) {
+    var scanned = false;
+    return showModalBottomSheet<String>(
+      context: sheetContext,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Container(
+          height: MediaQuery.sizeOf(ctx).height * 0.62,
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Scan Barcode',
+                        style: TextStyle(
+                          color: AppColors.navy,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: MobileScanner(
+                  onDetect: (capture) {
+                    if (scanned) return;
+                    final raw = capture.barcodes
+                        .map((barcode) => barcode.rawValue)
+                        .whereType<String>()
+                        .firstOrNull;
+                    if (raw == null || raw.trim().isEmpty) return;
+                    scanned = true;
+                    Navigator.pop(ctx, raw.trim());
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -997,84 +1065,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         },
                       ),
                       const SizedBox(height: 12),
-                      // Preview
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        constraints: const BoxConstraints(maxHeight: 120),
-                        child: ListView(
-                          shrinkWrap: true,
-                          children: importProducts()
-                              .take(5)
-                              .map(
-                                (p) => Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 3,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      if (p.itemCode != null) ...[
-                                        Text(
-                                          p.itemCode!,
-                                          style: TextStyle(
-                                            color: AppColors.textMuted,
-                                            fontSize: 12,
-                                            fontFamily: 'monospace',
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                      ],
-                                      Expanded(
-                                        child: Text(
-                                          p.name,
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Text(
-                                        p.directPriceToggle
-                                            ? 'direct'
-                                            : 'formula',
-                                        style: TextStyle(
-                                          color: p.directPriceToggle
-                                              ? AppColors.amber
-                                              : AppColors.success,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        p.priceLabel,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                        ),
-                      ),
-                      if (products.length > 5)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            '...and ${products.length - 5} more',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
+                      _ImportPreviewTable(products: importProducts()),
                       const SizedBox(height: 20),
                       if (existingMatchCount > 0) ...[
                         SizedBox(
@@ -1175,6 +1166,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (!mounted) return;
 
     final nameCtrl = TextEditingController(text: product?.name ?? '');
+    final productCodeCtrl = TextEditingController(
+      text: product?.productCode ?? '',
+    );
+    final barcodeCtrl = TextEditingController(text: product?.barcode ?? '');
     final purchaseCtrl = TextEditingController(
       text: product != null ? product.purchasePrice.toStringAsFixed(2) : '',
     );
@@ -1254,7 +1249,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       if (syncingTotals) return;
       syncingTotals = true;
       final price = double.tryParse(purchaseCtrl.text);
-      final quantity = int.tryParse(qtyCtrl.text);
+      final quantity = double.tryParse(qtyCtrl.text);
       if (price != null && price > 0 && quantity != null && quantity >= 0) {
         setFieldText(totalCtrl, (price * quantity).toStringAsFixed(2));
       } else if (purchaseCtrl.text.isEmpty || qtyCtrl.text.isEmpty) {
@@ -1269,7 +1264,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       final price = double.tryParse(purchaseCtrl.text);
       final total = double.tryParse(totalCtrl.text);
       if (price != null && price > 0 && total != null && total >= 0) {
-        setFieldText(qtyCtrl, (total / price).round().toString());
+        setFieldText(qtyCtrl, _formatQuantityInput(total / price));
       } else if (totalCtrl.text.isEmpty) {
         setFieldText(qtyCtrl, '');
       }
@@ -1311,9 +1306,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
       final manualPrice = double.tryParse(manualPriceCtrl.text);
       final draft = Product(
         id: product?.id,
-        itemCode: product?.itemCode,
+        uuid: product?.uuid,
+        shopId: product?.shopId ?? 'local-shop',
+        productCode: productCodeCtrl.text,
+        barcode: barcodeCtrl.text,
         name: nameCtrl.text.trim().isEmpty ? 'Product' : nameCtrl.text.trim(),
+        categoryId: product?.categoryId,
         category: selectedCategory,
+        supplierId: product?.supplierId,
+        unitId: product?.unitId,
         mrp: manualPrice ?? product?.mrp ?? purchasePrice,
         purchasePrice: purchasePrice,
         gstPercent: gstCustom ? double.tryParse(gstCtrl.text) : null,
@@ -1325,7 +1326,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             : null,
         directPriceToggle: directPrice,
         manualPrice: manualPrice,
-        quantity: int.tryParse(qtyCtrl.text) ?? 0,
+        quantity: double.tryParse(qtyCtrl.text) ?? 0,
         unit: selectedUnit,
         supplier: selectedSupplier,
         source: product?.source ?? ProductSource.mobile,
@@ -1437,9 +1438,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 final existing = selectedExistingProduct!;
                 final updated = Product(
                   id: existing.id,
-                  itemCode: existing.itemCode,
+                  uuid: existing.uuid,
+                  shopId: existing.shopId,
+                  productCode: _optionalControllerText(productCodeCtrl),
+                  barcode: _optionalControllerText(barcodeCtrl),
                   name: existing.name,
+                  categoryId: existing.categoryId,
                   category: selectedCategory,
+                  supplierId: existing.supplierId,
+                  supplier: selectedSupplier,
+                  unitId: existing.unitId,
+                  unit: selectedUnit,
                   mrp: preview.sellingPrice,
                   purchasePrice: double.parse(purchaseCtrl.text),
                   gstPercent: gstCustom ? double.tryParse(gstCtrl.text) : null,
@@ -1454,14 +1463,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       ? double.tryParse(manualPriceCtrl.text)
                       : null,
                   quantity: existing.quantity,
-                  unit: selectedUnit,
-                  supplier: selectedSupplier,
                   source: existing.source,
                   createdAt: existing.createdAt,
+                  updatedAt: existing.updatedAt,
                 );
                 await DatabaseHelper.instance.restockProduct(
                   updated,
-                  quantityAdded: int.parse(qtyCtrl.text),
+                  quantityAdded: double.parse(qtyCtrl.text),
                   purchaseDate: purchaseDate,
                   source: ProductSource.mobile,
                 );
@@ -1472,9 +1480,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
               }
               final p = Product(
                 id: product?.id,
-                itemCode: product?.itemCode,
+                uuid: product?.uuid,
+                shopId: product?.shopId ?? 'local-shop',
+                productCode: _optionalControllerText(productCodeCtrl),
+                barcode: _optionalControllerText(barcodeCtrl),
                 name: name,
+                categoryId: product?.categoryId,
                 category: selectedCategory,
+                supplierId: product?.supplierId,
+                supplier: selectedSupplier,
+                unitId: product?.unitId,
+                unit: selectedUnit,
                 mrp: preview.sellingPrice,
                 purchasePrice: double.parse(purchaseCtrl.text),
                 gstPercent: gstCustom ? double.tryParse(gstCtrl.text) : null,
@@ -1488,11 +1504,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 manualPrice: directPrice
                     ? double.tryParse(manualPriceCtrl.text)
                     : null,
-                quantity: int.parse(qtyCtrl.text),
-                unit: selectedUnit,
-                supplier: selectedSupplier,
+                quantity: double.parse(qtyCtrl.text),
                 source: product?.source ?? ProductSource.mobile,
                 createdAt: product?.createdAt,
+                updatedAt: product?.updatedAt,
               );
               if (isEditing) {
                 await DatabaseHelper.instance.updateProduct(p);
@@ -1558,7 +1573,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                     : _SourcePill(
                                         label: isEditing
                                             ? product.sourceLabel
-                                            : 'Mobile · code auto-created',
+                                            : 'Mobile product',
                                         imported: product?.isImported ?? false,
                                       ),
                                 child: Column(
@@ -1608,6 +1623,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             nameError = null;
                                             setFieldText(nameCtrl, match.name);
                                             setFieldText(
+                                              productCodeCtrl,
+                                              match.productCode ?? '',
+                                            );
+                                            setFieldText(
+                                              barcodeCtrl,
+                                              match.barcode ?? '',
+                                            );
+                                            setFieldText(
                                               purchaseCtrl,
                                               match.purchasePrice
                                                   .toStringAsFixed(2),
@@ -1653,6 +1676,73 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         },
                                       ),
                                     ],
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: productCodeCtrl,
+                                            textCapitalization:
+                                                TextCapitalization.characters,
+                                            decoration: const InputDecoration(
+                                              labelText: 'Product Code',
+                                              prefixIcon: Icon(
+                                                Icons.tag_outlined,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              setSheet(() {});
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: barcodeCtrl,
+                                            keyboardType: TextInputType.text,
+                                            decoration: InputDecoration(
+                                              labelText: 'Barcode',
+                                              prefixIcon: const Icon(
+                                                Icons.qr_code_scanner_rounded,
+                                                size: 18,
+                                              ),
+                                              suffixIcon: IconButton(
+                                                tooltip: 'Scan barcode',
+                                                icon: const Icon(
+                                                  Icons.center_focus_strong,
+                                                ),
+                                                onPressed: () async {
+                                                  final value =
+                                                      await _scanBarcodeValue(
+                                                        ctx,
+                                                      );
+                                                  if (value == null ||
+                                                      !ctx.mounted) {
+                                                    return;
+                                                  }
+                                                  markEdited();
+                                                  setFieldText(
+                                                    barcodeCtrl,
+                                                    value,
+                                                  );
+                                                  setSheet(() {});
+                                                },
+                                              ),
+                                            ),
+                                            onTapOutside: (_) =>
+                                                FocusScope.of(ctx).unfocus(),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              setSheet(() {});
+                                            },
+                                            onFieldSubmitted: (_) =>
+                                                FocusScope.of(ctx).unfocus(),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                     const SizedBox(height: 10),
                                     _OptionDropdown(
                                       label: 'Category',
@@ -2016,10 +2106,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         Expanded(
                                           child: TextFormField(
                                             controller: qtyCtrl,
-                                            keyboardType: TextInputType.number,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
                                             inputFormatters: [
-                                              FilteringTextInputFormatter
-                                                  .digitsOnly,
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,3}'),
+                                              ),
                                             ],
                                             decoration: const InputDecoration(
                                               labelText: 'Quantity *',
@@ -2036,7 +2130,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                               if (v == null || v.isEmpty) {
                                                 return 'Required';
                                               }
-                                              final n = int.tryParse(v);
+                                              final n = double.tryParse(v);
                                               return (n == null || n < 0)
                                                   ? 'Invalid'
                                                   : null;
@@ -2108,6 +2202,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
         purchaseCtrl.removeListener(updateTotalFromPriceAndQty);
         qtyCtrl.removeListener(updateTotalFromPriceAndQty);
         nameCtrl.dispose();
+        productCodeCtrl.dispose();
+        barcodeCtrl.dispose();
         purchaseCtrl.dispose();
         manualPriceCtrl.dispose();
         gstCtrl.dispose();
@@ -2444,6 +2540,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         ? _toggleProductSelection(_filtered[i])
                         : _showAddEditSheet(product: _filtered[i]),
                     onLongPress: () => _toggleProductSelection(_filtered[i]),
+                    onHistory: () => _showStockHistory(_filtered[i]),
                     onDelete: () => _deleteProduct(_filtered[i]),
                   ),
                 ),
@@ -2464,6 +2561,19 @@ String _formatShortDate(DateTime date) {
 
 String _formatFullDate(DateTime date) {
   return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+}
+
+String _formatQuantityInput(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
+}
+
+String? _optionalControllerText(TextEditingController controller) {
+  final text = controller.text.trim();
+  return text.isEmpty ? null : text;
 }
 
 class _AddOptionDialog extends StatefulWidget {
@@ -3823,7 +3933,13 @@ class _ProductSuggestionList extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
             subtitle: Text(
-              '${product.quantityLabel} • $lastDate • ₹${product.purchasePrice.toStringAsFixed(2)}',
+              [
+                product.quantityLabel,
+                lastDate,
+                if (product.productCode != null) 'Code ${product.productCode}',
+                if (product.barcode != null) 'Barcode ${product.barcode}',
+                '₹${product.purchasePrice.toStringAsFixed(2)}',
+              ].join(' • '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -3836,6 +3952,289 @@ class _ProductSuggestionList extends StatelessWidget {
   }
 }
 
+class _ImportPreviewTable extends StatelessWidget {
+  final List<Product> products;
+
+  const _ImportPreviewTable({required this.products});
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = products.take(12).toList();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 260),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: 720,
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(10),
+            children: [
+              const _ImportPreviewRow(
+                name: 'Product',
+                code: 'Code',
+                barcode: 'Barcode',
+                quantity: 'Qty',
+                purchase: 'Purchase',
+                selling: 'Selling',
+                header: true,
+              ),
+              const Divider(height: 12),
+              ...visible.map(
+                (product) => _ImportPreviewRow(
+                  name: product.name,
+                  code: product.productCode ?? '-',
+                  barcode: product.barcode ?? '-',
+                  quantity: product.quantityLabel,
+                  purchase: '₹${product.purchasePrice.toStringAsFixed(2)}',
+                  selling: product.priceLabel,
+                ),
+              ),
+              if (products.length > visible.length)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '${products.length - visible.length} more rows',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ImportPreviewRow extends StatelessWidget {
+  final String name;
+  final String code;
+  final String barcode;
+  final String quantity;
+  final String purchase;
+  final String selling;
+  final bool header;
+
+  const _ImportPreviewRow({
+    required this.name,
+    required this.code,
+    required this.barcode,
+    required this.quantity,
+    required this.purchase,
+    required this.selling,
+    this.header = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: header ? AppColors.navy : AppColors.textDark,
+      fontSize: 12,
+      fontWeight: header ? FontWeight.w900 : FontWeight.w600,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          _cell(name, 180, style),
+          _cell(code, 90, style),
+          _cell(barcode, 120, style),
+          _cell(quantity, 72, style, alignEnd: true),
+          _cell(purchase, 88, style, alignEnd: true),
+          _cell(selling, 110, style, alignEnd: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _cell(
+    String text,
+    double width,
+    TextStyle style, {
+    bool alignEnd = false,
+  }) {
+    return SizedBox(
+      width: width,
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: alignEnd ? TextAlign.end : TextAlign.start,
+        style: style,
+      ),
+    );
+  }
+}
+
+class _StockMovementHistorySheet extends StatelessWidget {
+  final Product product;
+  final List<StockMovement> movements;
+
+  const _StockMovementHistorySheet({
+    required this.product,
+    required this.movements,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.creamDark,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Stock History',
+              style: const TextStyle(
+                color: AppColors.navy,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${product.name} • Current ${product.quantityLabel}',
+              style: const TextStyle(color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: movements.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No stock movement yet',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: movements.length,
+                      separatorBuilder: (_, _) =>
+                          const Divider(height: 1, color: AppColors.creamDark),
+                      itemBuilder: (_, index) =>
+                          _StockMovementRow(movement: movements[index]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StockMovementRow extends StatelessWidget {
+  final StockMovement movement;
+
+  const _StockMovementRow({required this.movement});
+
+  @override
+  Widget build(BuildContext context) {
+    final positive = movement.quantityDelta >= 0;
+    final color = positive ? AppColors.success : AppColors.error;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              positive ? Icons.add_rounded : Icons.remove_rounded,
+              color: color,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _movementLabel(movement.movementType),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    _formatFullDate(movement.createdAt),
+                    if (movement.sourceType != null) movement.sourceType!,
+                    if (movement.unitCost != null)
+                      '₹${movement.unitCost!.toStringAsFixed(2)}',
+                  ].join(' • '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${positive ? '+' : ''}${_formatQuantityInput(movement.quantityDelta)}',
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _movementLabel(String type) {
+    switch (type) {
+      case StockMovementType.purchase:
+        return 'Purchase / Restock';
+      case StockMovementType.sale:
+        return 'Sale';
+      case StockMovementType.adjustment:
+        return 'Adjustment';
+      case StockMovementType.returnIn:
+        return 'Return';
+      case StockMovementType.voidSale:
+        return 'Bill void';
+      default:
+        return type;
+    }
+  }
+}
+
 // ── Product Card (Professional Design) ──
 class _ProductCard extends StatelessWidget {
   final Product product;
@@ -3845,6 +4244,7 @@ class _ProductCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final VoidCallback onHistory;
   final VoidCallback onDelete;
 
   const _ProductCard({
@@ -3855,6 +4255,7 @@ class _ProductCard extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
+    required this.onHistory,
     required this.onDelete,
   });
 
@@ -3933,13 +4334,23 @@ class _ProductCard extends StatelessWidget {
                     _stockBadge('LOW', AppColors.amber),
                   const SizedBox(width: 4),
                   if (!selectionMode)
-                    GestureDetector(
-                      onTap: onDelete,
-                      child: Icon(
-                        Icons.delete_outline,
-                        size: 18,
-                        color: AppColors.textMuted.withValues(alpha: 0.5),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: onHistory,
+                          icon: const Icon(Icons.history_rounded, size: 18),
+                          tooltip: 'Stock history',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          tooltip: 'Delete',
+                          color: AppColors.textMuted.withValues(alpha: 0.5),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
                     ),
                 ],
               ),
@@ -3954,6 +4365,25 @@ class _ProductCard extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (product.productCode != null || product.barcode != null) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    if (product.productCode != null)
+                      _InfoChip(
+                        icon: Icons.tag_outlined,
+                        label: product.productCode!,
+                      ),
+                    if (product.barcode != null)
+                      _InfoChip(
+                        icon: Icons.qr_code_scanner_rounded,
+                        label: product.barcode!,
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 10),
               if (purchaseSummary?.lastPurchaseDate != null) ...[
                 Row(
@@ -4079,6 +4509,44 @@ class _ProductCard extends StatelessWidget {
               color: color,
               fontSize: 11,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _InfoChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.textMuted),
+          const SizedBox(width: 4),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 150),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

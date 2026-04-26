@@ -117,10 +117,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               .map(
                                 (row) => _BarRow(
                                   label: row.label,
-                                  value: row.quantity.toDouble(),
-                                  max: topSelling.first.quantity.toDouble(),
-                                  valueLabel: '${row.quantity} ${row.unit}'
-                                      .trim(),
+                                  value: row.quantity,
+                                  max: topSelling.first.quantity,
+                                  valueLabel:
+                                      '${_formatQuantity(row.quantity)} ${row.unit}'
+                                          .trim(),
                                   color: AppColors.navy,
                                 ),
                               )
@@ -140,19 +141,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       byProduct[key] = _TopSellingRow(
         label: item.productName,
         unit: item.unitLabel,
-        quantity: (existing?.quantity ?? 0) + item.quantity,
+        quantity: (existing?.quantity ?? 0.0) + item.quantity,
       );
     }
     final rows = byProduct.values.toList()
       ..sort((a, b) => b.quantity.compareTo(a.quantity));
     return rows.take(8).toList();
   }
+
+  String _formatQuantity(double value) {
+    if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+    return value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+  }
 }
 
 class _TopSellingRow {
   final String label;
   final String unit;
-  final int quantity;
+  final double quantity;
 
   const _TopSellingRow({
     required this.label,

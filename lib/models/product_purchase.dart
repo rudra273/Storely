@@ -1,37 +1,73 @@
-class ProductPurchaseEntry {
-  final int? id;
-  final int productId;
-  final DateTime purchaseDate;
-  final int quantityAdded;
-  final double purchasePrice;
-  final String? supplier;
-  final String? importBatchKey;
-  final String source;
-  final DateTime createdAt;
+class StockMovementType {
+  static const purchase = 'purchase';
+  static const sale = 'sale';
+  static const adjustment = 'adjustment';
+  static const returnIn = 'return';
+  static const voidSale = 'void';
+}
 
-  const ProductPurchaseEntry({
+class StockMovement {
+  final int? id;
+  final String uuid;
+  final String shopId;
+  final int productId;
+  final String productUuid;
+  final String movementType;
+  final double quantityDelta;
+  final double? unitCost;
+  final String? sourceType;
+  final int? sourceId;
+  final String? sourceUuid;
+  final String? importBatchKey;
+  final String? notes;
+  final String? deviceId;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+
+  const StockMovement({
     this.id,
+    required this.uuid,
+    required this.shopId,
     required this.productId,
-    required this.purchaseDate,
-    required this.quantityAdded,
-    required this.purchasePrice,
-    this.supplier,
+    required this.productUuid,
+    required this.movementType,
+    required this.quantityDelta,
+    this.unitCost,
+    this.sourceType,
+    this.sourceId,
+    this.sourceUuid,
     this.importBatchKey,
-    required this.source,
+    this.notes,
+    this.deviceId,
     required this.createdAt,
+    required this.updatedAt,
+    this.deletedAt,
   });
 
-  factory ProductPurchaseEntry.fromMap(Map<String, dynamic> map) {
-    return ProductPurchaseEntry(
+  factory StockMovement.fromMap(Map<String, dynamic> map) {
+    final createdAt = DateTime.parse(map['created_at'] as String);
+    return StockMovement(
       id: map['id'] as int?,
+      uuid: map['uuid'] as String,
+      shopId: map['shop_id'] as String,
       productId: map['product_id'] as int,
-      purchaseDate: DateTime.parse(map['purchase_date'] as String),
-      quantityAdded: map['quantity_added'] as int,
-      purchasePrice: (map['purchase_price'] as num).toDouble(),
-      supplier: map['supplier'] as String?,
+      productUuid: map['product_uuid'] as String,
+      movementType: map['movement_type'] as String,
+      quantityDelta: (map['quantity_delta'] as num).toDouble(),
+      unitCost: (map['unit_cost'] as num?)?.toDouble(),
+      sourceType: map['source_type'] as String?,
+      sourceId: map['source_id'] as int?,
+      sourceUuid: map['source_uuid'] as String?,
       importBatchKey: map['import_batch_key'] as String?,
-      source: map['source'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      notes: map['notes'] as String?,
+      deviceId: map['device_id'] as String?,
+      createdAt: createdAt,
+      updatedAt:
+          DateTime.tryParse(map['updated_at']?.toString() ?? '') ?? createdAt,
+      deletedAt: map['deleted_at'] == null
+          ? null
+          : DateTime.tryParse(map['deleted_at'] as String),
     );
   }
 }
@@ -40,7 +76,7 @@ class ProductPurchaseSummary {
   final int productId;
   final DateTime? lastPurchaseDate;
   final double? lastPurchasePrice;
-  final int totalPurchased;
+  final double totalPurchased;
 
   const ProductPurchaseSummary({
     required this.productId,

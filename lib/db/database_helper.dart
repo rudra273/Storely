@@ -1,16 +1,22 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/bill.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/pricing.dart';
+import '../models/shop_profile.dart';
+import '../models/supplier.dart';
 
 part 'database_schema.dart';
 part 'database_settings.dart';
 part 'database_products.dart';
 part 'database_bills.dart';
+
+const _uuid = Uuid();
+const _defaultShopId = 'local-shop';
 
 class DatabaseHelper
     with DatabaseSchema, DatabaseSettings, DatabaseProducts, DatabaseBills {
@@ -39,6 +45,10 @@ String? _normaliseName(String? value) {
   return trimmed == null || trimmed.isEmpty ? null : trimmed;
 }
 
+String _newUuid() => _uuid.v4();
+
+String _nowIso() => DateTime.now().toIso8601String();
+
 bool _isPresetUnit(String value) {
   return Product.presetUnits.any(
     (unit) => unit.toLowerCase() == value.trim().toLowerCase(),
@@ -48,17 +58,4 @@ bool _isPresetUnit(String value) {
 String _dateOnly(DateTime value) {
   final local = DateTime(value.year, value.month, value.day);
   return local.toIso8601String().substring(0, 10);
-}
-
-Future<void> _addColumnIfMissing(
-  DatabaseExecutor executor,
-  String table,
-  String column,
-  String definition,
-) async {
-  final columns = await executor.rawQuery('PRAGMA table_info($table)');
-  final hasColumn = columns.any((row) => row['name'] == column);
-  if (!hasColumn) {
-    await executor.execute('ALTER TABLE $table ADD COLUMN $definition');
-  }
 }

@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 14,
+      version: 15,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -15,88 +15,67 @@ mixin DatabaseSchema {
   }
 
   Future<void> _createDB(Database db, int version) async {
-    await _createProductTable(db);
-    await _createSettingsTable(db);
-    await _createOptionTables(db);
-    await _createCustomerTables(db);
-    await _createBillTables(db);
-    await _createProductPurchaseTables(db);
+    await _createCleanSchema(db);
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) await _createBillTables(db);
-    if (oldVersion < 3) {
-      await _addColumnIfMissing(db, 'products', 'item_code', 'item_code TEXT');
-      await _addColumnIfMissing(db, 'products', 'category', 'category TEXT');
-      await _addColumnIfMissing(db, 'products', 'supplier', 'supplier TEXT');
+    if (oldVersion < 15) {
+      await _dropLegacySchema(db);
+      await _createCleanSchema(db);
+      return;
     }
-    if (oldVersion < 4) {
-      await _addColumnIfMissing(
-        db,
-        'products',
-        'source',
-        "source TEXT NOT NULL DEFAULT 'mobile'",
-      );
-      await _createOptionTables(db);
-      await _seedOptionsFromProducts(db);
-    }
-    if (oldVersion < 5) {
-      await _createSettingsTable(db);
-    }
-    if (oldVersion < 8) await _upgradeBillTables(db);
-    if (oldVersion < 9) await _upgradeUnitSchema(db);
-    if (oldVersion < 10) await _upgradePricingSchema(db);
-    if (oldVersion < 11) await _upgradeProductPricingOverrides(db);
-    if (oldVersion < 12) await _upgradeCustomerSchema(db);
-    if (oldVersion < 13) await _upgradeProductPurchaseSchema(db);
-    if (oldVersion < 14) await _upgradeBillPaymentMethodSchema(db);
+    await _ensureSchema(db);
   }
 
   Future<void> _ensureSchema(Database db) async {
-    await _createProductTable(db);
-    await _createSettingsTable(db);
-    await _addColumnIfMissing(db, 'products', 'item_code', 'item_code TEXT');
-    await _addColumnIfMissing(db, 'products', 'category', 'category TEXT');
-    await _addColumnIfMissing(db, 'products', 'supplier', 'supplier TEXT');
-    await _addColumnIfMissing(
-      db,
-      'products',
-      'source',
-      "source TEXT NOT NULL DEFAULT 'mobile'",
-    );
-    await _createOptionTables(db);
-    await _createCustomerTables(db);
-    await _createBillTables(db);
-    await _createProductPurchaseTables(db);
-    await _upgradeCustomerSchema(db);
-    await _upgradeProductPurchaseSchema(db);
-    await _upgradeUnitSchema(db);
-    await _upgradePricingSchema(db);
-    await _upgradeProductPricingOverrides(db);
-    await _upgradeBillTables(db);
-    await _upgradeBillPaymentMethodSchema(db);
-    await _seedOptionsFromProducts(db);
+    await _createCleanSchema(db);
   }
 
-  Future<void> _createProductTable(DatabaseExecutor executor) async {
+  Future<void> _dropLegacySchema(DatabaseExecutor executor) async {
+    for (final table in [
+      'bill_items',
+      'bills',
+      'stock_movements',
+      'product_purchase_entries',
+      'products',
+      'customers',
+      'suppliers',
+      'supplier_options',
+      'categories',
+      'category_options',
+      'units',
+      'unit_options',
+      'app_settings',
+      'shops',
+    ]) {
+      await executor.execute('DROP TABLE IF EXISTS $table');
+    }
+  }
+
+  Future<void> _createCleanSchema(DatabaseExecutor executor) async {
+    await _createShopTables(executor);
+    await _createSettingsTable(executor);
+    await _createReferenceTables(executor);
+    await _createProductTable(executor);
+    await _createCustomerTables(executor);
+    await _createBillTables(executor);
+    await _createStockMovementTables(executor);
+    await _seedPresetUnits(executor);
+  }
+
+  Future<void> _createShopTables(DatabaseExecutor executor) async {
     await executor.execute('''
-      CREATE TABLE IF NOT EXISTS products(
+      CREATE TABLE IF NOT EXISTS shops(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_code TEXT,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        category TEXT,
-        mrp REAL NOT NULL,
-        purchase_price REAL NOT NULL DEFAULT 0,
-        gst_percent REAL,
-        overhead_cost REAL,
-        profit_margin_percent REAL,
-        direct_price_toggle INTEGER NOT NULL DEFAULT 0,
-        manual_price REAL,
-        quantity INTEGER NOT NULL,
-        unit TEXT,
-        supplier TEXT,
-        source TEXT NOT NULL DEFAULT 'mobile',
-        created_at TEXT NOT NULL
+        uuid TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        gstin TEXT,
+        address TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
       )
     ''');
   }
@@ -104,40 +83,152 @@ mixin DatabaseSchema {
   Future<void> _createSettingsTable(DatabaseExecutor executor) async {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS app_settings(
-        key TEXT PRIMARY KEY,
+        key TEXT NOT NULL,
+        shop_id TEXT NOT NULL DEFAULT 'local-shop',
         value TEXT,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        PRIMARY KEY (shop_id, key)
       )
     ''');
   }
 
-  Future<void> _createOptionTables(DatabaseExecutor executor) async {
+  Future<void> _createReferenceTables(DatabaseExecutor executor) async {
     await executor.execute('''
-      CREATE TABLE IF NOT EXISTS category_options(
+      CREATE TABLE IF NOT EXISTS categories(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        name TEXT NOT NULL COLLATE NOCASE,
         gst_percent REAL,
         overhead_cost REAL,
         profit_margin_percent REAL,
         commission_percent REAL,
         direct_price_toggle INTEGER NOT NULL DEFAULT 0,
         manual_price REAL,
-        created_at TEXT NOT NULL
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
       )
     ''');
     await executor.execute('''
-      CREATE TABLE IF NOT EXISTS supplier_options(
+      CREATE TABLE IF NOT EXISTS units(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        created_at TEXT NOT NULL
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        name TEXT NOT NULL COLLATE NOCASE,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
       )
     ''');
     await executor.execute('''
-      CREATE TABLE IF NOT EXISTS unit_options(
+      CREATE TABLE IF NOT EXISTS suppliers(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        created_at TEXT NOT NULL
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        name TEXT NOT NULL COLLATE NOCASE,
+        phone TEXT,
+        email TEXT,
+        gstin TEXT,
+        address TEXT,
+        notes TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
       )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_uuid
+      ON categories(uuid)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_shop_name
+      ON categories(shop_id, name)
+      WHERE deleted_at IS NULL
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_categories_shop_updated
+      ON categories(shop_id, updated_at)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_units_uuid ON units(uuid)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_units_shop_name
+      ON units(shop_id, name)
+      WHERE deleted_at IS NULL
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_units_shop_updated
+      ON units(shop_id, updated_at)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_uuid ON suppliers(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_suppliers_shop_name
+      ON suppliers(shop_id, name)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_suppliers_shop_updated
+      ON suppliers(shop_id, updated_at)
+    ''');
+  }
+
+  Future<void> _createProductTable(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS products(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        product_code TEXT,
+        barcode TEXT,
+        name TEXT NOT NULL COLLATE NOCASE,
+        category_id INTEGER,
+        supplier_id INTEGER,
+        selling_price REAL NOT NULL DEFAULT 0,
+        purchase_price REAL NOT NULL DEFAULT 0,
+        gst_percent REAL,
+        overhead_cost REAL,
+        profit_margin_percent REAL,
+        direct_price_toggle INTEGER NOT NULL DEFAULT 0,
+        manual_price REAL,
+        quantity_cache REAL NOT NULL DEFAULT 0,
+        unit_id INTEGER,
+        source TEXT NOT NULL DEFAULT 'mobile',
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        FOREIGN KEY (category_id) REFERENCES categories(id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+        FOREIGN KEY (unit_id) REFERENCES units(id)
+      )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_uuid ON products(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_shop_updated
+      ON products(shop_id, updated_at)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_shop_product_code
+      ON products(shop_id, product_code)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_shop_barcode
+      ON products(shop_id, barcode)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id)
     ''');
   }
 
@@ -145,70 +236,45 @@ mixin DatabaseSchema {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS customers(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
         name TEXT NOT NULL DEFAULT 'Walk-in Customer',
-        phone TEXT NOT NULL UNIQUE,
+        phone TEXT,
+        email TEXT,
+        address TEXT,
+        notes TEXT,
         total_purchase_amount REAL NOT NULL DEFAULT 0,
         bill_count INTEGER NOT NULL DEFAULT 0,
         last_purchase_at TEXT,
+        device_id TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-  }
-
-  Future<void> _createProductPurchaseTables(DatabaseExecutor executor) async {
-    await executor.execute('''
-      CREATE TABLE IF NOT EXISTS product_purchase_entries(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER NOT NULL,
-        purchase_date TEXT NOT NULL,
-        quantity_added INTEGER NOT NULL,
-        purchase_price REAL NOT NULL,
-        supplier TEXT,
-        import_batch_key TEXT,
-        source TEXT NOT NULL DEFAULT 'manual',
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
       )
     ''');
     await executor.execute('''
-      CREATE INDEX IF NOT EXISTS idx_product_purchase_entries_product_date
-      ON product_purchase_entries(product_id, purchase_date)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_uuid ON customers(uuid)
     ''');
     await executor.execute('''
-      CREATE INDEX IF NOT EXISTS idx_product_purchase_entries_batch
-      ON product_purchase_entries(import_batch_key)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_shop_phone
+      ON customers(shop_id, phone)
+      WHERE phone IS NOT NULL AND TRIM(phone) != '' AND deleted_at IS NULL
     ''');
-  }
-
-  Future<void> _seedOptionsFromProducts(DatabaseExecutor executor) async {
-    final categories = await executor.rawQuery(
-      "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) != ''",
-    );
-    for (final row in categories) {
-      await _insertOption(executor, 'category_options', row['category']);
-    }
-
-    final suppliers = await executor.rawQuery(
-      "SELECT DISTINCT supplier FROM products WHERE supplier IS NOT NULL AND TRIM(supplier) != ''",
-    );
-    for (final row in suppliers) {
-      await _insertOption(executor, 'supplier_options', row['supplier']);
-    }
-
-    final units = await executor.rawQuery(
-      "SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ''",
-    );
-    for (final row in units) {
-      await _insertUnitOption(executor, row['unit']);
-    }
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_customers_shop_updated
+      ON customers(shop_id, updated_at)
+    ''');
   }
 
   Future<void> _createBillTables(DatabaseExecutor executor) async {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS bills(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        bill_number TEXT NOT NULL,
         customer_id INTEGER,
+        customer_uuid TEXT,
         customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer',
         customer_phone TEXT,
         subtotal_amount REAL NOT NULL DEFAULT 0,
@@ -219,18 +285,24 @@ mixin DatabaseSchema {
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
         payment_method TEXT NOT NULL DEFAULT 'cash',
+        device_id TEXT,
         created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
     ''');
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS bill_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
         bill_id INTEGER NOT NULL,
+        bill_uuid TEXT NOT NULL,
         product_id INTEGER,
+        product_uuid TEXT,
         product_name TEXT NOT NULL,
-        mrp REAL NOT NULL,
-        unit TEXT,
+        unit_name TEXT,
         purchase_price_snapshot REAL NOT NULL DEFAULT 0,
         selling_price_snapshot REAL NOT NULL DEFAULT 0,
         cost_snapshot REAL NOT NULL DEFAULT 0,
@@ -238,101 +310,115 @@ mixin DatabaseSchema {
         commission_snapshot REAL NOT NULL DEFAULT 0,
         gst_snapshot REAL NOT NULL DEFAULT 0,
         was_direct_price INTEGER NOT NULL DEFAULT 1,
-        quantity INTEGER NOT NULL,
+        quantity REAL NOT NULL DEFAULT 0,
         subtotal REAL NOT NULL,
-        FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id)
       )
     ''');
-  }
-
-  Future<void> _upgradeBillTables(DatabaseExecutor executor) async {
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'customer_id',
-      'customer_id INTEGER',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'customer_name',
-      "customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer'",
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'customer_phone',
-      'customer_phone TEXT',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'subtotal_amount',
-      'subtotal_amount REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'discount_percent',
-      'discount_percent REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'discount_amount',
-      'discount_amount REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'profit_commission_percent',
-      'profit_commission_percent REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'is_paid',
-      'is_paid INTEGER NOT NULL DEFAULT 1',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'payment_method',
-      "payment_method TEXT NOT NULL DEFAULT 'cash'",
-    );
     await executor.execute('''
-      UPDATE bills
-      SET subtotal_amount = total_amount + discount_amount
-      WHERE subtotal_amount = 0
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_uuid ON bills(uuid)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_shop_bill_number
+      ON bills(shop_id, bill_number)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bills_shop_created
+      ON bills(shop_id, created_at)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bills_shop_updated
+      ON bills(shop_id, updated_at)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bills_customer_id ON bills(customer_id)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bill_items_uuid
+      ON bill_items(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_items_bill_id
+      ON bill_items(bill_id)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_items_product_uuid
+      ON bill_items(product_uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_items_shop_updated
+      ON bill_items(shop_id, updated_at)
     ''');
   }
 
-  Future<void> _upgradeCustomerSchema(DatabaseExecutor executor) async {
-    await _createCustomerTables(executor);
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'customer_id',
-      'customer_id INTEGER',
-    );
-    await _syncCustomersFromBills(executor);
+  Future<void> _createStockMovementTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS stock_movements(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_uuid TEXT NOT NULL,
+        movement_type TEXT NOT NULL,
+        quantity_delta REAL NOT NULL,
+        unit_cost REAL,
+        source_type TEXT,
+        source_id INTEGER,
+        source_uuid TEXT,
+        import_batch_key TEXT,
+        notes TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_movements_uuid
+      ON stock_movements(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_product_created
+      ON stock_movements(product_id, created_at)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_source
+      ON stock_movements(source_type, source_id)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_shop_updated
+      ON stock_movements(shop_id, updated_at)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_import_batch
+      ON stock_movements(import_batch_key)
+    ''');
   }
 
-  Future<void> _upgradeBillPaymentMethodSchema(
-    DatabaseExecutor executor,
-  ) async {
-    await _addColumnIfMissing(
-      executor,
-      'bills',
-      'payment_method',
-      "payment_method TEXT NOT NULL DEFAULT 'cash'",
-    );
+  Future<void> _seedPresetUnits(DatabaseExecutor executor) async {
+    final now = _nowIso();
+    for (final unit in Product.presetUnits) {
+      await executor.insert('units', {
+        'uuid': _newUuid(),
+        'shop_id': _defaultShopId,
+        'name': unit,
+        'created_at': now,
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
   }
 
-  Future<void> _syncCustomersFromBills(DatabaseExecutor executor) async {
+  Future<void> syncCustomersFromBills(DatabaseExecutor executor) async {
     final bills = await executor.query(
       'bills',
-      where: "customer_phone IS NOT NULL AND TRIM(customer_phone) != ''",
+      where:
+          "deleted_at IS NULL AND customer_phone IS NOT NULL AND TRIM(customer_phone) != ''",
       orderBy: 'created_at ASC',
     );
     final ledgers = <String, _CustomerLedgerDraft>{};
@@ -371,21 +457,31 @@ mixin DatabaseSchema {
     for (final billId in invalidBillIds) {
       await executor.update(
         'bills',
-        {'customer_id': null},
+        {'customer_id': null, 'customer_uuid': null},
         where: 'id = ?',
         whereArgs: [billId],
       );
     }
-    await executor.update('bills', {
-      'customer_id': null,
-    }, where: "customer_phone IS NULL OR TRIM(customer_phone) = ''");
 
     final existingCustomers = await executor.query('customers');
     final customerIdsByPhone = {
       for (final customer in existingCustomers)
-        customer['phone'] as String: customer['id'] as int,
+        if (customer['phone'] != null)
+          customer['phone'] as String: customer['id'] as int,
     };
-    final now = DateTime.now().toIso8601String();
+    final customerUuidsByPhone = {
+      for (final customer in existingCustomers)
+        if (customer['phone'] != null)
+          customer['phone'] as String: customer['uuid'] as String,
+    };
+    final customerNamesByPhone = {
+      for (final customer in existingCustomers)
+        if (customer['phone'] != null)
+          customer['phone'] as String: _normaliseName(
+            customer['name']?.toString(),
+          ),
+    };
+    final now = _nowIso();
 
     await executor.update('customers', {
       'total_purchase_amount': 0,
@@ -394,12 +490,11 @@ mixin DatabaseSchema {
       'updated_at': now,
     });
 
-    if (ledgers.isEmpty) return;
-
     for (final ledger in ledgers.values) {
       final existingId = customerIdsByPhone[ledger.phone];
+      final existingName = customerNamesByPhone[ledger.phone];
       final data = {
-        'name': ledger.name,
+        'name': existingName ?? ledger.name,
         'phone': ledger.phone,
         'total_purchase_amount': ledger.totalPurchaseAmount,
         'bill_count': ledger.billCount,
@@ -409,7 +504,22 @@ mixin DatabaseSchema {
 
       final customerId =
           existingId ??
-          await executor.insert('customers', {...data, 'created_at': now});
+          await executor.insert('customers', {
+            ...data,
+            'uuid': _newUuid(),
+            'shop_id': _defaultShopId,
+            'created_at': now,
+          });
+      final customerUuid =
+          customerUuidsByPhone[ledger.phone] ??
+          (await executor.query(
+                'customers',
+                columns: ['uuid'],
+                where: 'id = ?',
+                whereArgs: [customerId],
+                limit: 1,
+              )).single['uuid']
+              as String;
       if (existingId != null) {
         await executor.update(
           'customers',
@@ -422,198 +532,11 @@ mixin DatabaseSchema {
       for (final billId in ledger.billIds) {
         await executor.update(
           'bills',
-          {'customer_id': customerId},
+          {'customer_id': customerId, 'customer_uuid': customerUuid},
           where: 'id = ?',
           whereArgs: [billId],
         );
       }
-    }
-  }
-
-  Future<void> _upgradeUnitSchema(DatabaseExecutor executor) async {
-    await _addColumnIfMissing(executor, 'products', 'unit', 'unit TEXT');
-    await _createOptionTables(executor);
-    await _addColumnIfMissing(executor, 'bill_items', 'unit', 'unit TEXT');
-    await _seedOptionsFromProducts(executor);
-  }
-
-  Future<void> _upgradePricingSchema(DatabaseExecutor executor) async {
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'purchase_price',
-      'purchase_price REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'direct_price_toggle',
-      'direct_price_toggle INTEGER NOT NULL DEFAULT 1',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'manual_price',
-      'manual_price REAL',
-    );
-    await executor.execute('''
-      UPDATE products
-      SET purchase_price = mrp
-      WHERE purchase_price = 0
-    ''');
-    await executor.execute('''
-      UPDATE products
-      SET manual_price = mrp
-      WHERE manual_price IS NULL
-    ''');
-
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'gst_percent',
-      'gst_percent REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'overhead_cost',
-      'overhead_cost REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'profit_margin_percent',
-      'profit_margin_percent REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'commission_percent',
-      'commission_percent REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'direct_price_toggle',
-      'direct_price_toggle INTEGER NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'category_options',
-      'manual_price',
-      'manual_price REAL',
-    );
-
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'product_id',
-      'product_id INTEGER',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'purchase_price_snapshot',
-      'purchase_price_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'selling_price_snapshot',
-      'selling_price_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'cost_snapshot',
-      'cost_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'profit_snapshot',
-      'profit_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'commission_snapshot',
-      'commission_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'gst_snapshot',
-      'gst_snapshot REAL NOT NULL DEFAULT 0',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'bill_items',
-      'was_direct_price',
-      'was_direct_price INTEGER NOT NULL DEFAULT 1',
-    );
-    await executor.execute('''
-      UPDATE bill_items
-      SET selling_price_snapshot = mrp
-      WHERE selling_price_snapshot = 0
-    ''');
-    await executor.execute('''
-      UPDATE bill_items
-      SET purchase_price_snapshot = mrp,
-          cost_snapshot = mrp
-      WHERE cost_snapshot = 0
-    ''');
-  }
-
-  Future<void> _upgradeProductPricingOverrides(
-    DatabaseExecutor executor,
-  ) async {
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'gst_percent',
-      'gst_percent REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'overhead_cost',
-      'overhead_cost REAL',
-    );
-    await _addColumnIfMissing(
-      executor,
-      'products',
-      'profit_margin_percent',
-      'profit_margin_percent REAL',
-    );
-  }
-
-  Future<void> _upgradeProductPurchaseSchema(DatabaseExecutor executor) async {
-    await _createProductPurchaseTables(executor);
-    final existingEntries = await executor.rawQuery(
-      'SELECT COUNT(*) AS c FROM product_purchase_entries',
-    );
-    final count = Sqflite.firstIntValue(existingEntries) ?? 0;
-    if (count > 0) return;
-
-    final products = await executor.query('products');
-    final now = DateTime.now().toIso8601String();
-    for (final product in products) {
-      final quantity = product['quantity'] as int? ?? 0;
-      if (quantity <= 0) continue;
-      final createdAt = product['created_at'] as String? ?? now;
-      await executor.insert('product_purchase_entries', {
-        'product_id': product['id'],
-        'purchase_date': createdAt.substring(0, 10),
-        'quantity_added': quantity,
-        'purchase_price':
-            (product['purchase_price'] as num?)?.toDouble() ??
-            (product['mrp'] as num?)?.toDouble() ??
-            0,
-        'supplier': product['supplier'],
-        'source': product['source'] ?? ProductSource.mobile,
-        'created_at': now,
-      });
     }
   }
 }

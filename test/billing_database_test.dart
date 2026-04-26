@@ -58,7 +58,7 @@ void main() {
             discountPercent: 10,
             discountAmount: item.subtotal * 0.10,
             totalAmount: item.subtotal * 0.90,
-            itemCount: item.quantity,
+            itemCount: item.quantity.round(),
             isPaid: false,
             paymentMethod: 'online',
           ),
@@ -252,7 +252,8 @@ void main() {
         where: 'bill_id = ?',
         whereArgs: [billId],
       );
-      expect(itemRows, isEmpty);
+      expect(itemRows, hasLength(2));
+      expect(itemRows.every((row) => row['deleted_at'] != null), isTrue);
     });
 
     test('deleting a customer bill reduces customer purchase total', () async {

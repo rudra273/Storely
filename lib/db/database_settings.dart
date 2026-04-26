@@ -12,12 +12,14 @@ mixin DatabaseSettings {
   Future<Database> get database;
 
   Future<String?> getShopName() async {
+    final profile = await getShopProfile();
+    if (profile != null) return profile.name;
     final db = await database;
     final rows = await db.query(
       'app_settings',
       columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_shopNameKey],
+      where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
+      whereArgs: [_defaultShopId, _shopNameKey],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -27,6 +29,24 @@ mixin DatabaseSettings {
   }
 
   Future<void> saveShopName(String name) async {
+    final current = await getShopProfile();
+    if (current != null) {
+      await saveShopProfile(
+        ShopProfile(
+          id: current.id,
+          uuid: current.uuid,
+          name: name,
+          phone: current.phone,
+          email: current.email,
+          gstin: current.gstin,
+          address: current.address,
+          gstRegistered: current.gstRegistered,
+          createdAt: current.createdAt,
+          updatedAt: current.updatedAt,
+        ),
+      );
+      return;
+    }
     final db = await database;
     final value = _normaliseName(name);
     if (value == null) {
@@ -34,9 +54,85 @@ mixin DatabaseSettings {
     }
     await db.insert('app_settings', {
       'key': _shopNameKey,
+      'shop_id': _defaultShopId,
       'value': value,
-      'updated_at': DateTime.now().toIso8601String(),
+      'updated_at': _nowIso(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<ShopProfile?> getShopProfile() async {
+    final db = await database;
+    final pricing = await getGlobalPricingSettings();
+    final rows = await db.query(
+      'shops',
+      where: 'deleted_at IS NULL AND uuid = ?',
+      whereArgs: [_defaultShopId],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      return ShopProfile.fromMap(
+        rows.single,
+        gstRegistered: pricing.gstRegistered,
+      );
+    }
+
+    final legacyName = await _getLegacyShopName(db);
+    if (legacyName == null) return null;
+    return ShopProfile(name: legacyName, gstRegistered: pricing.gstRegistered);
+  }
+
+  Future<void> saveShopProfile(ShopProfile profile) async {
+    final db = await database;
+    final name = _normaliseName(profile.name);
+    if (name == null) throw ArgumentError('Shop name is required');
+
+    await db.transaction((txn) async {
+      final now = _nowIso();
+      final existing = await txn.query(
+        'shops',
+        columns: ['id', 'uuid', 'created_at'],
+        where: 'uuid = ?',
+        whereArgs: [_defaultShopId],
+        limit: 1,
+      );
+      final map = profile.toMap()
+        ..remove('id')
+        ..['uuid'] = _defaultShopId
+        ..['name'] = name
+        ..['updated_at'] = now;
+      if (existing.isEmpty) {
+        map['created_at'] = profile.createdAt.toIso8601String();
+        await txn.insert('shops', map);
+      } else {
+        map['created_at'] = existing.single['created_at'];
+        await txn.update(
+          'shops',
+          map,
+          where: 'id = ?',
+          whereArgs: [existing.single['id']],
+        );
+      }
+      await _saveSetting(txn, _shopNameKey, name);
+      await _saveSetting(
+        txn,
+        _gstRegisteredKey,
+        profile.gstRegistered ? '1' : '0',
+      );
+    });
+  }
+
+  Future<String?> _getLegacyShopName(DatabaseExecutor executor) async {
+    final rows = await executor.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
+      whereArgs: [_defaultShopId, _shopNameKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final value = rows.first['value'] as String?;
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
   Future<int> getLowStockThreshold() async {
@@ -44,8 +140,8 @@ mixin DatabaseSettings {
     final rows = await db.query(
       'app_settings',
       columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [_lowStockThresholdKey],
+      where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
+      whereArgs: [_defaultShopId, _lowStockThresholdKey],
       limit: 1,
     );
     if (rows.isEmpty) return 5;
@@ -60,26 +156,24 @@ mixin DatabaseSettings {
     final db = await database;
     await db.insert('app_settings', {
       'key': _lowStockThresholdKey,
+      'shop_id': _defaultShopId,
       'value': value.toString(),
-      'updated_at': DateTime.now().toIso8601String(),
+      'updated_at': _nowIso(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<String>> getUnits() async {
     final db = await database;
-    final values = <String>{...Product.presetUnits};
-    final optionRows = await db.query('unit_options', orderBy: 'name ASC');
-    final productRows = await db.rawQuery(
-      "SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND TRIM(unit) != ''",
+    final rows = await db.query(
+      'units',
+      columns: ['name'],
+      where: 'deleted_at IS NULL',
+      orderBy: 'name ASC',
     );
-
-    for (final row in optionRows) {
-      final value = _normaliseName(row['name']?.toString());
-      if (value != null) values.add(value);
-    }
-    for (final row in productRows) {
-      final value = _normaliseName(row['unit']?.toString());
-      if (value != null) values.add(value);
+    final values = <String>{...Product.presetUnits};
+    for (final row in rows) {
+      final name = _normaliseName(row['name']?.toString());
+      if (name != null) values.add(name);
     }
 
     final presets = Product.presetUnits
@@ -92,15 +186,16 @@ mixin DatabaseSettings {
 
   Future<void> addUnitOption(String name) async {
     final db = await database;
-    await _insertUnitOption(db, name);
+    await _ensureUnit(db, name);
   }
 
   Future<void> deleteUnitOption(String name) async {
     final db = await database;
     final value = _normaliseName(name);
-    if (value == null || _isPresetUnit(value)) return;
-    await db.delete(
-      'unit_options',
+    if (value == null) return;
+    await db.update(
+      'units',
+      {'deleted_at': _nowIso(), 'updated_at': _nowIso()},
       where: 'LOWER(name) = LOWER(?)',
       whereArgs: [value],
     );
@@ -108,7 +203,11 @@ mixin DatabaseSettings {
 
   Future<GlobalPricingSettings> getGlobalPricingSettings() async {
     final db = await database;
-    final rows = await db.query('app_settings');
+    final rows = await db.query(
+      'app_settings',
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [_defaultShopId],
+    );
     final values = {
       for (final row in rows) row['key'] as String: row['value']?.toString(),
     };
@@ -163,7 +262,8 @@ Future<void> _saveSetting(
 ) async {
   await executor.insert('app_settings', {
     'key': key,
+    'shop_id': _defaultShopId,
     'value': value,
-    'updated_at': DateTime.now().toIso8601String(),
+    'updated_at': _nowIso(),
   }, conflictAlgorithm: ConflictAlgorithm.replace);
 }
