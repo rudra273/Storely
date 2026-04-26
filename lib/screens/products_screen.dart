@@ -2337,11 +2337,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: _FilterDropdownButton(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _FilterDropdownButton(
+                  icon: Icons.category_outlined,
                   label: 'Category',
                   count: _selectedCategories.length,
                   onTap: () => _showMultiSelectFilter(
@@ -2351,11 +2352,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     onAdd: DatabaseHelper.instance.addCategoryOption,
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 4,
-                child: _FilterDropdownButton(
+                const SizedBox(width: 8),
+                _FilterDropdownButton(
+                  icon: Icons.storefront_outlined,
                   label: 'Supplier',
                   count: _selectedSuppliers.length,
                   onTap: () => _showMultiSelectFilter(
@@ -2365,27 +2364,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     onAdd: DatabaseHelper.instance.addSupplierOption,
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: _FilterDropdownButton(
+                const SizedBox(width: 8),
+                _FilterDropdownButton(
+                  icon: Icons.event_outlined,
                   label: _selectedPurchaseDate == null
-                      ? 'Date'
+                      ? 'Purchase Date'
                       : _formatShortDate(_selectedPurchaseDate!),
                   count: _selectedPurchaseDate == null ? 0 : 1,
                   onTap: _pickPurchaseDateFilter,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: _SortDropdownButton(
+                const SizedBox(width: 8),
+                _SortDropdownButton(
                   label: _sortMode.label,
                   onTap: _showSortOptions,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         if (_isUpdatingPrices)
@@ -2552,11 +2546,13 @@ class _AddOptionDialogState extends State<_AddOptionDialog> {
 }
 
 class _FilterDropdownButton extends StatelessWidget {
+  final IconData icon;
   final String label;
   final int count;
   final VoidCallback onTap;
 
   const _FilterDropdownButton({
+    required this.icon,
     required this.label,
     required this.count,
     required this.onTap,
@@ -2565,7 +2561,7 @@ class _FilterDropdownButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSelection = count > 0;
-    return OutlinedButton(
+    return OutlinedButton.icon(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         foregroundColor: hasSelection ? AppColors.navy : AppColors.textDark,
@@ -2576,19 +2572,12 @@ class _FilterDropdownButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: Text(
-              hasSelection ? '$label ($count)' : label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
-        ],
+      icon: Icon(icon, size: 17),
+      label: Text(
+        hasSelection ? '$label ($count)' : label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -2602,28 +2591,21 @@ class _SortDropdownButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
+    return OutlinedButton.icon(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textDark,
         backgroundColor: Colors.white,
         side: const BorderSide(color: AppColors.creamDark),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.sort_rounded, size: 18),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
+      icon: const Icon(Icons.sort_rounded, size: 17),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -3757,16 +3739,6 @@ class _ProductCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (purchaseSummary!.lastPurchasePrice != null) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '₹${purchaseSummary!.lastPurchasePrice!.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
                 const SizedBox(height: 10),
