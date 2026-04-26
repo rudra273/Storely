@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/shop_profile.dart';
+import '../utils/bill_pdf_generator.dart';
 import 'scan_screen.dart';
 
 class BillsScreen extends StatefulWidget {
@@ -101,6 +103,15 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
+  Future<void> _shareBillPdf(Bill bill) async {
+    final shop = await DatabaseHelper.instance.getShopProfile();
+    final bytes = await BillPdfGenerator.generate(bill: bill, shop: shop);
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: BillPdfGenerator.filename(bill),
+    );
+  }
+
   String? _whatsAppPhone(String? value) {
     final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
     if (phone == null || phone.isEmpty || phone == '91') return null;
@@ -191,6 +202,7 @@ class _BillsScreenState extends State<BillsScreen> {
           onDelete: () => _deleteBill(bill),
           onStatusChanged: (isPaid) => _updateBillStatus(bill, isPaid),
           onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
+          onSharePdf: () => _shareBillPdf(bill),
         ),
       );
     }
@@ -273,11 +285,13 @@ class _BillCard extends StatefulWidget {
   final Bill bill;
   final VoidCallback onDelete;
   final VoidCallback onSendWhatsApp;
+  final VoidCallback onSharePdf;
   final ValueChanged<bool> onStatusChanged;
   const _BillCard({
     required this.bill,
     required this.onDelete,
     required this.onSendWhatsApp,
+    required this.onSharePdf,
     required this.onStatusChanged,
   });
   @override
@@ -501,6 +515,17 @@ class _BillCardState extends State<_BillCard> {
                                   foregroundColor: AppColors.success,
                                 ),
                               ),
+                            TextButton.icon(
+                              onPressed: widget.onSharePdf,
+                              icon: const Icon(
+                                Icons.ios_share_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('Share'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.navy,
+                              ),
+                            ),
                             TextButton.icon(
                               onPressed: _showProfitSummary,
                               icon: const Icon(
