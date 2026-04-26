@@ -48,6 +48,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
 
   bool get _selectionMode => _selectedProductIds.isNotEmpty;
+  int get _activeFilterCount =>
+      _selectedCategories.length +
+      _selectedSuppliers.length +
+      (_selectedPurchaseDate == null ? 0 : 1);
 
   @override
   void initState() {
@@ -231,23 +235,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
     if (selected == null || selected == _sortMode) return;
     setState(() => _sortMode = selected);
-    _applyFilter();
-  }
-
-  Future<void> _pickPurchaseDateFilter() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedPurchaseDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked == null) return;
-    final ids = await DatabaseHelper.instance.getProductIdsPurchasedOn(picked);
-    if (!mounted) return;
-    setState(() {
-      _selectedPurchaseDate = picked;
-      _purchaseDateProductIds = ids;
-    });
     _applyFilter();
   }
 
@@ -631,13 +618,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  Future<void> _showMultiSelectFilter({
-    required String title,
-    required List<String> options,
-    required Set<String> selected,
-    required Future<void> Function(String value) onAdd,
-  }) async {
-    await showModalBottomSheet<void>(
+  Future<void> _showProductFilters() async {
+    final nextCategories = Set<String>.from(_selectedCategories);
+    final nextSuppliers = Set<String>.from(_selectedSuppliers);
+    var nextPurchaseDate = _selectedPurchaseDate;
+
+    final applied = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -668,94 +654,100 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
+                    const Text(
+                      'Filters',
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const Spacer(),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final value = await _showAddOptionDialog(title);
-                        if (value == null || !mounted || !ctx.mounted) return;
-                        await onAdd(value);
-                        if (!mounted || !ctx.mounted) return;
-                        setState(() {
-                          if (title == 'Category' &&
-                              !_categories.contains(value)) {
-                            _categories.add(value);
-                            _categories.sort();
-                          }
-                          if (title == 'Supplier' &&
-                              !_suppliers.contains(value)) {
-                            _suppliers.add(value);
-                            _suppliers.sort();
-                          }
-                          selected.add(value);
-                        });
-                        _applyFilter();
-                        setSheet(() {});
-                      },
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Add'),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      icon: const Icon(Icons.close_rounded),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Flexible(
-                  child: options.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No ${title.toLowerCase()} options yet',
-                            style: TextStyle(color: AppColors.textMuted),
-                          ),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: options.length,
-                          itemBuilder: (_, i) {
-                            final option = options[i];
-                            final checked = selected.contains(option);
-                            return CheckboxListTile(
-                              contentPadding: EdgeInsets.zero,
-                              value: checked,
-                              title: Text(option),
-                              activeColor: AppColors.navy,
-                              onChanged: (value) {
-                                setState(() {
-                                  if (value == true) {
-                                    selected.add(option);
-                                  } else {
-                                    selected.remove(option);
-                                  }
-                                });
-                                _applyFilter();
-                                setSheet(() {});
-                              },
-                            );
-                          },
-                        ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      _FilterSheetSection(
+                        title: 'Category',
+                        icon: Icons.category_outlined,
+                        options: _categories,
+                        selected: nextCategories,
+                        emptyText: 'No categories yet',
+                        onChanged: (value, selected) {
+                          setSheet(() {
+                            if (selected) {
+                              nextCategories.add(value);
+                            } else {
+                              nextCategories.remove(value);
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _FilterSheetSection(
+                        title: 'Supplier',
+                        icon: Icons.storefront_outlined,
+                        options: _suppliers,
+                        selected: nextSuppliers,
+                        emptyText: 'No suppliers yet',
+                        onChanged: (value, selected) {
+                          setSheet(() {
+                            if (selected) {
+                              nextSuppliers.add(value);
+                            } else {
+                              nextSuppliers.remove(value);
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _PurchaseDateFilterTile(
+                        date: nextPurchaseDate,
+                        onPick: () async {
+                          final picked = await showDatePicker(
+                            context: ctx,
+                            initialDate: nextPurchaseDate ?? DateTime.now(),
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now().add(
+                              const Duration(days: 365),
+                            ),
+                          );
+                          if (picked == null || !ctx.mounted) return;
+                          setSheet(() => nextPurchaseDate = picked);
+                        },
+                        onClear: nextPurchaseDate == null
+                            ? null
+                            : () => setSheet(() => nextPurchaseDate = null),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     TextButton(
                       onPressed: () {
-                        setState(selected.clear);
-                        _applyFilter();
-                        setSheet(() {});
+                        setSheet(() {
+                          nextCategories.clear();
+                          nextSuppliers.clear();
+                          nextPurchaseDate = null;
+                        });
                       },
                       child: const Text('Clear'),
                     ),
                     const Spacer(),
                     FilledButton(
-                      onPressed: () => Navigator.pop(ctx),
+                      onPressed: () => Navigator.pop(ctx, true),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.navy,
                       ),
-                      child: const Text('Done'),
+                      child: const Text('Apply'),
                     ),
                   ],
                 ),
@@ -765,6 +757,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
         ),
       ),
     );
+    if (applied != true) return;
+    final ids = nextPurchaseDate == null
+        ? <int>{}
+        : await DatabaseHelper.instance.getProductIdsPurchasedOn(
+            nextPurchaseDate!,
+          );
+    if (!mounted) return;
+    setState(() {
+      _selectedCategories
+        ..clear()
+        ..addAll(nextCategories);
+      _selectedSuppliers
+        ..clear()
+        ..addAll(nextSuppliers);
+      _selectedPurchaseDate = nextPurchaseDate;
+      _purchaseDateProductIds = ids;
+    });
+    _applyFilter();
+  }
+
+  void _clearAllFilters() {
+    setState(() {
+      _selectedCategories.clear();
+      _selectedSuppliers.clear();
+      _selectedPurchaseDate = null;
+      _purchaseDateProductIds = {};
+    });
+    _applyFilter();
   }
 
   Future<String?> _showAddOptionDialog(String label) async {
@@ -2337,51 +2357,74 @@ class _ProductsScreenState extends State<ProductsScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _FilterDropdownButton(
-                  icon: Icons.category_outlined,
-                  label: 'Category',
-                  count: _selectedCategories.length,
-                  onTap: () => _showMultiSelectFilter(
-                    title: 'Category',
-                    options: _categories,
-                    selected: _selectedCategories,
-                    onAdd: DatabaseHelper.instance.addCategoryOption,
-                  ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _ProductFilterButton(
+                  count: _activeFilterCount,
+                  onTap: _showProductFilters,
                 ),
-                const SizedBox(width: 8),
-                _FilterDropdownButton(
-                  icon: Icons.storefront_outlined,
-                  label: 'Supplier',
-                  count: _selectedSuppliers.length,
-                  onTap: () => _showMultiSelectFilter(
-                    title: 'Supplier',
-                    options: _suppliers,
-                    selected: _selectedSuppliers,
-                    onAdd: DatabaseHelper.instance.addSupplierOption,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _FilterDropdownButton(
-                  icon: Icons.event_outlined,
-                  label: _selectedPurchaseDate == null
-                      ? 'Purchase Date'
-                      : _formatShortDate(_selectedPurchaseDate!),
-                  count: _selectedPurchaseDate == null ? 0 : 1,
-                  onTap: _pickPurchaseDateFilter,
-                ),
-                const SizedBox(width: 8),
-                _SortDropdownButton(
-                  label: _sortMode.label,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SortDropdownButton(
+                  label: 'Sort: ${_sortMode.label}',
                   onTap: _showSortOptions,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
+        if (_activeFilterCount > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (_selectedCategories.isNotEmpty)
+                    _ActiveFilterChip(
+                      label: _selectedCategories.length == 1
+                          ? 'Category: ${_selectedCategories.first}'
+                          : 'Category: ${_selectedCategories.length}',
+                      onDeleted: () {
+                        setState(_selectedCategories.clear);
+                        _applyFilter();
+                      },
+                    ),
+                  if (_selectedSuppliers.isNotEmpty)
+                    _ActiveFilterChip(
+                      label: _selectedSuppliers.length == 1
+                          ? 'Supplier: ${_selectedSuppliers.first}'
+                          : 'Supplier: ${_selectedSuppliers.length}',
+                      onDeleted: () {
+                        setState(_selectedSuppliers.clear);
+                        _applyFilter();
+                      },
+                    ),
+                  if (_selectedPurchaseDate != null)
+                    _ActiveFilterChip(
+                      label:
+                          'Date: ${_formatShortDate(_selectedPurchaseDate!)}',
+                      onDeleted: () {
+                        setState(() {
+                          _selectedPurchaseDate = null;
+                          _purchaseDateProductIds = {};
+                        });
+                        _applyFilter();
+                      },
+                    ),
+                  _ActiveFilterChip(
+                    label: 'Clear all',
+                    onDeleted: _clearAllFilters,
+                    isClearAction: true,
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (_isUpdatingPrices)
           Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -2403,32 +2446,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ],
-            ),
-          ),
-        if (_selectedCategories.isNotEmpty ||
-            _selectedSuppliers.isNotEmpty ||
-            _selectedPurchaseDate != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _selectedCategories.clear();
-                    _selectedSuppliers.clear();
-                    _selectedPurchaseDate = null;
-                    _purchaseDateProductIds = {};
-                  });
-                  _applyFilter();
-                },
-                icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
-                label: const Text('Clear filters'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.textMuted,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
             ),
           ),
         if (_selectionMode)
@@ -2545,18 +2562,11 @@ class _AddOptionDialogState extends State<_AddOptionDialog> {
   }
 }
 
-class _FilterDropdownButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
+class _ProductFilterButton extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
 
-  const _FilterDropdownButton({
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.onTap,
-  });
+  const _ProductFilterButton({required this.count, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2572,13 +2582,53 @@ class _FilterDropdownButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      icon: Icon(icon, size: 17),
+      icon: const Icon(Icons.tune_rounded, size: 17),
       label: Text(
-        hasSelection ? '$label ($count)' : label,
+        hasSelection ? 'Filter ($count)' : 'Filter',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
+    );
+  }
+}
+
+class _ActiveFilterChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onDeleted;
+  final bool isClearAction;
+
+  const _ActiveFilterChip({
+    required this.label,
+    required this.onDeleted,
+    this.isClearAction = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InputChip(
+      label: Text(
+        label,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: isClearAction ? AppColors.textMuted : AppColors.navy,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      deleteIcon: Icon(
+        isClearAction ? Icons.filter_alt_off_rounded : Icons.close_rounded,
+        size: 16,
+      ),
+      onDeleted: onDeleted,
+      backgroundColor: isClearAction
+          ? Colors.white
+          : AppColors.navy.withValues(alpha: 0.08),
+      side: BorderSide(
+        color: isClearAction ? AppColors.creamDark : AppColors.navy,
+      ),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 }
@@ -2606,6 +2656,166 @@ class _SortDropdownButton extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _FilterSheetSection extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final List<String> options;
+  final Set<String> selected;
+  final String emptyText;
+  final void Function(String value, bool selected) onChanged;
+
+  const _FilterSheetSection({
+    required this.title,
+    required this.icon,
+    required this.options,
+    required this.selected,
+    required this.emptyText,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cream.withValues(alpha: 0.5),
+        border: Border.all(color: AppColors.creamDark),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.navy),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (options.isEmpty)
+            Text(emptyText, style: const TextStyle(color: AppColors.textMuted))
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 164),
+              child: Scrollbar(
+                thumbVisibility: options.length > 8,
+                child: SingleChildScrollView(
+                  primary: false,
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: options
+                        .map(
+                          (option) => FilterChip(
+                            label: Text(
+                              option,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            selected: selected.contains(option),
+                            onSelected: (value) => onChanged(option, value),
+                            selectedColor: AppColors.navy.withValues(
+                              alpha: 0.12,
+                            ),
+                            checkmarkColor: AppColors.navy,
+                            side: BorderSide(
+                              color: selected.contains(option)
+                                  ? AppColors.navy
+                                  : AppColors.creamDark,
+                            ),
+                            backgroundColor: Colors.white,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PurchaseDateFilterTile extends StatelessWidget {
+  final DateTime? date;
+  final VoidCallback onPick;
+  final VoidCallback? onClear;
+
+  const _PurchaseDateFilterTile({
+    required this.date,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.cream.withValues(alpha: 0.5),
+        border: Border.all(color: AppColors.creamDark),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.event_outlined, size: 18, color: AppColors.navy),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Purchase Date',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  date == null ? 'Any date' : _formatFullDate(date!),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onClear != null)
+            IconButton(
+              onPressed: onClear,
+              tooltip: 'Clear date',
+              icon: const Icon(Icons.close_rounded),
+            ),
+          OutlinedButton(
+            onPressed: onPick,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.navy,
+              side: const BorderSide(color: AppColors.creamDark),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(date == null ? 'Choose' : 'Change'),
+          ),
+        ],
       ),
     );
   }
