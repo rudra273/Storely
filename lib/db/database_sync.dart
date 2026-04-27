@@ -204,7 +204,27 @@ mixin DatabaseSync {
       limit: 1,
     );
     if (existing.isEmpty) {
-      await executor.insert(table, map..remove('id'));
+      // No row with this UUID locally. Try inserting.
+      try {
+        await executor.insert(table, map..remove('id'));
+      } on DatabaseException catch (e) {
+        if (e.isUniqueConstraintError()) {
+          // A local row with a different UUID but same (shop_id, name) exists.
+          // Merge: update the existing local row to adopt the cloud UUID + data.
+          final shopId = map['shop_id']?.toString();
+          final name = map['name']?.toString();
+          if (shopId != null && name != null) {
+            await executor.update(
+              table,
+              map..remove('id'),
+              where: 'shop_id = ? AND name = ? COLLATE NOCASE',
+              whereArgs: [shopId, name],
+            );
+          }
+        } else {
+          rethrow;
+        }
+      }
       return;
     }
     final localUpdatedAt = existing.single['updated_at']?.toString();
