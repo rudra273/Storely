@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/shop_profile.dart';
+import '../utils/bill_pdf_generator.dart';
+import 'scan_screen.dart';
 
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
@@ -47,7 +51,7 @@ class _BillsScreenState extends State<BillsScreen> {
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.delete_outline, color: AppColors.error, size: 32),
         title: const Text('Delete Bill'),
-        content: Text('Delete bill #${bill.id}?'),
+        content: Text('Delete ${_billDisplayId(bill)}?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -73,12 +77,23 @@ class _BillsScreenState extends State<BillsScreen> {
     await _loadBills();
   }
 
+  Future<void> _openBillCreator(BillingEntryMode mode) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ScanScreen(initialMode: mode)),
+    );
+    await _loadBills();
+  }
+
   Future<void> _sendBillOnWhatsApp(Bill bill) async {
     final phone = _whatsAppPhone(bill.customerPhone);
     if (phone == null) return;
 
     final uri = Uri.https('wa.me', '/$phone', {
-      'text': _buildBillMessage(bill),
+      'text': _buildBillMessage(
+        bill,
+        await DatabaseHelper.instance.getShopProfile(),
+      ),
     });
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
@@ -88,6 +103,15 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
+  Future<void> _shareBillPdf(Bill bill) async {
+    final shop = await DatabaseHelper.instance.getShopProfile();
+    final bytes = await BillPdfGenerator.generate(bill: bill, shop: shop);
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: BillPdfGenerator.filename(bill),
+    );
+  }
+
   String? _whatsAppPhone(String? value) {
     final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
     if (phone == null || phone.isEmpty || phone == '91') return null;
@@ -95,13 +119,17 @@ class _BillsScreenState extends State<BillsScreen> {
     return phone;
   }
 
-  String _buildBillMessage(Bill bill) {
+  String _buildBillMessage(Bill bill, ShopProfile? shop) {
     final buffer = StringBuffer()
-      ..writeln('Storely Bill #${bill.id}')
+      ..writeln(shop?.name ?? 'Storely')
+      ..writeln(_billDisplayId(bill))
       ..writeln('Customer: ${bill.customerName}')
       ..writeln(
         'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}',
-      )
+      );
+    if (shop?.gstin != null) buffer.writeln('GSTIN: ${shop!.gstin}');
+    if (shop?.address != null) buffer.writeln(shop!.address);
+    buffer
       ..writeln('')
       ..writeln('Items:');
     for (final item in bill.items) {
@@ -119,7 +147,8 @@ class _BillsScreenState extends State<BillsScreen> {
     }
     buffer
       ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}');
+      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}')
+      ..writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
     return buffer.toString();
   }
 
@@ -140,9 +169,18 @@ class _BillsScreenState extends State<BillsScreen> {
           : RefreshIndicator(
               onRefresh: _loadBills,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                 children: _buildGroupedBillCards(),
               ),
+            ),
+      floatingActionButton: _isLoading || _bills.isEmpty
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _openBillCreator(BillingEntryMode.manual),
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.receipt_long_rounded),
+              label: const Text('New Bill'),
             ),
     );
   }
@@ -164,6 +202,7 @@ class _BillsScreenState extends State<BillsScreen> {
           onDelete: () => _deleteBill(bill),
           onStatusChanged: (isPaid) => _updateBillStatus(bill, isPaid),
           onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
+          onSharePdf: () => _shareBillPdf(bill),
         ),
       );
     }
@@ -205,8 +244,15 @@ class _BillsScreenState extends State<BillsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Scan products to create your first bill',
+            'Search products to create your first bill',
             style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: () => _openBillCreator(BillingEntryMode.manual),
+            icon: const Icon(Icons.receipt_long_rounded),
+            label: const Text('Create Bill'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
           ),
         ],
       ),
@@ -239,11 +285,13 @@ class _BillCard extends StatefulWidget {
   final Bill bill;
   final VoidCallback onDelete;
   final VoidCallback onSendWhatsApp;
+  final VoidCallback onSharePdf;
   final ValueChanged<bool> onStatusChanged;
   const _BillCard({
     required this.bill,
     required this.onDelete,
     required this.onSendWhatsApp,
+    required this.onSharePdf,
     required this.onStatusChanged,
   });
   @override
@@ -309,7 +357,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Bill #${bill.id} • $dateStr',
+                          '${_billDisplayId(bill)} • $dateStr',
                           style: TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 12,
@@ -322,6 +370,8 @@ class _BillCardState extends State<_BillCard> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       _PaymentChip(isPaid: bill.isPaid),
+                      const SizedBox(height: 4),
+                      _MethodChip(method: bill.paymentMethod),
                       const SizedBox(height: 4),
                       Text(
                         '₹${bill.totalAmount.toStringAsFixed(2)}',
@@ -466,6 +516,17 @@ class _BillCardState extends State<_BillCard> {
                                 ),
                               ),
                             TextButton.icon(
+                              onPressed: widget.onSharePdf,
+                              icon: const Icon(
+                                Icons.ios_share_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('Share'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.navy,
+                              ),
+                            ),
+                            TextButton.icon(
                               onPressed: _showProfitSummary,
                               icon: const Icon(
                                 Icons.trending_up_rounded,
@@ -581,7 +642,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Bill #${bill.id} Profit',
+                '${_billDisplayId(bill)} Profit',
                 style: const TextStyle(
                   color: AppColors.navy,
                   fontSize: 20,
@@ -720,6 +781,41 @@ class _PaymentChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MethodChip extends StatelessWidget {
+  final String method;
+  const _MethodChip({required this.method});
+
+  @override
+  Widget build(BuildContext context) {
+    final online = method == 'online';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: (online ? AppColors.navy : AppColors.amber).withValues(
+          alpha: 0.12,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        _paymentMethodLabel(method),
+        style: TextStyle(
+          color: online ? AppColors.navy : AppColors.amber,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+String _paymentMethodLabel(String method) {
+  return method == 'online' ? 'Online' : 'Cash';
+}
+
+String _billDisplayId(Bill bill) {
+  return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}';
 }
 
 class _AmountRow extends StatelessWidget {

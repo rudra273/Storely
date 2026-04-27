@@ -5,9 +5,15 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/customer.dart';
+import '../models/product.dart';
+
+enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final BillingEntryMode initialMode;
+
+  const ScanScreen({super.key, this.initialMode = BillingEntryMode.scan});
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -16,20 +22,61 @@ class _ScanScreenState extends State<ScanScreen> {
   static const _scanCooldown = Duration(seconds: 1);
   static const _invalidScanCooldown = Duration(seconds: 2);
 
-  final MobileScannerController _camController = MobileScannerController();
+  final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
+  List<Product> _allProducts = [];
+  List<Product> _filteredProducts = [];
+  late BillingEntryMode _entryMode;
   bool _isProcessing = false;
   bool _isSavingBill = false;
+  bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   String? _lastScanned;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
-  int get _itemCount => _items.fold(0, (sum, i) => sum + i.quantity);
+  int get _itemCount =>
+      _items.fold<double>(0, (sum, i) => sum + i.quantity).round();
+
+  @override
+  void initState() {
+    super.initState();
+    _entryMode = widget.initialMode;
+    _productSearchCtrl.addListener(_applyProductSearch);
+    _loadProducts();
+  }
 
   @override
   void dispose() {
-    _camController.dispose();
+    _productSearchCtrl.removeListener(_applyProductSearch);
+    _productSearchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadProducts() async {
+    final products = await DatabaseHelper.instance.getAllProducts();
+    if (!mounted) return;
+    setState(() {
+      _allProducts = products;
+      _isLoadingProducts = false;
+    });
+    _applyProductSearch();
+  }
+
+  void _applyProductSearch() {
+    final query = _productSearchCtrl.text.trim().toLowerCase();
+    if (!mounted) return;
+    setState(() {
+      final products = query.isEmpty
+          ? _allProducts
+          : _allProducts.where((product) {
+              return product.name.toLowerCase().contains(query) ||
+                  (product.itemCode?.toLowerCase().contains(query) ?? false) ||
+                  (product.barcode?.toLowerCase().contains(query) ?? false) ||
+                  (product.category?.toLowerCase().contains(query) ?? false) ||
+                  (product.supplier?.toLowerCase().contains(query) ?? false);
+            }).toList();
+      _filteredProducts = products.take(40).toList();
+    });
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
@@ -48,11 +95,13 @@ class _ScanScreenState extends State<ScanScreen> {
       final name = data['name'] as String? ?? 'Unknown';
       final id = (data['id'] as num?)?.toInt();
       final code = data['code'] as String?;
+      final barcode = data['barcode'] as String?;
       final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
       final unit = _cleanOptionalText(data['unit'] as String?);
       final product = await DatabaseHelper.instance.findProductForBilling(
         id: id,
         itemCode: code,
+        barcode: barcode,
         name: name,
       );
       final scannedItem = product == null
@@ -60,26 +109,26 @@ class _ScanScreenState extends State<ScanScreen> {
           : await DatabaseHelper.instance.buildBillItemForProduct(product);
       if (!mounted) return;
 
-      // Check if already in list
-      final existing = _items.indexWhere(
-        (i) =>
-            i.productName.toLowerCase() ==
-            scannedItem.productName.toLowerCase(),
-      );
-
-      setState(() {
-        if (existing >= 0) {
-          _items[existing].quantity++;
-          _items[existing].unit ??= scannedItem.unit;
-        } else {
-          _items.add(scannedItem);
-        }
-        _showAddedStatus = true;
-      });
+      _addBillItem(scannedItem);
 
       HapticFeedback.mediumImpact();
       _allowNextScanAfter(_scanCooldown);
     } catch (_) {
+      final product = await DatabaseHelper.instance.findProductForBilling(
+        barcode: raw,
+        itemCode: raw,
+        name: raw,
+      );
+      if (product != null) {
+        final item = await DatabaseHelper.instance.buildBillItemForProduct(
+          product,
+        );
+        if (!mounted) return;
+        _addBillItem(item);
+        HapticFeedback.mediumImpact();
+        _allowNextScanAfter(_scanCooldown);
+        return;
+      }
       if (!mounted) return;
       setState(() => _showAddedStatus = false);
       ScaffoldMessenger.of(context)
@@ -92,6 +141,34 @@ class _ScanScreenState extends State<ScanScreen> {
         );
       _allowNextScanAfter(_invalidScanCooldown);
     }
+  }
+
+  Future<void> _addProductToBill(Product product) async {
+    final item = await DatabaseHelper.instance.buildBillItemForProduct(product);
+    if (!mounted) return;
+    _addBillItem(item);
+    HapticFeedback.selectionClick();
+  }
+
+  void _addBillItem(BillItem item) {
+    final existing = _items.indexWhere(
+      (existingItem) =>
+          (item.productId != null &&
+              existingItem.productId == item.productId) ||
+          (item.productId == null &&
+              existingItem.productName.toLowerCase() ==
+                  item.productName.toLowerCase()),
+    );
+
+    setState(() {
+      if (existing >= 0) {
+        _items[existing].quantity++;
+        _items[existing].unit ??= item.unit;
+      } else {
+        _items.add(item);
+      }
+      _showAddedStatus = _entryMode == BillingEntryMode.scan;
+    });
   }
 
   void _allowNextScanAfter(Duration duration) {
@@ -110,6 +187,7 @@ class _ScanScreenState extends State<ScanScreen> {
     required String? customerPhone,
     required double discountPercent,
     required bool isPaid,
+    required String paymentMethod,
   }) async {
     if (_items.isEmpty) return null;
     if (_isSavingBill) return null;
@@ -122,7 +200,10 @@ class _ScanScreenState extends State<ScanScreen> {
     final itemCopies = _items
         .map(
           (item) => BillItem(
+            uuid: item.uuid,
+            shopId: item.shopId,
             productId: item.productId,
+            productUuid: item.productUuid,
             productName: item.productName,
             mrp: item.mrp,
             unit: item.unit,
@@ -149,6 +230,7 @@ class _ScanScreenState extends State<ScanScreen> {
       totalAmount: total,
       itemCount: _itemCount,
       isPaid: isPaid,
+      paymentMethod: paymentMethod,
     );
 
     try {
@@ -164,8 +246,17 @@ class _ScanScreenState extends State<ScanScreen> {
     final customerController = TextEditingController();
     final phoneController = TextEditingController(text: '+91 ');
     final discountController = TextEditingController();
+    final customers = await DatabaseHelper.instance.getAllCustomers();
+    if (!mounted) {
+      customerController.dispose();
+      phoneController.dispose();
+      discountController.dispose();
+      return;
+    }
     var discountPercent = 0.0;
     var isPaid = true;
+    var paymentMethod = 'cash';
+    var hideCustomerSuggestions = false;
 
     try {
       final draft = await showModalBottomSheet<_BillDraft>(
@@ -181,6 +272,13 @@ class _ScanScreenState extends State<ScanScreen> {
               final percent = discountPercent.clamp(0, 100).toDouble();
               final discount = _subtotal * percent / 100;
               final total = _subtotal - discount;
+              final customerMatches = hideCustomerSuggestions
+                  ? <Customer>[]
+                  : _matchingCustomers(
+                      customers,
+                      customerController.text,
+                      phoneController.text,
+                    );
               return SingleChildScrollView(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
@@ -213,6 +311,9 @@ class _ScanScreenState extends State<ScanScreen> {
                       TextField(
                         controller: customerController,
                         textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => setSheetState(
+                          () => hideCustomerSuggestions = false,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'Customer name',
                           prefixIcon: Icon(Icons.person_outline_rounded),
@@ -225,11 +326,33 @@ class _ScanScreenState extends State<ScanScreen> {
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
                         ],
+                        onChanged: (_) => setSheetState(
+                          () => hideCustomerSuggestions = false,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'Phone number (optional)',
                           prefixIcon: Icon(Icons.phone_outlined),
                         ),
                       ),
+                      if (customerMatches.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _CustomerSuggestionList(
+                          customers: customerMatches,
+                          onSelected: (customer) {
+                            setSheetState(() {
+                              _setControllerText(
+                                customerController,
+                                customer.name,
+                              );
+                              _setControllerText(
+                                phoneController,
+                                _formatCustomerPhoneInput(customer.phone),
+                              );
+                              hideCustomerSuggestions = true;
+                            });
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       _BillSummaryRow(
                         label: 'Subtotal',
@@ -278,6 +401,24 @@ class _ScanScreenState extends State<ScanScreen> {
                         onSelectionChanged: (value) =>
                             setSheetState(() => isPaid = value.first),
                       ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 'cash',
+                            icon: Icon(Icons.payments_outlined),
+                            label: Text('Cash'),
+                          ),
+                          ButtonSegment(
+                            value: 'online',
+                            icon: Icon(Icons.account_balance_wallet_outlined),
+                            label: Text('Online'),
+                          ),
+                        ],
+                        selected: {paymentMethod},
+                        onSelectionChanged: (value) =>
+                            setSheetState(() => paymentMethod = value.first),
+                      ),
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -313,6 +454,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                 customerPhone: phoneController.text,
                                 discountPercent: percent,
                                 isPaid: isPaid,
+                                paymentMethod: paymentMethod,
                               ),
                             );
                           },
@@ -339,6 +481,7 @@ class _ScanScreenState extends State<ScanScreen> {
         customerPhone: draft.customerPhone,
         discountPercent: draft.discountPercent,
         isPaid: draft.isPaid,
+        paymentMethod: draft.paymentMethod,
       );
       if (billId == null || !mounted) return;
       await _showBillCreatedDialog(
@@ -365,6 +508,11 @@ class _ScanScreenState extends State<ScanScreen> {
     required int itemCount,
     required bool isPaid,
   }) async {
+    final bills = await DatabaseHelper.instance.getAllBills();
+    final bill = bills.where((bill) => bill.id == billId).firstOrNull;
+    final billLabel = bill?.billNumber.isNotEmpty == true
+        ? bill!.billNumber
+        : 'Bill #$billId';
     if (mounted) {
       await showDialog(
         context: context,
@@ -388,7 +536,7 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                '$customerName\nBill #$billId • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+                '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
                 style: TextStyle(color: AppColors.textMuted),
                 textAlign: TextAlign.center,
               ),
@@ -416,8 +564,8 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  void _setQty(int index, int quantity) {
-    if (quantity < 1) return;
+  void _setQty(int index, double quantity) {
+    if (quantity <= 0) return;
     setState(() => _items[index].quantity = quantity);
   }
 
@@ -427,13 +575,214 @@ class _ScanScreenState extends State<ScanScreen> {
     return trimmed;
   }
 
+  List<Customer> _matchingCustomers(
+    List<Customer> customers,
+    String nameQuery,
+    String phoneQuery,
+  ) {
+    final name = nameQuery.trim().toLowerCase();
+    final phone = phoneQuery.replaceAll(RegExp(r'[^0-9]'), '');
+    final hasNameQuery = name.length >= 2;
+    final hasPhoneQuery = phone.length >= 3 && phone != '91';
+    if (!hasNameQuery && !hasPhoneQuery) return [];
+
+    return customers
+        .where((customer) {
+          final customerName = customer.name.toLowerCase();
+          final customerPhone = customer.phone.replaceAll(
+            RegExp(r'[^0-9]'),
+            '',
+          );
+          return (hasNameQuery && customerName.contains(name)) ||
+              (hasPhoneQuery && customerPhone.contains(phone));
+        })
+        .take(5)
+        .toList();
+  }
+
+  String _formatCustomerPhoneInput(String phone) {
+    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return '+91 ${digits.substring(2)}';
+    }
+    if (digits.length == 10) return '+91 $digits';
+    return phone;
+  }
+
+  void _setControllerText(TextEditingController controller, String value) {
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  Widget _buildModeSelector() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: SegmentedButton<BillingEntryMode>(
+        segments: const [
+          ButtonSegment(
+            value: BillingEntryMode.scan,
+            icon: Icon(Icons.qr_code_scanner_rounded),
+            label: Text('Scan'),
+          ),
+          ButtonSegment(
+            value: BillingEntryMode.manual,
+            icon: Icon(Icons.search_rounded),
+            label: Text('Search'),
+          ),
+        ],
+        selected: {_entryMode},
+        style: SegmentedButton.styleFrom(
+          backgroundColor: AppColors.navyLight,
+          selectedBackgroundColor: AppColors.amber,
+          foregroundColor: Colors.white,
+          selectedForegroundColor: Colors.white,
+        ),
+        onSelectionChanged: (selection) {
+          setState(() {
+            _entryMode = selection.first;
+            _showAddedStatus = false;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildEntryPanel(double height) {
+    return _entryMode == BillingEntryMode.scan
+        ? _buildScanPanel(height)
+        : _buildManualPanel(height);
+  }
+
+  Widget _buildScanPanel(double height) {
+    return Container(
+      height: height,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppColors.amber.withValues(alpha: 0.5),
+          width: 2,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          MobileScanner(onDetect: _onDetect),
+          Center(
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: AppColors.amber.withValues(alpha: 0.7),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          if (_showAddedStatus)
+            Positioned(
+              bottom: 12,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.success,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'Item added!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildManualPanel(double height) {
+    return Container(
+      height: height,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _productSearchCtrl,
+            textInputAction: TextInputAction.search,
+            decoration: const InputDecoration(
+              labelText: 'Search products',
+              prefixIcon: Icon(Icons.search_rounded),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: _isLoadingProducts
+                ? const Center(child: CircularProgressIndicator())
+                : _allProducts.isEmpty
+                ? _ManualEmptyState(
+                    icon: Icons.inventory_2_outlined,
+                    message: 'Add products before manual billing',
+                  )
+                : _filteredProducts.isEmpty
+                ? _ManualEmptyState(
+                    icon: Icons.search_off_rounded,
+                    message: 'No matching products',
+                  )
+                : ListView.separated(
+                    itemCount: _filteredProducts.length,
+                    separatorBuilder: (_, index) => const SizedBox(height: 8),
+                    itemBuilder: (_, index) {
+                      final product = _filteredProducts[index];
+                      return _ManualProductTile(
+                        product: product,
+                        onAdd: () => _addProductToBill(product),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _entryHintText() {
+    if (_entryMode == BillingEntryMode.scan) {
+      return _items.isEmpty
+          ? 'Point camera at product QR code'
+          : '${_items.length} item${_items.length != 1 ? 's' : ''} added';
+    }
+    if (_items.isNotEmpty) {
+      return '${_items.length} item${_items.length != 1 ? 's' : ''} in bill';
+    }
+    return 'Search by product name, code, category or supplier';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.navy,
       appBar: AppBar(
-        title: const Text(
-          'Scan & Bill',
+        title: Text(
+          _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: AppColors.navy,
@@ -451,214 +800,36 @@ class _ScanScreenState extends State<ScanScreen> {
       ),
       body: Column(
         children: [
-          // ── Camera Preview ──
-          Container(
-            height: 280,
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.amber.withValues(alpha: 0.5),
-                width: 2,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                MobileScanner(controller: _camController, onDetect: _onDetect),
-                // Scan overlay
-                Center(
-                  child: Container(
-                    width: 200,
-                    height: 200,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: AppColors.amber.withValues(alpha: 0.7),
-                        width: 2,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-                // Status indicator
-                if (_showAddedStatus)
-                  Positioned(
-                    bottom: 12,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.success,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          '✓ Item added!',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _items.isEmpty
-                ? 'Point camera at product QR code'
-                : '${_items.length} item${_items.length != 1 ? 's' : ''} scanned',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // ── Scanned Items List ──
           Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: AppColors.cream,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: _items.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.qr_code_scanner,
-                            size: 48,
-                            color: AppColors.textMuted.withValues(alpha: 0.3),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No items scanned yet',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxHeight < 520;
+                final panelHeight = (constraints.maxHeight * 0.42).clamp(
+                  180.0,
+                  280.0,
+                );
+
+                return Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    _buildModeSelector(),
+                    _buildEntryPanel(panelHeight),
+                    if (!compact) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _entryHintText(),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 13,
+                        ),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                      itemCount: _items.length,
-                      itemBuilder: (_, i) {
-                        final item = _items[i];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.productName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      item.priceLabel,
-                                      style: TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Qty controls
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.cream,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      onPressed: () => _updateQty(i, -1),
-                                      icon: const Icon(Icons.remove, size: 18),
-                                      constraints: const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36,
-                                      ),
-                                    ),
-                                    SizedBox(
-                                      width: 44,
-                                      child: TextFormField(
-                                        key: ValueKey(
-                                          '${item.productName}-${item.mrp}-${item.quantity}',
-                                        ),
-                                        initialValue: '${item.quantity}',
-                                        textAlign: TextAlign.center,
-                                        keyboardType: TextInputType.number,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter
-                                              .digitsOnly,
-                                        ],
-                                        decoration: const InputDecoration(
-                                          isDense: true,
-                                          filled: false,
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 8,
-                                          ),
-                                          border: InputBorder.none,
-                                        ),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 16,
-                                        ),
-                                        onChanged: (value) {
-                                          final quantity = int.tryParse(value);
-                                          if (quantity != null) {
-                                            _setQty(i, quantity);
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                    IconButton(
-                                      onPressed: () => _updateQty(i, 1),
-                                      icon: const Icon(Icons.add, size: 18),
-                                      constraints: const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // Subtotal
-                              Text(
-                                '₹${item.subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
+                      const SizedBox(height: 12),
+                    ] else
+                      const SizedBox(height: 8),
+                    Expanded(child: _buildBillItemsPanel()),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -729,6 +900,326 @@ class _ScanScreenState extends State<ScanScreen> {
           : null,
     );
   }
+
+  Widget _buildBillItemsPanel() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: _items.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.qr_code_scanner,
+                    size: 48,
+                    color: AppColors.textMuted.withValues(alpha: 0.3),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No items added yet',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+              itemCount: _items.length,
+              itemBuilder: (_, i) {
+                final item = _items[i];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.productName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              item.priceLabel,
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Qty controls
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.cream,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              onPressed: () => _updateQty(i, -1),
+                              icon: const Icon(Icons.remove, size: 18),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                            SizedBox(
+                              width: 44,
+                              child: TextFormField(
+                                key: ValueKey(
+                                  '${item.productName}-${item.mrp}-${item.quantity}',
+                                ),
+                                initialValue: _formatQuantityInput(
+                                  item.quantity,
+                                ),
+                                textAlign: TextAlign.center,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'^\d*\.?\d{0,3}'),
+                                  ),
+                                ],
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  filled: false,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 8,
+                                  ),
+                                  border: InputBorder.none,
+                                ),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                                onChanged: (value) {
+                                  final quantity = double.tryParse(value);
+                                  if (quantity != null) {
+                                    _setQty(i, quantity);
+                                  }
+                                },
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => _updateQty(i, 1),
+                              icon: const Icon(Icons.add, size: 18),
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Subtotal
+                      Text(
+                        '₹${item.subtotal.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _ManualEmptyState extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _ManualEmptyState({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 38,
+            color: AppColors.textMuted.withValues(alpha: 0.4),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualProductTile extends StatelessWidget {
+  final Product product;
+  final VoidCallback onAdd;
+
+  const _ManualProductTile({required this.product, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOut = product.quantity == 0;
+    return Material(
+      color: AppColors.cream,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onAdd,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        product.priceLabel,
+                        if (product.itemCode != null) product.itemCode!,
+                        if (product.barcode != null) product.barcode!,
+                      ].join(' • '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    isOut ? 'Out' : product.quantityLabel,
+                    style: TextStyle(
+                      color: isOut ? AppColors.error : AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Icon(
+                    Icons.add_circle_rounded,
+                    color: AppColors.navy,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerSuggestionList extends StatelessWidget {
+  final List<Customer> customers;
+  final ValueChanged<Customer> onSelected;
+
+  const _CustomerSuggestionList({
+    required this.customers,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 220),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        itemCount: customers.length,
+        separatorBuilder: (_, index) =>
+            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+        itemBuilder: (_, index) {
+          final customer = customers[index];
+          return ListTile(
+            dense: true,
+            leading: CircleAvatar(
+              radius: 17,
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              child: Text(
+                customer.name.trim().isEmpty
+                    ? '?'
+                    : customer.name.trim().substring(0, 1).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            title: Text(
+              customer.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.check_circle_outline_rounded),
+            onTap: () => onSelected(customer),
+          );
+        },
+      ),
+    );
+  }
+
+  static String _displayPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return '+91 ${digits.substring(2, 7)} ${digits.substring(7)}';
+    }
+    return phone;
+  }
 }
 
 class _BillSummaryRow extends StatelessWidget {
@@ -771,16 +1262,26 @@ class _BillSummaryRow extends StatelessWidget {
   }
 }
 
+String _formatQuantityInput(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
+}
+
 class _BillDraft {
   final String customerName;
   final String? customerPhone;
   final double discountPercent;
   final bool isPaid;
+  final String paymentMethod;
 
   const _BillDraft({
     required this.customerName,
     required this.customerPhone,
     required this.discountPercent,
     required this.isPaid,
+    required this.paymentMethod,
   });
 }

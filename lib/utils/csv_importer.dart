@@ -72,14 +72,15 @@ class CsvImporter {
 
         products.add(
           Product(
-            itemCode: _getString(row, mapping['item_code']),
+            productCode: _getString(row, mapping['product_code']),
+            barcode: _getString(row, mapping['barcode']),
             name: name,
             category: _getString(row, mapping['category']),
-            mrp: _getDouble(row, mapping['mrp']) ?? 0,
+            sellingPrice: _getDouble(row, mapping['selling_price']) ?? 0,
             purchasePrice: _getDouble(row, mapping['purchase_price']),
             directPriceToggle: mapping['purchase_price'] == null,
-            manualPrice: _getDouble(row, mapping['mrp']) ?? 0,
-            quantity: _getInt(row, mapping['quantity']) ?? 0,
+            manualPrice: _getDouble(row, mapping['selling_price']) ?? 0,
+            quantity: _getDouble(row, mapping['quantity']) ?? 0,
             unit: _getString(row, mapping['unit']),
             supplier: _getString(row, mapping['supplier']),
             source: ProductSource.imported,
@@ -413,10 +414,11 @@ class CsvImporter {
   /// Maps header names to our field names using fuzzy matching.
   static Map<String, int?> _mapColumns(List<String> headers) {
     final mapping = <String, int?>{
-      'item_code': null,
+      'product_code': null,
+      'barcode': null,
       'name': null,
       'category': null,
-      'mrp': null,
+      'selling_price': null,
       'purchase_price': null,
       'quantity': null,
       'unit': null,
@@ -439,7 +441,20 @@ class CsvImporter {
         'product code',
         'product_code',
       ])) {
-        mapping['item_code'] = i;
+        mapping['product_code'] = i;
+      } else if (_matches(h, [
+        'barcode',
+        'bar code',
+        'bar_code',
+        'ean',
+        'ean code',
+        'ean_code',
+        'upc',
+        'gtin',
+        'scan code',
+        'scan_code',
+      ])) {
+        mapping['barcode'] = i;
       } else if (_matches(h, [
         'name',
         'item name',
@@ -469,9 +484,10 @@ class CsvImporter {
         'unit_price',
         'cost',
         'selling price',
+        'selling_price',
         'amount',
       ])) {
-        mapping['mrp'] = i;
+        mapping['selling_price'] = i;
       } else if (_matches(h, [
         'quantity',
         'qty',
@@ -519,12 +535,6 @@ class CsvImporter {
     if (index == null || index >= row.length) return null;
     final val = row[index].toString().replaceAll(RegExp(r'[^0-9.]'), '');
     return double.tryParse(val);
-  }
-
-  static int? _getInt(List row, int? index) {
-    if (index == null || index >= row.length) return null;
-    final val = row[index].toString().replaceAll(RegExp(r'[^0-9]'), '');
-    return int.tryParse(val);
   }
 }
 

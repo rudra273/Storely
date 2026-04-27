@@ -13,23 +13,23 @@ Effective Date: April 23, 2026
 Storely is designed to help store owners manage inventory and billing. This Privacy Policy explains how the app handles the information you enter.
 
 2. Data Stored Locally
-Storely does not collect, upload, or store your data on any server in version 1.0.0. The information you enter is stored locally on your device, including:
+By default, the information you enter is stored locally on your device, including:
 - Store details (such as shop name and settings)
 - Product details (name, price, quantity, unit, barcode, category, supplier)
 - Billing information created in the app
 
 3. How Data Is Stored
-In version 1.0.0, your data is stored in a local database on your device. Storely does not require an account login, cloud sync, or server storage in this version.
+Storely can be used without an account or cloud sync. If you enable the optional Cloud Sync feature, the app connects to the Supabase project configured in the app and syncs your store data with that project so approved users can share the same data.
 
 4. Permissions Used
 - Camera: used only for barcode and QR scanning.
 - File access: used for importing and exporting files such as invoices, CSV or Excel files, and QR sheets.
 
 5. Data Sharing
-Storely does not sell your personal data. No advertising SDK is included in version 1.0.0. Storely does not share data with third parties by default. If you choose to export a file, print a bill, or send a bill through another app such as WhatsApp, the information you share may be handled by that selected app or service.
+Storely does not sell your personal data. No advertising SDK is included in version 1.0.0. Storely does not share data with third parties by default. If you enable Cloud Sync, your data is stored in the Supabase project you configure. If you choose to export a file, print a bill, or send a bill through another app such as WhatsApp, the information you share may be handled by that selected app or service.
 
 6. Data Security
-Storely follows standard mobile app development practices. Because data is stored on your device, you are responsible for securing access to your device.
+Storely follows standard mobile app development practices. Because data is stored on your device, you are responsible for securing access to your device. Cloud Sync should use only a Supabase URL and anon public key in the app; service role keys should never be added to Storely.
 
 7. Your Control
 You can modify or delete store, product, and billing records from within the app. Uninstalling the app may remove local app data, depending on your device settings.
