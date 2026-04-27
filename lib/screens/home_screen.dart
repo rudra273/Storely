@@ -524,7 +524,7 @@ class _UnpaidBillItem extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}'} • ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''} pending',
+                  '${_cleanBillNumber(bill)} • ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''} pending',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
               ],
@@ -538,6 +538,14 @@ class _UnpaidBillItem extends StatelessWidget {
       ),
     );
   }
+}
+
+String _cleanBillNumber(Bill bill) {
+  if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';
+  return bill.billNumber.replaceFirst(
+    RegExp(r'^SHOP-LOCAL-local-'),
+    'INV-',
+  );
 }
 
 class _HomeHeaderDelegate extends SliverPersistentHeaderDelegate {

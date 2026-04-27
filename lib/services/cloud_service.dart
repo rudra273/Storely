@@ -32,6 +32,10 @@ class CloudState {
   final String? message;
   final String? error;
 
+  /// The current user's role in the cloud shop: 'owner', 'admin', 'staff',
+  /// or null when not signed in / not yet resolved.
+  final String? shopRole;
+
   const CloudState({
     this.config,
     this.user,
@@ -39,11 +43,20 @@ class CloudState {
     this.lastSyncedAt,
     this.message,
     this.error,
+    this.shopRole,
   });
 
   bool get isConfigured => config != null;
   bool get isSignedIn => user != null;
   bool get isSyncing => phase == CloudSyncPhase.syncing;
+
+  /// True when the signed-in user is an owner or admin of the cloud shop.
+  /// Also true when cloud is not configured (local-only mode — no restrictions).
+  bool get isAdmin =>
+      !isConfigured ||
+      !isSignedIn ||
+      shopRole == 'owner' ||
+      shopRole == 'admin';
 
   CloudState copyWith({
     CloudConfig? config,
@@ -57,6 +70,8 @@ class CloudState {
     bool clearMessage = false,
     String? error,
     bool clearError = false,
+    String? shopRole,
+    bool clearShopRole = false,
   }) {
     return CloudState(
       config: clearConfig ? null : config ?? this.config,
@@ -67,6 +82,7 @@ class CloudState {
           : lastSyncedAt ?? this.lastSyncedAt,
       message: clearMessage ? null : message ?? this.message,
       error: clearError ? null : error ?? this.error,
+      shopRole: clearShopRole ? null : shopRole ?? this.shopRole,
     );
   }
 }
@@ -190,6 +206,7 @@ class CloudService {
     }
     state.value = state.value.copyWith(
       clearUser: true,
+      clearShopRole: true,
       message: 'Signed out',
       clearError: true,
     );
@@ -220,9 +237,14 @@ class CloudService {
         client: activeClient,
         database: DatabaseHelper.instance,
       ).sync();
+
+      // Fetch the user's role after sync completes.
+      final role = await _fetchUserRole(activeClient);
+
       state.value = state.value.copyWith(
         phase: CloudSyncPhase.idle,
         lastSyncedAt: syncedAt,
+        shopRole: role,
         message: 'Cloud sync complete',
         clearError: true,
       );
@@ -231,6 +253,24 @@ class CloudService {
         phase: CloudSyncPhase.idle,
         error: error.toString(),
       );
+    }
+  }
+
+  /// Query the user's role from cloud shop_members.
+  Future<String?> _fetchUserRole(SupabaseClient activeClient) async {
+    final user = activeClient.auth.currentUser;
+    if (user == null) return null;
+    try {
+      final rows = await activeClient
+          .from('shop_members')
+          .select('role')
+          .eq('shop_id', _storelyShopId)
+          .eq('user_id', user.id)
+          .limit(1);
+      if ((rows as List).isEmpty) return null;
+      return rows.first['role']?.toString();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -313,9 +353,19 @@ class CloudSyncEngine {
     return syncStartedAt;
   }
 
+  /// Ensure the current user has cloud access to the shop.
+  ///
+  /// Flow:
+  /// 1. If user is already a member → done (return false).
+  /// 2. Upsert the shop row into the cloud.
+  /// 3. Use the SECURITY DEFINER RPC to check if the shop is empty.
+  /// 4. If empty → join as owner; otherwise → join as staff.
+  /// 5. If owner insert fails (race condition) → fall back to staff.
   Future<bool> _ensureCloudAccess() async {
     final user = client.auth.currentUser;
     if (user == null) return false;
+
+    // Check if user is already a member (RLS allows reading own membership).
     final memberships = await client
         .from('shop_members')
         .select('role')
@@ -324,19 +374,51 @@ class CloudSyncEngine {
         .limit(1);
     if ((memberships as List).isNotEmpty) return false;
 
+    // User is NOT a member yet. Get local shop data.
     final shops = await database.cloudExportRows('shops');
     if (shops.isEmpty) return false;
     final shop = shops.first;
     final shopId = shop['uuid']?.toString();
     if (shopId == null || shopId.isEmpty) return false;
 
+    // Upsert the shop row first (INSERT policy allows any authenticated user).
     await client
         .from('shops')
         .upsert([shop], onConflict: 'uuid', ignoreDuplicates: true);
+
+    // Use the SECURITY DEFINER function to check if the shop has no members.
+    // This bypasses RLS so non-members can see the truth.
+    bool isEmpty = true;
+    try {
+      final result = await client.rpc(
+        'shop_has_no_members',
+        params: {'target_shop_id': shopId},
+      );
+      isEmpty = result == true;
+    } catch (_) {
+      // If the RPC fails, default to trying owner first.
+    }
+
+    if (isEmpty) {
+      // First user — try joining as owner.
+      try {
+        await client.from('shop_members').insert({
+          'shop_id': shopId,
+          'user_id': user.id,
+          'role': 'owner',
+        });
+        return true;
+      } catch (_) {
+        // Race condition: someone else became owner between RPC check and insert.
+        // Fall through to join as staff.
+      }
+    }
+
+    // Shop already has members — join as staff.
     await client.from('shop_members').insert({
       'shop_id': shopId,
       'user_id': user.id,
-      'role': 'owner',
+      'role': 'staff',
     });
     return true;
   }

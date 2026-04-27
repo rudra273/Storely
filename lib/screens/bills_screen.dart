@@ -815,7 +815,13 @@ String _paymentMethodLabel(String method) {
 }
 
 String _billDisplayId(Bill bill) {
-  return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id}';
+  if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';
+  // Strip the internal SHOP-LOCAL-local- prefix for display.
+  final cleaned = bill.billNumber.replaceFirst(
+    RegExp(r'^SHOP-LOCAL-local-'),
+    'INV-',
+  );
+  return cleaned;
 }
 
 class _AmountRow extends StatelessWidget {

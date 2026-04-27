@@ -218,6 +218,34 @@ as $$
   );
 $$;
 
+create or replace function public.is_shop_admin(target_shop_id text)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.shop_members
+    where shop_id = target_shop_id
+      and user_id = auth.uid()
+      and role in ('owner', 'admin')
+  );
+$$;
+
+create or replace function public.get_shop_role(target_shop_id text)
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select role
+  from public.shop_members
+  where shop_id = target_shop_id
+    and user_id = auth.uid()
+  limit 1;
+$$;
+
 create or replace function public.can_manage_shop_members(target_shop_id text)
 returns boolean
 language sql
@@ -259,6 +287,7 @@ alter table public.bills enable row level security;
 alter table public.bill_items enable row level security;
 alter table public.stock_movements enable row level security;
 
+-- ── Profiles ──
 drop policy if exists "Users can view own profile" on public.profiles;
 create policy "Users can view own profile"
 on public.profiles for select
@@ -270,22 +299,40 @@ on public.profiles for update
 using ((select auth.uid()) = id)
 with check ((select auth.uid()) = id);
 
+-- ── Shops ──
+-- Any authenticated user can create a shop (first sync).
 drop policy if exists "Authenticated users can create shop" on public.shops;
 create policy "Authenticated users can create shop"
 on public.shops for insert
 with check ((select auth.uid()) is not null);
 
+-- Any member can read shop details.
 drop policy if exists "Members can sync shops" on public.shops;
-create policy "Members can sync shops"
-on public.shops for all
-using (public.is_shop_member(uuid))
-with check (public.is_shop_member(uuid));
+drop policy if exists "Members can view shops" on public.shops;
+create policy "Members can view shops"
+on public.shops for select
+using (public.is_shop_member(uuid));
 
+-- Only owner/admin can update shop details.
+drop policy if exists "Admins can update shops" on public.shops;
+create policy "Admins can update shops"
+on public.shops for update
+using (public.is_shop_admin(uuid))
+with check (public.is_shop_admin(uuid));
+
+-- Only owner/admin can delete shops.
+drop policy if exists "Admins can delete shops" on public.shops;
+create policy "Admins can delete shops"
+on public.shops for delete
+using (public.is_shop_admin(uuid));
+
+-- ── Shop members ──
 drop policy if exists "Members can view shop members" on public.shop_members;
 create policy "Members can view shop members"
 on public.shop_members for select
 using (public.is_shop_member(shop_id));
 
+-- First user to join an empty shop becomes owner.
 drop policy if exists "First owner can join empty shop" on public.shop_members;
 create policy "First owner can join empty shop"
 on public.shop_members for insert
@@ -295,12 +342,24 @@ with check (
   and public.shop_has_no_members(shop_id)
 );
 
+-- Any authenticated user can self-join as staff if not already a member.
+drop policy if exists "Authenticated users can join as staff" on public.shop_members;
+create policy "Authenticated users can join as staff"
+on public.shop_members for insert
+with check (
+  (select auth.uid()) = user_id
+  and role = 'staff'
+  and not public.is_shop_member(shop_id)
+);
+
+-- Owners/admins can manage (update/delete) shop members.
 drop policy if exists "Owners and admins can manage shop members" on public.shop_members;
 create policy "Owners and admins can manage shop members"
 on public.shop_members for all
 using (public.can_manage_shop_members(shop_id))
 with check (public.can_manage_shop_members(shop_id));
 
+-- ── Data tables: any shop member can sync ──
 drop policy if exists "Members can sync app_settings" on public.app_settings;
 create policy "Members can sync app_settings"
 on public.app_settings for all

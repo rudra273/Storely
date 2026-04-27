@@ -511,7 +511,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final bills = await DatabaseHelper.instance.getAllBills();
     final bill = bills.where((bill) => bill.id == billId).firstOrNull;
     final billLabel = bill?.billNumber.isNotEmpty == true
-        ? bill!.billNumber
+        ? bill!.billNumber.replaceFirst(RegExp(r'^SHOP-LOCAL-local-'), 'INV-')
         : 'Bill #$billId';
     if (mounted) {
       await showDialog(

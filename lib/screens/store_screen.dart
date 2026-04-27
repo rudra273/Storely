@@ -505,10 +505,16 @@ class _StoreScreenState extends State<StoreScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                 children: [
-                  _ShopPanel(
-                    profile: _shopProfile,
-                    gstRegistered: _pricingSettings.gstRegistered,
-                    onEdit: _editShopProfile,
+                  ValueListenableBuilder<CloudState>(
+                    valueListenable: CloudService.instance.state,
+                    builder: (context, cloudState, _) => _ShopPanel(
+                      profile: _shopProfile,
+                      gstRegistered: _pricingSettings.gstRegistered,
+                      onEdit: cloudState.isAdmin ? _editShopProfile : null,
+                      roleLabel: cloudState.isConfigured && cloudState.isSignedIn
+                          ? cloudState.shopRole
+                          : null,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _CloudSyncPanel(onSetup: _openCloudSetup, onSync: _syncCloud),
@@ -613,11 +619,13 @@ class _CloudSyncPanel extends StatelessWidget {
       valueListenable: CloudService.instance.state,
       builder: (context, state, _) {
         final email = state.user?.email;
+        final role = state.shopRole;
+        final roleStr = role != null ? ' (${role[0].toUpperCase()}${role.substring(1)})' : '';
         final subtitle = !state.isConfigured
             ? 'Local only'
             : email == null
             ? 'Configured • sign in to sync'
-            : 'Signed in as $email';
+            : 'Signed in as $email$roleStr';
         final lastSync = state.lastSyncedAt == null
             ? null
             : _formatCloudTime(state.lastSyncedAt!.toLocal());
@@ -1059,12 +1067,14 @@ String? _cleanOptional(String value) {
 class _ShopPanel extends StatelessWidget {
   final ShopProfile? profile;
   final bool gstRegistered;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
+  final String? roleLabel;
 
   const _ShopPanel({
     required this.profile,
     required this.gstRegistered,
     required this.onEdit,
+    this.roleLabel,
   });
 
   @override
@@ -1084,9 +1094,39 @@ class _ShopPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Shop',
-                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                Row(
+                  children: [
+                    const Text(
+                      'Shop',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                    ),
+                    if (roleLabel != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: roleLabel == 'owner' || roleLabel == 'admin'
+                              ? AppColors.amber.withValues(alpha: 0.15)
+                              : AppColors.navy.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          roleLabel!.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: roleLabel == 'owner' || roleLabel == 'admin'
+                                ? AppColors.amber
+                                : AppColors.textMuted,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -1114,11 +1154,21 @@ class _ShopPanel extends StatelessWidget {
               ],
             ),
           ),
-          IconButton.filledTonal(
-            onPressed: onEdit,
-            icon: const Icon(Icons.edit_rounded),
-            tooltip: 'Edit shop profile',
-          ),
+          if (onEdit != null)
+            IconButton.filledTonal(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_rounded),
+              tooltip: 'Edit shop profile',
+            )
+          else
+            Tooltip(
+              message: 'Only admin or owner can edit',
+              child: Icon(
+                Icons.lock_outline_rounded,
+                color: AppColors.textMuted.withValues(alpha: 0.5),
+                size: 22,
+              ),
+            ),
         ],
       ),
     );
