@@ -259,7 +259,6 @@ class CloudService with WidgetsBindingObserver {
       clearError: true,
     );
     try {
-      await _ensureShopRowExists();
       final syncedAt = await CloudSyncEngine(
         client: activeClient,
         database: DatabaseHelper.instance,
@@ -299,12 +298,6 @@ class CloudService with WidgetsBindingObserver {
     } catch (_) {
       return null;
     }
-  }
-
-  Future<void> _ensureShopRowExists() async {
-    final profile = await DatabaseHelper.instance.getShopProfile();
-    if (profile == null) return;
-    await DatabaseHelper.instance.saveShopProfile(profile);
   }
 
   SupabaseClient _requireClient() {

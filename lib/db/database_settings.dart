@@ -119,6 +119,7 @@ mixin DatabaseSettings {
         profile.gstRegistered ? '1' : '0',
       );
     });
+    notifyDatabaseChanged();
   }
 
   Future<String?> _getLegacyShopName(DatabaseExecutor executor) async {
@@ -160,6 +161,7 @@ mixin DatabaseSettings {
       'value': value.toString(),
       'updated_at': _nowIso(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    notifyDatabaseChanged();
   }
 
   Future<List<String>> getUnits() async {
@@ -187,6 +189,7 @@ mixin DatabaseSettings {
   Future<void> addUnitOption(String name) async {
     final db = await database;
     await _ensureUnit(db, name);
+    notifyDatabaseChanged();
   }
 
   Future<void> deleteUnitOption(String name) async {
@@ -199,6 +202,7 @@ mixin DatabaseSettings {
       where: 'LOWER(name) = LOWER(?)',
       whereArgs: [value],
     );
+    notifyDatabaseChanged();
   }
 
   Future<GlobalPricingSettings> getGlobalPricingSettings() async {
@@ -252,6 +256,7 @@ mixin DatabaseSettings {
         settings.showPurchasePriceGlobally ? '1' : '0',
       );
     });
+    notifyDatabaseChanged();
   }
 }
 
