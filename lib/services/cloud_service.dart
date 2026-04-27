@@ -328,6 +328,17 @@ class CloudSyncEngine {
     final createdCloudShop = await _ensureCloudAccess();
     final pullFirst = lastSync == null && !createdCloudShop;
 
+    // Pull shop data (all members can read).
+    try {
+      final shopRows = await _pullTable('shops', updatedAfter: pullFirst ? null : lastSync);
+      await database.cloudImportRows('shops', shopRows);
+    } catch (_) {
+      // Staff might not see shop on first pull — not fatal.
+    }
+
+    // Push shop data only if user is admin/owner.
+    await _pushShopIfAdmin();
+
     if (pullFirst) {
       for (final table in storelyCloudTables) {
         final rows = await _pullTable(table);
@@ -381,11 +392,6 @@ class CloudSyncEngine {
     final shopId = shop['uuid']?.toString();
     if (shopId == null || shopId.isEmpty) return false;
 
-    // Upsert the shop row first (INSERT policy allows any authenticated user).
-    await client
-        .from('shops')
-        .upsert([shop], onConflict: 'uuid', ignoreDuplicates: true);
-
     // Use the SECURITY DEFINER function to check if the shop has no members.
     // This bypasses RLS so non-members can see the truth.
     bool isEmpty = true;
@@ -400,6 +406,11 @@ class CloudSyncEngine {
     }
 
     if (isEmpty) {
+      // Upsert the shop row first (INSERT policy allows any authenticated user).
+      await client
+          .from('shops')
+          .upsert([shop], onConflict: 'uuid', ignoreDuplicates: true);
+
       // First user — try joining as owner.
       try {
         await client.from('shop_members').insert({
@@ -421,6 +432,24 @@ class CloudSyncEngine {
       'role': 'staff',
     });
     return true;
+  }
+
+  /// Push shop data only if the current user is admin/owner.
+  Future<void> _pushShopIfAdmin() async {
+    try {
+      final result = await client.rpc(
+        'is_shop_admin',
+        params: {'target_shop_id': CloudService._storelyShopId},
+      );
+      if (result != true) return; // Staff — skip shop push.
+    } catch (_) {
+      return; // Can't determine role — skip to be safe.
+    }
+    final rows = await database.cloudExportRows('shops');
+    if (rows.isEmpty) return;
+    await client
+        .from('shops')
+        .upsert(rows, onConflict: 'uuid');
   }
 
   Future<void> _pushTable(String table, {String? updatedAfter}) async {
