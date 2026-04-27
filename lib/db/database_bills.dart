@@ -40,6 +40,7 @@ mixin DatabaseBills {
           createdAt: bill.createdAt,
         );
       }
+      notifyDatabaseChanged();
       return billId;
     });
   }
@@ -193,23 +194,26 @@ mixin DatabaseBills {
           billCountDelta: -1,
         );
       }
+      notifyDatabaseChanged();
       return count;
     });
   }
 
   Future<int> updateBillPaidStatus(int id, bool isPaid) async {
     final db = await database;
-    return db.update(
+    final count = await db.update(
       'bills',
       {'is_paid': isPaid ? 1 : 0, 'updated_at': _nowIso()},
       where: 'id = ?',
       whereArgs: [id],
     );
+    if (count > 0) notifyDatabaseChanged();
+    return count;
   }
 
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
     final db = await database;
-    return db.update(
+    final count = await db.update(
       'bills',
       {
         'profit_commission_percent': percent.clamp(0, 100).toDouble(),
@@ -218,6 +222,8 @@ mixin DatabaseBills {
       where: 'id = ?',
       whereArgs: [id],
     );
+    notifyDatabaseChanged();
+    return count;
   }
 
   Future<int> getBillCount() async {

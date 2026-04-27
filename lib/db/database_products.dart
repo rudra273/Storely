@@ -27,6 +27,7 @@ mixin DatabaseProducts {
           createdAt: productToInsert.createdAt,
         );
       }
+      notifyDatabaseChanged();
       return id;
     });
   }
@@ -113,12 +114,14 @@ mixin DatabaseProducts {
         txn,
         product.copyWith(updatedAt: DateTime.now()),
       );
-      return txn.update(
+      final count = await txn.update(
         'products',
         productToUpdate.toMap(),
         where: 'id = ?',
         whereArgs: [product.id],
       );
+      notifyDatabaseChanged();
+      return count;
     });
   }
 
@@ -163,6 +166,7 @@ mixin DatabaseProducts {
         sourceType: source == ProductSource.imported ? 'import' : 'manual',
         createdAt: purchaseDate,
       );
+      notifyDatabaseChanged();
       return count;
     });
   }
@@ -170,12 +174,14 @@ mixin DatabaseProducts {
   Future<int> deleteProduct(int id) async {
     final db = await database;
     final now = _nowIso();
-    return db.update(
+    final count = await db.update(
       'products',
       {'deleted_at': now, 'updated_at': now},
       where: 'id = ?',
       whereArgs: [id],
     );
+    if (count > 0) notifyDatabaseChanged();
+    return count;
   }
 
   Future<List<String>> getCategories() async {
@@ -509,6 +515,7 @@ mixin DatabaseProducts {
         );
         count++;
       }
+      notifyDatabaseChanged();
       return count;
     });
   }
@@ -585,6 +592,7 @@ mixin DatabaseProducts {
           added++;
         }
       }
+      notifyDatabaseChanged();
       return ProductImportResult(
         added: added,
         updated: updated,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
@@ -44,6 +45,12 @@ class DatabaseHelper
     await db.close();
     _database = null;
   }
+
+  VoidCallback? onDatabaseChanged;
+}
+
+void notifyDatabaseChanged() {
+  DatabaseHelper.instance.onDatabaseChanged?.call();
 }
 
 String? _normaliseName(String? value) {

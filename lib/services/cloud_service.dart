@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -87,7 +88,7 @@ class CloudState {
   }
 }
 
-class CloudService {
+class CloudService with WidgetsBindingObserver {
   CloudService._();
 
   static final instance = CloudService._();
@@ -101,6 +102,8 @@ class CloudService {
   final _connectivity = Connectivity();
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _autoSyncTimer;
+  Timer? _debounceTimer;
   bool _clientReady = false;
   Future<void>? _syncInFlight;
 
@@ -132,6 +135,30 @@ class CloudService {
         syncNow(reason: 'Back online');
       }
     });
+
+    WidgetsBinding.instance.addObserver(this);
+    _autoSyncTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
+      if (state.value.isConfigured && state.value.isSignedIn) {
+        syncNow(reason: 'Auto sync');
+      }
+    });
+
+    DatabaseHelper.instance.onDatabaseChanged = () {
+      if (!state.value.isConfigured || !state.value.isSignedIn) return;
+      _debounceTimer?.cancel();
+      _debounceTimer = Timer(const Duration(seconds: 2), () {
+        syncNow(reason: 'Local data changed');
+      });
+    };
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (this.state.value.isConfigured && this.state.value.isSignedIn) {
+        syncNow(reason: 'App resumed');
+      }
+    }
   }
 
   Future<void> saveConfig(CloudConfig config) async {
