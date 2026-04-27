@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'db/database_helper.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
 import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
-import 'screens/welcome_screen.dart';
 import 'services/cloud_service.dart';
 
 Future<void> main() async {
@@ -92,47 +90,12 @@ class StorelyApp extends StatelessWidget {
   }
 }
 
-class AppGate extends StatefulWidget {
+class AppGate extends StatelessWidget {
   const AppGate({super.key});
 
   @override
-  State<AppGate> createState() => _AppGateState();
-}
-
-class _AppGateState extends State<AppGate> {
-  late Future<String?> _shopNameFuture;
-  bool _setupComplete = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _shopNameFuture = DatabaseHelper.instance.getShopName();
-  }
-
-  void _enterApp() {
-    setState(() => _setupComplete = true);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_setupComplete) return const AppShell();
-
-    return FutureBuilder<String?>(
-      future: _shopNameFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            backgroundColor: AppColors.cream,
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final shopName = snapshot.data?.trim();
-        if (shopName != null && shopName.isNotEmpty) {
-          return const AppShell();
-        }
-        return WelcomeScreen(onComplete: _enterApp);
-      },
-    );
+    return const AppShell();
   }
 }
 

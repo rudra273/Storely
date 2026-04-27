@@ -393,12 +393,14 @@ class CloudSyncEngine {
 
   /// Ensure the current user has cloud access to the shop.
   ///
-  /// Flow:
-  /// 1. If user is already a member → done (return false).
-  /// 2. Upsert the shop row into the cloud.
-  /// 3. Use the SECURITY DEFINER RPC to check if the shop is empty.
-  /// 4. If empty → join as owner; otherwise → join as staff.
-  /// 5. If owner insert fails (race condition) → fall back to staff.
+  /// Returns `true` ONLY when this user CREATED the shop (first user, owner).
+  /// This tells the sync engine that our local data is the source of truth
+  /// and should be pushed first.
+  ///
+  /// Returns `false` when:
+  ///   - User is already a member (no action needed)
+  ///   - User just joined an existing shop as staff (cloud is source of truth,
+  ///     pull first to avoid overwriting real data with fresh defaults)
   Future<bool> _ensureCloudAccess() async {
     final user = client.auth.currentUser;
     if (user == null) return false;
@@ -453,12 +455,13 @@ class CloudSyncEngine {
     }
 
     // Shop already has members — join as staff.
+    // Return false so the sync engine pulls first (cloud is source of truth).
     await client.from('shop_members').insert({
       'shop_id': shopId,
       'user_id': user.id,
       'role': 'staff',
     });
-    return true;
+    return false;
   }
 
   /// Push shop data only if the current user is admin/owner.
