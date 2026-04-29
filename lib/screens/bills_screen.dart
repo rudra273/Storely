@@ -20,6 +20,14 @@ class BillsScreen extends StatefulWidget {
 class _BillsScreenState extends State<BillsScreen> {
   List<Bill> _bills = [];
   bool _isLoading = true;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -173,6 +181,8 @@ class _BillsScreenState extends State<BillsScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                 children: [
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
                   _buildUnpaidSummary(),
                   ..._buildGroupedBillCards(),
                 ],
@@ -190,7 +200,38 @@ class _BillsScreenState extends State<BillsScreen> {
     );
   }
 
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchCtrl,
+      decoration: InputDecoration(
+        hintText: 'Search by name, bill # or date...',
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear_rounded, size: 20),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      onChanged: (val) {
+        setState(() => _searchQuery = val.trim().toLowerCase());
+      },
+    );
+  }
+
   Widget _buildUnpaidSummary() {
+    if (_searchQuery.isNotEmpty) return const SizedBox.shrink();
+
     final unpaid = _bills.where((b) => !b.isPaid).toList();
     if (unpaid.isEmpty) return const SizedBox.shrink();
 
@@ -202,72 +243,77 @@ class _BillsScreenState extends State<BillsScreen> {
       customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text(
-          'Unpaid Bills (Dues)',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.error),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowHeight: 40,
-              dataRowMinHeight: 35,
-              dataRowMaxHeight: 40,
-              columns: const [
-                DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Bill #', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Amount', style: TextStyle(fontWeight: FontWeight.bold))),
-              ],
-              rows: unpaid.map((b) => DataRow(cells: [
-                DataCell(Text(DateFormat('dd MMM').format(b.createdAt))),
-                DataCell(Text(b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber)),
-                DataCell(Text(b.customerName)),
-                DataCell(Text('₹${b.totalAmount.toStringAsFixed(0)}', style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w600))),
-              ])).toList(),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
             ),
+            child: const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
           ),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'Total Due by Customer',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+          title: const Text(
+            'Unpaid Bills Summary',
+            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.error),
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowHeight: 40,
-              dataRowMinHeight: 35,
-              dataRowMaxHeight: 40,
-              columns: const [
-                DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Total Due', style: TextStyle(fontWeight: FontWeight.bold))),
-              ],
-              rows: customerTotals.entries.map((e) => DataRow(cells: [
-                DataCell(Text(e.key)),
-                DataCell(Text('₹${e.value.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w700))),
-              ])).toList(),
+          subtitle: Text('${unpaid.length} pending bill${unpaid.length != 1 ? 's' : ''}', style: const TextStyle(fontSize: 12)),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            const Divider(),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Total Due by Customer', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textMuted)),
             ),
-          ),
+            const SizedBox(height: 8),
+            ...customerTotals.entries.map((e) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text(e.key, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+                  Text('₹${e.value.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.error)),
+                ],
+              ),
+            )),
+            const SizedBox(height: 16),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('All Unpaid Bills', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textMuted)),
+            ),
+            const SizedBox(height: 8),
+            ...unpaid.map((b) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 50,
+                    child: Text(DateFormat('dd MMM').format(b.createdAt), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(b.customerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text('#${b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber}', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                  Text('₹${b.totalAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.error)),
+                ],
+              ),
+            )),
+          ],
         ),
-        const SizedBox(height: 24),
-        const Divider(),
-        const SizedBox(height: 8),
-      ],
+      ),
     );
   }
 
@@ -275,7 +321,16 @@ class _BillsScreenState extends State<BillsScreen> {
     final widgets = <Widget>[];
     String? currentGroup;
 
-    for (final bill in _bills) {
+    final filtered = _bills.where((b) {
+      if (_searchQuery.isEmpty) return true;
+      final query = _searchQuery;
+      final nameMatches = b.customerName.toLowerCase().contains(query);
+      final numMatches = b.billNumber.toLowerCase().contains(query);
+      final dateMatches = DateFormat('dd MMM yyyy').format(b.createdAt).toLowerCase().contains(query);
+      return nameMatches || numMatches || dateMatches;
+    }).toList();
+
+    for (final bill in filtered) {
       final group = _dateGroupTitle(bill.createdAt);
       if (group != currentGroup) {
         currentGroup = group;
