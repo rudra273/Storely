@@ -230,35 +230,61 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     const SizedBox(height: 28),
-                    if (_unpaidBills.isNotEmpty) ...[
-                      Row(
-                        children: [
-                          const Text(
-                            'Unpaid Bills',
+                    Row(
+                      children: [
+                        const Text(
+                          'Unpaid Bills',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => widget.onNavigate(2),
+                          child: Text(
+                            'View All →',
                             style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
+                              color: AppColors.amber,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => widget.onNavigate(2),
-                            child: Text(
-                              'View All →',
-                              style: TextStyle(
-                                color: AppColors.amber,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_unpaidBills.isNotEmpty) ...[
                       ..._unpaidBills.map(
                         (bill) => _UnpaidBillItem(bill: bill),
                       ),
-                      const SizedBox(height: 20),
-                    ],
+                    ] else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.task_alt_rounded,
+                              size: 40,
+                              color: AppColors.amber.withValues(alpha: 0.7),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'All bills are paid!',
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 20),
                     const SizedBox(height: 8),
                     // ── NEEDS ATTENTION ──
                     Row(
@@ -317,9 +343,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           children: [
                             Icon(
-                              Icons.check_circle_outline,
+                              Icons.inventory_2_outlined,
                               size: 40,
-                              color: AppColors.textMuted.withValues(alpha: 0.4),
+                              color: AppColors.amber.withValues(alpha: 0.7),
                             ),
                             const SizedBox(height: 8),
                             Text(
@@ -327,6 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(
                                 color: AppColors.textMuted,
                                 fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
