@@ -1,6 +1,18 @@
 flutter_launcher_icons:
   android: true
   ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/storely.png"
+    background_color: "#F8F4ED"
+    theme_color: "#1B2838"
+  windows:
+    generate: true
+    image_path: "assets/icon/storely.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/storely.png"
   image_path: "assets/icon/storely.png"
   min_sdk_android: 21
   adaptive_icon_background: "#F8F4ED"

@@ -3,3 +3,4 @@ flutter_native_splash:
   image: "assets/icon/storely.png"
   android: true
   ios: true
+  web: true
