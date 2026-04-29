@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -350,7 +349,10 @@ class CloudSyncEngine {
 
     // Pull shop data (all members can read).
     try {
-      final shopRows = await _pullTable('shops', updatedAfter: pullFirst ? null : lastSync);
+      final shopRows = await _pullTable(
+        'shops',
+        updatedAfter: pullFirst ? null : lastSync,
+      );
       await database.cloudImportRows('shops', shopRows);
     } catch (_) {
       // Staff might not see shop on first pull — not fatal.
@@ -470,9 +472,7 @@ class CloudSyncEngine {
     }
     final rows = await database.cloudExportRows('shops');
     if (rows.isEmpty) return;
-    await client
-        .from('shops')
-        .upsert(rows, onConflict: 'uuid');
+    await client.from('shops').upsert(rows, onConflict: 'uuid');
   }
 
   Future<void> _pushTable(String table, {String? updatedAfter}) async {
