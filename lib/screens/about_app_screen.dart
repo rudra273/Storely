@@ -140,7 +140,7 @@ class AboutAppScreen extends StatelessWidget {
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'Version 1.0.0 includes core inventory management, billing, QR scanning, and store setup features for first production release.',
+                  'Version 1.0.1 includes core inventory management, billing, QR scanning, and store setup features for first production release.',
                   style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 14,

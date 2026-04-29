@@ -579,7 +579,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.0',
+                    subtitle: 'App information and version 1.0.1',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),
