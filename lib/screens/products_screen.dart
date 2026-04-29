@@ -4299,27 +4299,7 @@ class _ProductCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                   ],
-                  if (product.category != null) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.navy.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        product.category!,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.navy,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
+
                   _sourceBadge(product.sourceLabel, product.isImported),
                   const SizedBox(width: 8),
                   _sourceBadge(
@@ -4365,22 +4345,16 @@ class _ProductCard extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              if (product.productCode != null || product.barcode != null) ...[
+              if (product.barcode != null) ...[
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
-                    if (product.productCode != null)
-                      _InfoChip(
-                        icon: Icons.tag_outlined,
-                        label: product.productCode!,
-                      ),
-                    if (product.barcode != null)
-                      _InfoChip(
-                        icon: Icons.qr_code_scanner_rounded,
-                        label: product.barcode!,
-                      ),
+                    _InfoChip(
+                      icon: Icons.qr_code_scanner_rounded,
+                      label: product.barcode!,
+                    ),
                   ],
                 ),
               ],

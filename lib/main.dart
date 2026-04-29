@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
 import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
+import 'screens/welcome_screen.dart';
 import 'services/cloud_service.dart';
 
 Future<void> main() async {
@@ -90,12 +92,50 @@ class StorelyApp extends StatelessWidget {
   }
 }
 
-class AppGate extends StatelessWidget {
+class AppGate extends StatefulWidget {
   const AppGate({super.key});
 
   @override
+  State<AppGate> createState() => _AppGateState();
+}
+
+class _AppGateState extends State<AppGate> {
+  bool _isLoading = true;
+  bool _isFirstLaunch = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFirstLaunch();
+  }
+
+  Future<void> _checkFirstLaunch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isFirst = prefs.getBool('is_first_launch') ?? true;
+    if (mounted) {
+      setState(() {
+        _isFirstLaunch = isFirst;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _completeWelcome() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_first_launch', false);
+    if (mounted) {
+      setState(() {
+        _isFirstLaunch = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const AppShell();
+    if (_isLoading) return const Scaffold(backgroundColor: AppColors.cream);
+    return _isFirstLaunch
+        ? WelcomeScreen(onComplete: _completeWelcome)
+        : const AppShell();
   }
 }
 

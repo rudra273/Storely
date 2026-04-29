@@ -199,11 +199,18 @@ mixin DatabaseBills {
     });
   }
 
-  Future<int> updateBillPaidStatus(int id, bool isPaid) async {
+  Future<int> updateBillPaidStatus(int id, bool isPaid, {String? paymentMethod}) async {
     final db = await database;
+    final updates = <String, dynamic>{
+      'is_paid': isPaid ? 1 : 0,
+      'updated_at': _nowIso()
+    };
+    if (paymentMethod != null) {
+      updates['payment_method'] = paymentMethod;
+    }
     final count = await db.update(
       'bills',
-      {'is_paid': isPaid ? 1 : 0, 'updated_at': _nowIso()},
+      updates,
       where: 'id = ?',
       whereArgs: [id],
     );

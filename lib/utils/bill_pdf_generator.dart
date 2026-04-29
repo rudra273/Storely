@@ -114,7 +114,7 @@ class BillPdfGenerator {
             title: 'Payment',
             lines: [
               bill.isPaid ? 'Status: Paid' : 'Status: Unpaid',
-              'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
+              if (bill.isPaid) 'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
               if (shop?.gstRegistered == true) 'GST: Registered',
               if (shop?.gstRegistered != true) 'GST: Not registered',
             ],

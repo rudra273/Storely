@@ -16,6 +16,7 @@ part 'database_settings.dart';
 part 'database_products.dart';
 part 'database_bills.dart';
 part 'database_sync.dart';
+part 'database_kpi.dart';
 
 const _uuid = Uuid();
 const _defaultShopId = 'local-shop';
@@ -26,7 +27,8 @@ class DatabaseHelper
         DatabaseSettings,
         DatabaseProducts,
         DatabaseBills,
-        DatabaseSync {
+        DatabaseSync,
+        DatabaseKpi {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 

@@ -1,4 +1,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ═══════════════════════════════════════════════════
+         PERMISSIONS
+         ═══════════════════════════════════════════════════ -->
+
+    <!-- Internet access — required for Supabase cloud sync -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Network state — required by connectivity_plus to detect online/offline -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Camera — required by mobile_scanner for QR / barcode scanning -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- File access for file_picker (CSV / Excel import) on Android ≤ 12 (API 32).
+         On Android 13+ the system document picker handles access without this. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+
+    <!-- Camera hardware feature — marked required="false" so the app is NOT
+         filtered out on Play Store for devices without a camera. The scanner
+         feature degrades gracefully when no camera is present. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false"/>
+
     <application
         android:label="Storely"
         android:name="${applicationName}"
@@ -31,6 +58,7 @@
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
+
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
          https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
@@ -40,6 +68,15 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- url_launcher — needed for opening external links (bill sharing, etc.) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
         </intent>
     </queries>
 </manifest>

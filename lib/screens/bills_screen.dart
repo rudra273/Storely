@@ -6,6 +6,7 @@ import '../main.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/shop_profile.dart';
+import '../services/cloud_service.dart';
 import '../utils/bill_pdf_generator.dart';
 import 'scan_screen.dart';
 
@@ -20,6 +21,14 @@ class BillsScreen extends StatefulWidget {
 class _BillsScreenState extends State<BillsScreen> {
   List<Bill> _bills = [];
   bool _isLoading = true;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -71,9 +80,9 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _updateBillStatus(Bill bill, bool isPaid) async {
+  Future<void> _updateBillStatus(Bill bill, bool isPaid, {String? paymentMethod}) async {
     if (bill.id == null) return;
-    await DatabaseHelper.instance.updateBillPaidStatus(bill.id!, isPaid);
+    await DatabaseHelper.instance.updateBillPaidStatus(bill.id!, isPaid, paymentMethod: paymentMethod);
     await _loadBills();
   }
 
@@ -147,8 +156,10 @@ class _BillsScreenState extends State<BillsScreen> {
     }
     buffer
       ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}')
-      ..writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
+      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}');
+    if (bill.isPaid) {
+      buffer.writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
+    }
     return buffer.toString();
   }
 
@@ -170,7 +181,12 @@ class _BillsScreenState extends State<BillsScreen> {
               onRefresh: _loadBills,
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                children: _buildGroupedBillCards(),
+                children: [
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
+                  _buildUnpaidSummary(),
+                  ..._buildGroupedBillCards(),
+                ],
               ),
             ),
       floatingActionButton: _isLoading || _bills.isEmpty
@@ -185,11 +201,137 @@ class _BillsScreenState extends State<BillsScreen> {
     );
   }
 
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchCtrl,
+      decoration: InputDecoration(
+        hintText: 'Search by name, bill # or date...',
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear_rounded, size: 20),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      onChanged: (val) {
+        setState(() => _searchQuery = val.trim().toLowerCase());
+      },
+    );
+  }
+
+  Widget _buildUnpaidSummary() {
+    if (_searchQuery.isNotEmpty) return const SizedBox.shrink();
+
+    final unpaid = _bills.where((b) => !b.isPaid).toList();
+    if (unpaid.isEmpty) return const SizedBox.shrink();
+
+    unpaid.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    Map<String, double> customerTotals = {};
+    for (var b in unpaid) {
+      final name = b.customerName.trim().isEmpty ? 'Walk-in' : b.customerName.trim();
+      customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
+          ),
+          title: const Text(
+            'Unpaid Bills Summary',
+            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.error),
+          ),
+          subtitle: Text('${unpaid.length} pending bill${unpaid.length != 1 ? 's' : ''}', style: const TextStyle(fontSize: 12)),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            const Divider(),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Total Due by Customer', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textMuted)),
+            ),
+            const SizedBox(height: 8),
+            ...customerTotals.entries.map((e) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text(e.key, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+                  Text('₹${e.value.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.error)),
+                ],
+              ),
+            )),
+            const SizedBox(height: 16),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('All Unpaid Bills', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textMuted)),
+            ),
+            const SizedBox(height: 8),
+            ...unpaid.map((b) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 50,
+                    child: Text(DateFormat('dd MMM').format(b.createdAt), style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(b.customerName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text('#${b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber}', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                  Text('₹${b.totalAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.error)),
+                ],
+              ),
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<Widget> _buildGroupedBillCards() {
     final widgets = <Widget>[];
     String? currentGroup;
 
-    for (final bill in _bills) {
+    final filtered = _bills.where((b) {
+      if (_searchQuery.isEmpty) return true;
+      final query = _searchQuery;
+      final nameMatches = b.customerName.toLowerCase().contains(query);
+      final numMatches = b.billNumber.toLowerCase().contains(query);
+      final dateMatches = DateFormat('dd MMM yyyy').format(b.createdAt).toLowerCase().contains(query);
+      return nameMatches || numMatches || dateMatches;
+    }).toList();
+
+    for (final bill in filtered) {
       final group = _dateGroupTitle(bill.createdAt);
       if (group != currentGroup) {
         currentGroup = group;
@@ -200,7 +342,7 @@ class _BillsScreenState extends State<BillsScreen> {
         _BillCard(
           bill: bill,
           onDelete: () => _deleteBill(bill),
-          onStatusChanged: (isPaid) => _updateBillStatus(bill, isPaid),
+          onStatusChanged: (isPaid, method) => _updateBillStatus(bill, isPaid, paymentMethod: method),
           onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
           onSharePdf: () => _shareBillPdf(bill),
         ),
@@ -286,7 +428,7 @@ class _BillCard extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback onSendWhatsApp;
   final VoidCallback onSharePdf;
-  final ValueChanged<bool> onStatusChanged;
+  final void Function(bool isPaid, String? paymentMethod) onStatusChanged;
   const _BillCard({
     required this.bill,
     required this.onDelete,
@@ -301,12 +443,61 @@ class _BillCard extends StatefulWidget {
 class _BillCardState extends State<_BillCard> {
   bool _expanded = false;
 
+  Future<void> _togglePaidStatus() async {
+    final bill = widget.bill;
+    if (bill.isPaid) {
+      widget.onStatusChanged(false, null);
+    } else {
+      final method = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Payment Method'),
+          content: const Text('How was this bill paid?'),
+          actions: [
+            TextButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'cash'),
+              icon: const Icon(Icons.payments_outlined),
+              label: const Text('Cash'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'online'),
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              label: const Text('Online'),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+            ),
+          ],
+        ),
+      );
+      if (method != null) {
+        widget.onStatusChanged(true, method);
+      }
+    }
+  }
+
   Future<void> _showProfitSummary() {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _BillProfitSheet(bill: widget.bill),
+    );
+  }
+
+  Widget _buildActionButton(VoidCallback onPressed, IconData icon, String label, Color color) {
+    return FractionallySizedBox(
+      widthFactor: 0.5,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Text(label, overflow: TextOverflow.ellipsis),
+          style: TextButton.styleFrom(
+            foregroundColor: color,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+        ),
+      ),
     );
   }
 
@@ -369,9 +560,16 @@ class _BillCardState extends State<_BillCard> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      _PaymentChip(isPaid: bill.isPaid),
-                      const SizedBox(height: 4),
-                      _MethodChip(method: bill.paymentMethod),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _PaymentChip(isPaid: bill.isPaid),
+                          if (bill.isPaid) ...[
+                            const SizedBox(width: 4),
+                            _MethodChip(method: bill.paymentMethod),
+                          ],
+                        ],
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         '₹${bill.totalAmount.toStringAsFixed(2)}',
@@ -466,88 +664,32 @@ class _BillCardState extends State<_BillCard> {
                     ),
                     _AmountRow(
                       label: 'Discount',
-                      value:
-                          '${bill.discountPercent.toStringAsFixed(2)}% • - ₹${bill.discountAmount.toStringAsFixed(2)}',
+                      value: '${bill.discountPercent.toStringAsFixed(2)}% • - ₹${bill.discountAmount.toStringAsFixed(2)}',
                     ),
                     const SizedBox(height: 4),
                   ],
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Expanded(
-                        child: Wrap(
-                          spacing: 4,
-                          runSpacing: 0,
-                          children: [
-                            TextButton.icon(
-                              onPressed: widget.onDelete,
-                              icon: const Icon(Icons.delete_outline, size: 18),
-                              label: const Text('Delete'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.error,
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () =>
-                                  widget.onStatusChanged(!bill.isPaid),
-                              icon: Icon(
-                                bill.isPaid
-                                    ? Icons.pending_actions_outlined
-                                    : Icons.check_circle_outline,
-                                size: 18,
-                              ),
-                              label: Text(
-                                bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
-                              ),
-                              style: TextButton.styleFrom(
-                                foregroundColor: bill.isPaid
-                                    ? AppColors.textMuted
-                                    : AppColors.success,
-                              ),
-                            ),
-                            if (bill.customerPhone != null)
-                              TextButton.icon(
-                                onPressed: widget.onSendWhatsApp,
-                                icon: const Icon(Icons.send_outlined, size: 18),
-                                label: const Text('WhatsApp'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppColors.success,
-                                ),
-                              ),
-                            TextButton.icon(
-                              onPressed: widget.onSharePdf,
-                              icon: const Icon(
-                                Icons.ios_share_rounded,
-                                size: 18,
-                              ),
-                              label: const Text('Share'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.navy,
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: _showProfitSummary,
-                              icon: const Icon(
-                                Icons.trending_up_rounded,
-                                size: 18,
-                              ),
-                              label: const Text('View Profit'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.navy,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
+                      const Text('Total Amount', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textMuted)),
                       Text(
-                        'Total: ₹${bill.totalAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
+                        '₹${bill.totalAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.navy),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    children: [
+                      if (CloudService.instance.state.value.isAdmin)
+                        _buildActionButton(widget.onDelete, Icons.delete_outline, 'Delete', AppColors.error),
+                      _buildActionButton(_togglePaidStatus, bill.isPaid ? Icons.pending_actions_outlined : Icons.check_circle_outline, bill.isPaid ? 'Mark Unpaid' : 'Mark Paid', bill.isPaid ? AppColors.textMuted : AppColors.success),
+                      if (bill.customerPhone != null)
+                        _buildActionButton(widget.onSendWhatsApp, Icons.send_outlined, 'WhatsApp', AppColors.success),
+                      _buildActionButton(widget.onSharePdf, Icons.ios_share_rounded, 'Share', AppColors.navy),
+                      _buildActionButton(_showProfitSummary, Icons.trending_up_rounded, 'View Profit', AppColors.navy),
                     ],
                   ),
                 ],
@@ -649,37 +791,69 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(height: 14),
-              ...bill.items.map((item) => _ProfitItemRow(item: item)),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _commissionCtrl,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.cream,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                decoration: const InputDecoration(
-                  labelText: 'Commission % from profit (optional)',
-                  suffixText: '%',
+                child: Column(
+                  children: [
+                    _ProfitTotalRow('Total Revenue', revenue),
+                    _ProfitTotalRow('Purchase Cost', cost),
+                    _ProfitTotalRow('Overhead', 0.0), // Placeholder for future feature
+                    if (gst > 0) _ProfitTotalRow('GST', gst),
+                    const Divider(height: 16),
+                    _ProfitTotalRow('Gross Profit', profit, isBold: true, color: AppColors.success),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Text('Partner Commission %', style: TextStyle(color: AppColors.textMuted, fontSize: 13, fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        SizedBox(
+                          width: 80,
+                          height: 36,
+                          child: TextField(
+                            controller: _commissionCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            decoration: InputDecoration(
+                              contentPadding: EdgeInsets.zero,
+                              suffixText: '%',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                            onChanged: (value) => setState(() {
+                              _commissionPercent = (double.tryParse(value) ?? 0).clamp(0, 100).toDouble();
+                            }),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (commission > 0) ...[
+                      const SizedBox(height: 10),
+                      _ProfitTotalRow('Commission Payable', -commission, color: AppColors.error),
+                    ],
+                    const Divider(height: 20),
+                    _ProfitTotalRow('Net Profit', net, isBold: true, fontSize: 18),
+                  ],
                 ),
-                onChanged: (value) => setState(() {
-                  _commissionPercent = (double.tryParse(value) ?? 0)
-                      .clamp(0, 100)
-                      .toDouble();
-                }),
               ),
-              const Divider(height: 24),
-              _ProfitTotalRow('Total Revenue', revenue),
-              _ProfitTotalRow('Total Cost', cost),
-              _ProfitTotalRow('Gross Profit', profit),
-              _ProfitTotalRow('Commission Payable', commission),
-              _ProfitTotalRow('Your Net Profit', net),
-              _ProfitTotalRow('GST Collected', gst),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: _saveCommission,
                 icon: const Icon(Icons.save_outlined),
                 label: const Text('Save Commission'),
-                style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.navy,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
               ),
             ],
           ),
@@ -689,68 +863,28 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
   }
 }
 
-class _ProfitItemRow extends StatelessWidget {
-  final BillItem item;
 
-  const _ProfitItemRow({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  item.productName,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              Text(
-                item.wasDirectPrice ? 'direct' : 'formula',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${item.quantityLabel}    Sold: ₹${item.sellingPriceSnapshot.toStringAsFixed(2)}    Cost: ₹${item.costSnapshot.toStringAsFixed(2)}    Profit: ₹${item.profitSnapshot.toStringAsFixed(2)}',
-            style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _ProfitTotalRow extends StatelessWidget {
   final String label;
   final double value;
+  final bool isBold;
+  final Color? color;
+  final double fontSize;
 
-  const _ProfitTotalRow(this.label, this.value);
+  const _ProfitTotalRow(this.label, this.value, {this.isBold = false, this.color, this.fontSize = 14});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textMuted)),
-          const Spacer(),
+          Text(label, style: TextStyle(color: color ?? AppColors.textMuted, fontSize: fontSize, fontWeight: isBold ? FontWeight.w700 : FontWeight.normal)),
           Text(
-            '₹${value.toStringAsFixed(2)}',
-            style: const TextStyle(fontWeight: FontWeight.w800),
+            '${value < 0 ? '-' : ''}₹${value.abs().toStringAsFixed(2)}',
+            style: TextStyle(fontWeight: isBold ? FontWeight.w800 : FontWeight.w600, fontSize: fontSize, color: color),
           ),
         ],
       ),

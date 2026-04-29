@@ -5,6 +5,7 @@ import '../models/bill.dart';
 import '../models/product.dart';
 import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
+import 'notifications_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final int refreshToken;
@@ -29,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _todayBillCount = 0;
   double _todaySales = 0;
   String? _shopName;
+  String _attentionSearchQuery = '';
 
   @override
   void initState() {
@@ -187,7 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _QuickAction(
                           icon: Icons.grid_view_rounded,
                           label: 'QR Sheet',
-                          color: AppColors.textMuted,
+                          color: AppColors.navy,
                           filled: false,
                           onTap: () async {
                             final products = await DatabaseHelper.instance
@@ -213,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _QuickAction(
                           icon: Icons.bar_chart_rounded,
                           label: 'Reports',
-                          color: AppColors.textMuted,
+                          color: AppColors.navy,
                           filled: false,
                           onTap: () {
                             Navigator.push(
@@ -228,35 +230,61 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     const SizedBox(height: 28),
-                    if (_unpaidBills.isNotEmpty) ...[
-                      Row(
-                        children: [
-                          const Text(
-                            'Unpaid Bills',
+                    Row(
+                      children: [
+                        const Text(
+                          'Unpaid Bills',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => widget.onNavigate(2),
+                          child: Text(
+                            'View All →',
                             style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
+                              color: AppColors.amber,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => widget.onNavigate(2),
-                            child: Text(
-                              'View All →',
-                              style: TextStyle(
-                                color: AppColors.amber,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_unpaidBills.isNotEmpty) ...[
                       ..._unpaidBills.map(
                         (bill) => _UnpaidBillItem(bill: bill),
                       ),
-                      const SizedBox(height: 20),
-                    ],
+                    ] else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.task_alt_rounded,
+                              size: 40,
+                              color: AppColors.amber.withValues(alpha: 0.7),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'All bills are paid!',
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 20),
                     const SizedBox(height: 8),
                     // ── NEEDS ATTENTION ──
                     Row(
@@ -282,6 +310,28 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
+                    // Search bar for Needs Attention
+                    if (_lowStockProducts.isNotEmpty || _attentionSearchQuery.isNotEmpty) ...[
+                      TextField(
+                        onChanged: (value) {
+                          setState(() {
+                            _attentionSearchQuery = value.toLowerCase();
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search items...',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     if (_lowStockProducts.isEmpty)
                       Container(
                         width: double.infinity,
@@ -293,9 +343,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           children: [
                             Icon(
-                              Icons.check_circle_outline,
+                              Icons.inventory_2_outlined,
                               size: 40,
-                              color: AppColors.textMuted.withValues(alpha: 0.4),
+                              color: AppColors.amber.withValues(alpha: 0.7),
                             ),
                             const SizedBox(height: 8),
                             Text(
@@ -303,14 +353,23 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(
                                 color: AppColors.textMuted,
                                 fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
                         ),
                       )
+                    else if (_attentionSearchQuery.isNotEmpty && !_lowStockProducts.any((p) => p.name.toLowerCase().contains(_attentionSearchQuery)))
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(child: Text('No items found matching your search')),
+                      )
                     else
-                      ...(_lowStockProducts.map(
-                        (p) => _LowStockItem(product: p),
+                      ...(_lowStockProducts.where((p) => p.name.toLowerCase().contains(_attentionSearchQuery)).map(
+                        (p) => _LowStockItem(
+                          product: p,
+                          onUpdate: _loadData,
+                        ),
                       )),
                     const SizedBox(height: 80),
                   ],
@@ -400,7 +459,7 @@ class _QuickAction extends StatelessWidget {
               color: filled ? color : null,
               border: filled
                   ? null
-                  : Border.all(color: AppColors.creamDark, width: 2),
+                  : Border.all(color: color, width: 2),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(icon, color: filled ? Colors.white : color, size: 26),
@@ -419,67 +478,120 @@ class _QuickAction extends StatelessWidget {
 
 class _LowStockItem extends StatelessWidget {
   final Product product;
-  const _LowStockItem({required this.product});
+  final VoidCallback onUpdate;
+  const _LowStockItem({required this.product, required this.onUpdate});
 
   @override
   Widget build(BuildContext context) {
     final isOut = product.quantity == 0;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: isOut ? AppColors.error : AppColors.amber,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _showQuantityDialog(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
               children: [
-                Text(
-                  product.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: isOut ? AppColors.error : AppColors.amber,
+                    shape: BoxShape.circle,
                   ),
                 ),
-                Text(
-                  isOut ? 'Out of stock' : 'Only ${product.quantityLabel} left',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        product.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                      Text(
+                        isOut ? 'Out of stock' : 'Only ${product.quantityLabel} left',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isOut
+                        ? AppColors.error.withValues(alpha: 0.1)
+                        : AppColors.amber.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isOut ? 'Out' : 'Low',
+                    style: TextStyle(
+                      color: isOut ? AppColors.error : AppColors.amber,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: isOut
-                  ? AppColors.error.withValues(alpha: 0.1)
-                  : AppColors.amber.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              isOut ? 'Out' : 'Low',
-              style: TextStyle(
-                color: isOut ? AppColors.error : AppColors.amber,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
+  }
+
+  void _showQuantityDialog(BuildContext context) {
+    final qtyCtrl = TextEditingController(
+      text: product.quantity == product.quantity.toInt()
+          ? product.quantity.toInt().toString()
+          : product.quantity.toString(),
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Update Quantity'),
+          content: TextField(
+            controller: qtyCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'New Quantity',
+              hintText: 'Enter new quantity',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newQty = double.tryParse(qtyCtrl.text) ?? 0;
+                final updatedProduct = product.copyWith(quantity: newQty);
+                await DatabaseHelper.instance.updateProduct(updatedProduct);
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    ).then((updated) {
+      if (updated == true) {
+        onUpdate();
+      }
+    });
   }
 }
 
@@ -611,7 +723,12 @@ class _HomeHeaderDelegate extends SliverPersistentHeaderDelegate {
               child: Opacity(
                 opacity: expanded,
                 child: IconButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                    );
+                  },
                   icon: const Icon(
                     Icons.notifications_outlined,
                     color: Colors.white,
