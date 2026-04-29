@@ -607,8 +607,9 @@ mixin DatabaseKpi {
 
   String _dateWhere(String col, String? from, String? to) {
     var clause = '';
-    if (from != null) clause += " AND substr($col,1,10) >= '$from'";
-    if (to != null) clause += " AND substr($col,1,10) <= '$to'";
+    final dateRegex = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+    if (from != null && dateRegex.hasMatch(from)) clause += " AND substr($col,1,10) >= '$from'";
+    if (to != null && dateRegex.hasMatch(to)) clause += " AND substr($col,1,10) <= '$to'";
     return clause;
   }
 }

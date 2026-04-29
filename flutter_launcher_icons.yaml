@@ -1,0 +1,7 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/storely.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#F8F4ED"
+  adaptive_icon_foreground: "assets/icon/storely.png"

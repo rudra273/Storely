@@ -7,7 +7,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
   static const String _policyText = '''
 Storely Privacy Policy
-Effective Date: April 23, 2026
+Effective Date: April 29, 2026
 
 1. Introduction
 Storely is designed to help store owners manage inventory and billing. This Privacy Policy explains how the app handles the information you enter.
@@ -18,30 +18,36 @@ By default, the information you enter is stored locally on your device, includin
 - Product details (name, price, quantity, unit, barcode, category, supplier)
 - Billing information created in the app
 
-3. How Data Is Stored
-Storely can be used without an account or cloud sync. If you enable the optional Cloud Sync feature, the app connects to the Supabase project configured in the app and syncs your store data with that project so approved users can share the same data.
+3. Cloud Sync & Third-Party Processors
+Storely can be used completely offline. If you choose to enable the optional Cloud Sync feature, the app connects to the Supabase project configured. 
+- The data is synchronized to Supabase servers.
+- Supabase acts as a third-party data processor. Their privacy policy can be found at https://supabase.com/privacy.
+- You are responsible for ensuring you have the legal right to synchronize your store's data to the cloud.
 
 4. Permissions Used
-- Camera: used only for barcode and QR scanning.
-- File access: used for importing and exporting files such as invoices, CSV or Excel files, and QR sheets.
+- Camera: Used exclusively for scanning barcodes and QR codes. Images are processed locally and not uploaded.
+- Network State & Internet: Used to check connectivity and synchronize data to your configured Supabase project.
+- Storage/Files: Used to import/export Excel, CSV files, and save PDF bills to your device.
 
 5. Data Sharing
-Storely does not sell your personal data. No advertising SDK is included in version 1.0.0. Storely does not share data with third parties by default. If you enable Cloud Sync, your data is stored in the Supabase project you configure. If you choose to export a file, print a bill, or send a bill through another app such as WhatsApp, the information you share may be handled by that selected app or service.
+Storely does not sell your personal data. Storely does not contain advertising SDKs or third-party trackers. Storely does not share data with third parties by default. If you export a file or share a bill through another app (like WhatsApp), the information you share is governed by that app's privacy policy.
 
 6. Data Security
-Storely follows standard mobile app development practices. Because data is stored on your device, you are responsible for securing access to your device. Cloud Sync should use only a Supabase URL and anon public key in the app; service role keys should never be added to Storely.
+Because data is stored on your device by default, you are responsible for securing access to your device. If using Cloud Sync, ensure you only use the "anon public" key in the app configuration and securely manage your Supabase database access rules.
 
-7. Your Control
-You can modify or delete store, product, and billing records from within the app. Uninstalling the app may remove local app data, depending on your device settings.
+7. Data Deletion & Retention
+- Local Data: You can delete all your local data at any time by uninstalling the Storely app or clearing the app data in your device settings.
+- Cloud Data: If you enabled Cloud Sync, you can delete your data directly from your Supabase project dashboard. 
+- Requesting Deletion: If you require assistance deleting an account associated with Cloud Sync, you may contact us at the email below.
 
 8. Children's Privacy
-Storely is not designed for children under 13, and it is intended for business use.
+Storely is a business tool and is not designed for children under 13.
 
 9. Policy Updates
-This Privacy Policy may be updated in future releases. Any changes should be reflected in the latest app version and the Play Store listing.
+This Privacy Policy may be updated in future releases. Any changes will be reflected in the latest app version and the Play Store listing.
 
 10. Contact
-For any privacy-related questions or concerns, contact us at:
+For any privacy-related questions, data deletion requests, or concerns, contact us at:
 rosmoxx@gmail.com
 ''';
 

@@ -254,7 +254,7 @@ class _ScanScreenState extends State<ScanScreen> {
       return;
     }
     var discountPercent = 0.0;
-    var isPaid = true;
+    var isPaid = false;
     var paymentMethod = 'cash';
     var hideCustomerSuggestions = false;
 
@@ -267,6 +267,7 @@ class _ScanScreenState extends State<ScanScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         builder: (sheetContext) {
+          final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
           return StatefulBuilder(
             builder: (ctx, setSheetState) {
               final percent = discountPercent.clamp(0, 100).toDouble();
@@ -281,12 +282,7 @@ class _ScanScreenState extends State<ScanScreen> {
                     );
               return SingleChildScrollView(
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    20,
-                    20,
-                    MediaQuery.viewInsetsOf(ctx).bottom + 20,
-                  ),
+                  padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 20),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,24 +397,26 @@ class _ScanScreenState extends State<ScanScreen> {
                         onSelectionChanged: (value) =>
                             setSheetState(() => isPaid = value.first),
                       ),
-                      const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: 'cash',
-                            icon: Icon(Icons.payments_outlined),
-                            label: Text('Cash'),
-                          ),
-                          ButtonSegment(
-                            value: 'online',
-                            icon: Icon(Icons.account_balance_wallet_outlined),
-                            label: Text('Online'),
-                          ),
-                        ],
-                        selected: {paymentMethod},
-                        onSelectionChanged: (value) =>
-                            setSheetState(() => paymentMethod = value.first),
-                      ),
+                      if (isPaid) ...[
+                        const SizedBox(height: 12),
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(
+                              value: 'cash',
+                              icon: Icon(Icons.payments_outlined),
+                              label: Text('Cash'),
+                            ),
+                            ButtonSegment(
+                              value: 'online',
+                              icon: Icon(Icons.account_balance_wallet_outlined),
+                              label: Text('Online'),
+                            ),
+                          ],
+                          selected: {paymentMethod},
+                          onSelectionChanged: (value) =>
+                              setSheetState(() => paymentMethod = value.first),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(16),

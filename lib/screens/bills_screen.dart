@@ -147,8 +147,10 @@ class _BillsScreenState extends State<BillsScreen> {
     }
     buffer
       ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}')
-      ..writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
+      ..writeln('Status: ${bill.isPaid ? 'Paid' : 'Unpaid'}');
+    if (bill.isPaid) {
+      buffer.writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
+    }
     return buffer.toString();
   }
 
@@ -170,7 +172,10 @@ class _BillsScreenState extends State<BillsScreen> {
               onRefresh: _loadBills,
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                children: _buildGroupedBillCards(),
+                children: [
+                  _buildUnpaidSummary(),
+                  ..._buildGroupedBillCards(),
+                ],
               ),
             ),
       floatingActionButton: _isLoading || _bills.isEmpty
@@ -182,6 +187,87 @@ class _BillsScreenState extends State<BillsScreen> {
               icon: const Icon(Icons.receipt_long_rounded),
               label: const Text('New Bill'),
             ),
+    );
+  }
+
+  Widget _buildUnpaidSummary() {
+    final unpaid = _bills.where((b) => !b.isPaid).toList();
+    if (unpaid.isEmpty) return const SizedBox.shrink();
+
+    unpaid.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    Map<String, double> customerTotals = {};
+    for (var b in unpaid) {
+      final name = b.customerName.trim().isEmpty ? 'Walk-in' : b.customerName.trim();
+      customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Unpaid Bills (Dues)',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.error),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowHeight: 40,
+              dataRowMinHeight: 35,
+              dataRowMaxHeight: 40,
+              columns: const [
+                DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('Bill #', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('Amount', style: TextStyle(fontWeight: FontWeight.bold))),
+              ],
+              rows: unpaid.map((b) => DataRow(cells: [
+                DataCell(Text(DateFormat('dd MMM').format(b.createdAt))),
+                DataCell(Text(b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber)),
+                DataCell(Text(b.customerName)),
+                DataCell(Text('₹${b.totalAmount.toStringAsFixed(0)}', style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w600))),
+              ])).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Total Due by Customer',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowHeight: 40,
+              dataRowMinHeight: 35,
+              dataRowMaxHeight: 40,
+              columns: const [
+                DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('Total Due', style: TextStyle(fontWeight: FontWeight.bold))),
+              ],
+              rows: customerTotals.entries.map((e) => DataRow(cells: [
+                DataCell(Text(e.key)),
+                DataCell(Text('₹${e.value.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w700))),
+              ])).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Divider(),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
@@ -371,8 +457,10 @@ class _BillCardState extends State<_BillCard> {
                     children: [
                       _PaymentChip(isPaid: bill.isPaid),
                       const SizedBox(height: 4),
-                      _MethodChip(method: bill.paymentMethod),
-                      const SizedBox(height: 4),
+                      if (bill.isPaid) ...[
+                        _MethodChip(method: bill.paymentMethod),
+                        const SizedBox(height: 4),
+                      ],
                       Text(
                         '₹${bill.totalAmount.toStringAsFixed(2)}',
                         style: const TextStyle(

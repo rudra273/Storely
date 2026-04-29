@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../main.dart';
 
 class AboutAppScreen extends StatelessWidget {
   const AboutAppScreen({super.key});
-
-  static const String appVersion = '1.0.0';
 
   @override
   Widget build(BuildContext context) {
@@ -61,23 +60,29 @@ class AboutAppScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
-              children: const [
-                Icon(Icons.verified_outlined, color: AppColors.amber),
-                SizedBox(width: 10),
-                Text(
+              children: [
+                const Icon(Icons.verified_outlined, color: AppColors.amber),
+                const SizedBox(width: 10),
+                const Text(
                   'Version',
                   style: TextStyle(
                     color: AppColors.navy,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                Spacer(),
-                Text(
-                  appVersion,
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontWeight: FontWeight.w700,
-                  ),
+                const Spacer(),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    final version = snapshot.data?.version ?? '1.0.0';
+                    return Text(
+                      version,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
