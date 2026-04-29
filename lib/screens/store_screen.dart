@@ -503,7 +503,7 @@ class _StoreScreenState extends State<StoreScreen> {
               onRefresh: _loadStoreData,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 112),
                 children: [
                   ValueListenableBuilder<CloudState>(
                     valueListenable: CloudService.instance.state,
@@ -511,21 +511,22 @@ class _StoreScreenState extends State<StoreScreen> {
                       profile: _shopProfile,
                       gstRegistered: _pricingSettings.gstRegistered,
                       onEdit: cloudState.isAdmin ? _editShopProfile : null,
-                      roleLabel: cloudState.isConfigured && cloudState.isSignedIn
+                      roleLabel:
+                          cloudState.isConfigured && cloudState.isSignedIn
                           ? cloudState.shopRole
                           : null,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  _CloudSyncPanel(onSetup: _openCloudSetup, onSync: _syncCloud),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
+                  const _SectionLabel(title: 'Settings Configuration'),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Categories',
                     subtitle: '${_categories.length} saved',
                     icon: Icons.category_outlined,
                     onTap: _showCategoryManager,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Suppliers',
                     subtitle:
@@ -533,7 +534,7 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.local_shipping_outlined,
                     onTap: _showSupplierManager,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Pricing Defaults',
                     subtitle:
@@ -541,37 +542,41 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.calculate_outlined,
                     onTap: _showGlobalPricingSettings,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Needs Attention',
                     subtitle: 'Show stock at $_lowStockThreshold or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Customers',
                     subtitle: '${_customers.length} saved',
                     icon: Icons.people_outline_rounded,
                     onTap: _showCustomerTable,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Analytics',
                     subtitle: 'Revenue, profit, GST and unit volume',
                     icon: Icons.analytics_outlined,
                     onTap: _openAnalytics,
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
+                  const _SectionLabel(title: 'Advanced'),
+                  const SizedBox(height: 8),
+                  _CloudSyncPanel(onSetup: _openCloudSetup, onSync: _syncCloud),
+                  const SizedBox(height: 14),
                   const _SectionLabel(title: 'Legal & App Information'),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'Privacy policy',
                     subtitle: 'Privacy policy and data usage details',
                     icon: Icons.privacy_tip_outlined,
                     onTap: _openPrivacyPolicy,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _StoreActionRow(
                     title: 'About',
                     subtitle: 'App information and version 1.0.0',
@@ -593,7 +598,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
       child: Text(
         title,
         style: const TextStyle(
@@ -601,6 +606,7 @@ class _SectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: 1.0,
           color: AppColors.textMuted,
+          height: 1.1,
         ),
       ),
     );
@@ -620,7 +626,9 @@ class _CloudSyncPanel extends StatelessWidget {
       builder: (context, state, _) {
         final email = state.user?.email;
         final role = state.shopRole;
-        final roleStr = role != null ? ' (${role[0].toUpperCase()}${role.substring(1)})' : '';
+        final roleStr = role != null
+            ? ' (${role[0].toUpperCase()}${role.substring(1)})'
+            : '';
         final subtitle = !state.isConfigured
             ? 'Local only'
             : email == null
@@ -1098,7 +1106,10 @@ class _ShopPanel extends StatelessWidget {
                   children: [
                     const Text(
                       'Shop',
-                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textMuted,
+                      ),
                     ),
                     if (roleLabel != null) ...[
                       const SizedBox(width: 8),
@@ -1455,10 +1466,10 @@ class _StorePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: child,
     );
@@ -1473,13 +1484,13 @@ class _PanelIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 38,
-      width: 38,
+      height: 34,
+      width: 34,
       decoration: BoxDecoration(
         color: AppColors.amber.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(icon, color: AppColors.amber),
+      child: Icon(icon, color: AppColors.amber, size: 21),
     );
   }
 }
