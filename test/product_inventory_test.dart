@@ -153,6 +153,28 @@ void main() {
       expect(byName['Replace Me']!.purchasePrice, 45);
       expect(byName['New Item']!.quantity, 2);
     });
+
+    test('cloud import compares parsed timestamps instead of text', () async {
+      final productId = await db.insertProduct(
+        Product(name: 'Synced Item', mrp: 100, purchasePrice: 80, quantity: 5),
+      );
+      final database = await db.database;
+      await database.update(
+        'products',
+        {'updated_at': '2026-04-30T11:30:00.000'},
+        where: 'id = ?',
+        whereArgs: [productId],
+      );
+      final rows = await db.cloudExportRows('products');
+      final cloudRow = Map<String, dynamic>.from(rows.single)
+        ..['quantity_cache'] = 7.0
+        ..['updated_at'] = '2026-04-30T06:01:00.000Z';
+
+      await db.cloudImportRows('products', [cloudRow]);
+
+      final product = await db.getProductById(productId);
+      expect(product!.quantity, 7);
+    });
   });
 }
 

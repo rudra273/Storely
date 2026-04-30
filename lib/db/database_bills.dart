@@ -199,11 +199,15 @@ mixin DatabaseBills {
     });
   }
 
-  Future<int> updateBillPaidStatus(int id, bool isPaid, {String? paymentMethod}) async {
+  Future<int> updateBillPaidStatus(
+    int id,
+    bool isPaid, {
+    String? paymentMethod,
+  }) async {
     final db = await database;
     final updates = <String, dynamic>{
       'is_paid': isPaid ? 1 : 0,
-      'updated_at': _nowIso()
+      'updated_at': _nowIso(),
     };
     if (paymentMethod != null) {
       updates['payment_method'] = paymentMethod;
@@ -344,7 +348,7 @@ mixin DatabaseBills {
     String? sourceUuid,
     DateTime? createdAt,
   }) async {
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc();
     await executor.insert('stock_movements', {
       'uuid': _newUuid(),
       'shop_id': _defaultShopId,

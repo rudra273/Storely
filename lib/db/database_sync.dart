@@ -267,6 +267,9 @@ mixin DatabaseSync {
 bool _cloudIsNewer(String? localUpdatedAt, String? cloudUpdatedAt) {
   if (cloudUpdatedAt == null || cloudUpdatedAt.isEmpty) return false;
   if (localUpdatedAt == null || localUpdatedAt.isEmpty) return true;
+  final local = DateTime.tryParse(localUpdatedAt);
+  final cloud = DateTime.tryParse(cloudUpdatedAt);
+  if (local != null && cloud != null) return cloud.isAfter(local);
   return cloudUpdatedAt.compareTo(localUpdatedAt) > 0;
 }
 

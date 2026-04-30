@@ -112,7 +112,7 @@ mixin DatabaseProducts {
     return db.transaction((txn) async {
       final productToUpdate = await _prepareProductForWrite(
         txn,
-        product.copyWith(updatedAt: DateTime.now()),
+        product.copyWith(updatedAt: DateTime.now().toUtc()),
       );
       final count = await txn.update(
         'products',
@@ -147,7 +147,7 @@ mixin DatabaseProducts {
         product.copyWith(
           quantity: current.quantity + quantityAdded,
           source: source,
-          updatedAt: DateTime.now(),
+          updatedAt: DateTime.now().toUtc(),
         ),
       );
       final count = await txn.update(
@@ -685,7 +685,7 @@ mixin DatabaseProducts {
     DatabaseExecutor executor,
     Product product,
   ) async {
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc();
     final categoryId = product.category == null
         ? product.categoryId
         : await _ensureCategory(executor, product.category!);
@@ -721,7 +721,7 @@ mixin DatabaseProducts {
     DateTime? createdAt,
   }) async {
     if (quantityDelta == 0) return;
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc();
     await executor.insert('stock_movements', {
       'uuid': _newUuid(),
       'shop_id': _defaultShopId,

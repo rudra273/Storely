@@ -62,7 +62,7 @@ String? _normaliseName(String? value) {
 
 String _newUuid() => _uuid.v4();
 
-String _nowIso() => DateTime.now().toIso8601String();
+String _nowIso() => DateTime.now().toUtc().toIso8601String();
 
 bool _isPresetUnit(String value) {
   return Product.presetUnits.any(

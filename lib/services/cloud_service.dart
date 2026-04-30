@@ -371,11 +371,11 @@ class CloudSyncEngine {
       }
     } else {
       for (final table in storelyCloudTables) {
-        await _pushTable(table, updatedAfter: lastSync);
-      }
-      for (final table in storelyCloudTables) {
         final rows = await _pullTable(table, updatedAfter: lastSync);
         await database.cloudImportRows(table, rows);
+      }
+      for (final table in storelyCloudTables) {
+        await _pushTable(table, updatedAfter: lastSync);
       }
     }
 
@@ -476,10 +476,11 @@ class CloudSyncEngine {
   }
 
   Future<void> _pushTable(String table, {String? updatedAfter}) async {
-    final rows = await database.cloudExportRows(
+    var rows = await database.cloudExportRows(
       table,
       updatedAfter: updatedAfter,
     );
+    rows = await _onlyRowsNewerThanCloud(table, rows);
     if (rows.isEmpty) return;
     await client
         .from(table)
@@ -487,6 +488,75 @@ class CloudSyncEngine {
           rows,
           onConflict: table == 'app_settings' ? 'shop_id,key' : 'uuid',
         );
+  }
+
+  Future<List<Map<String, dynamic>>> _onlyRowsNewerThanCloud(
+    String table,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    if (rows.isEmpty) return rows;
+
+    if (table == 'app_settings') {
+      final shopIds = rows
+          .map((row) => row['shop_id']?.toString())
+          .whereType<String>()
+          .toSet();
+      final remoteRows = <Map<String, dynamic>>[];
+      for (final shopId in shopIds) {
+        final response = await client
+            .from(table)
+            .select('shop_id,key,updated_at')
+            .eq('shop_id', shopId);
+        remoteRows.addAll(
+          (response as List).map(
+            (row) => Map<String, dynamic>.from(row as Map),
+          ),
+        );
+      }
+      final remoteUpdatedByKey = {
+        for (final row in remoteRows)
+          '${row['shop_id']}::${row['key']}': row['updated_at']?.toString(),
+      };
+      return rows.where((row) {
+        final key = '${row['shop_id']}::${row['key']}';
+        return _timestampIsNewer(
+          row['updated_at']?.toString(),
+          remoteUpdatedByKey[key],
+        );
+      }).toList();
+    }
+
+    final uuids = rows
+        .map((row) => row['uuid']?.toString())
+        .whereType<String>()
+        .where((uuid) => uuid.isNotEmpty)
+        .toList();
+    if (uuids.isEmpty) return rows;
+
+    final remoteUpdatedByUuid = <String, String?>{};
+    for (var start = 0; start < uuids.length; start += 100) {
+      final end = start + 100 < uuids.length ? start + 100 : uuids.length;
+      final response = await client
+          .from(table)
+          .select('uuid,updated_at')
+          .inFilter('uuid', uuids.sublist(start, end));
+      for (final row in response as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final uuid = map['uuid']?.toString();
+        if (uuid != null && uuid.isNotEmpty) {
+          remoteUpdatedByUuid[uuid] = map['updated_at']?.toString();
+        }
+      }
+    }
+
+    return rows.where((row) {
+      final uuid = row['uuid']?.toString();
+      if (uuid == null || uuid.isEmpty) return false;
+      return _timestampIsNewer(
+        row['updated_at']?.toString(),
+        remoteUpdatedByUuid[uuid],
+      );
+    }).toList();
   }
 
   Future<List<Map<String, dynamic>>> _pullTable(
@@ -502,4 +572,15 @@ class CloudSyncEngine {
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
   }
+}
+
+bool _timestampIsNewer(String? candidate, String? existing) {
+  if (candidate == null || candidate.isEmpty) return false;
+  if (existing == null || existing.isEmpty) return true;
+  final candidateDate = DateTime.tryParse(candidate);
+  final existingDate = DateTime.tryParse(existing);
+  if (candidateDate != null && existingDate != null) {
+    return candidateDate.isAfter(existingDate);
+  }
+  return candidate.compareTo(existing) > 0;
 }
