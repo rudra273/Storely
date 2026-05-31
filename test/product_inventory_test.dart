@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/product.dart';
+import 'package:storely/models/product_purchase.dart';
 
 void main() {
   late DatabaseHelper db;
@@ -130,6 +131,88 @@ void main() {
       expect(secondDateIds, {byName['Item B']});
     });
 
+    test(
+      'purchase batch uses selected purchase date for new products',
+      () async {
+        final purchaseDate = DateTime(2026, 4, 20);
+
+        final count = await db.commitProductPurchaseBatch([
+          ProductPurchaseCommit(
+            product: Product(
+              name: 'Batch Item',
+              mrp: 25,
+              purchasePrice: 20,
+              quantity: 6,
+              createdAt: DateTime(2026, 5, 1),
+            ),
+            quantityAdded: 6,
+          ),
+        ], purchaseDate: purchaseDate);
+
+        final products = await db.getAllProducts();
+        final summaries = await db.getProductPurchaseSummaries();
+        final purchasedIds = await db.getProductIdsPurchasedOn(purchaseDate);
+
+        expect(count, 1);
+        expect(products, hasLength(1));
+        expect(purchasedIds, {products.single.id});
+        expect(summaries[products.single.id]!.lastPurchaseDate, purchaseDate);
+      },
+    );
+
+    test('purchase batch rolls back all products if one write fails', () async {
+      final purchaseDate = DateTime(2026, 4, 20);
+      final fixedUuid = 'fixed-product-uuid';
+
+      expect(
+        () => db.commitProductPurchaseBatch([
+          ProductPurchaseCommit(
+            product: Product(
+              uuid: fixedUuid,
+              name: 'First Item',
+              mrp: 25,
+              purchasePrice: 20,
+              quantity: 6,
+            ),
+            quantityAdded: 6,
+          ),
+          ProductPurchaseCommit(
+            product: Product(
+              uuid: fixedUuid,
+              name: 'Second Item',
+              mrp: 30,
+              purchasePrice: 22,
+              quantity: 4,
+            ),
+            quantityAdded: 4,
+          ),
+        ], purchaseDate: purchaseDate),
+        throwsA(isA<DatabaseException>()),
+      );
+
+      expect(await db.getAllProducts(), isEmpty);
+      expect(await _stockRows(), isEmpty);
+    });
+
+    test('manual quantity edit records adjustment movement', () async {
+      final productId = await db.insertProduct(
+        Product(name: 'Adjust Me', mrp: 100, purchasePrice: 80, quantity: 10),
+      );
+      final product = await db.getProductById(productId);
+
+      await db.updateProduct(product!.copyWith(quantity: 7));
+
+      final updated = await db.getProductById(productId);
+      final rows = await _stockRows();
+      final adjustmentRows = rows
+          .where((row) => row['movement_type'] == StockMovementType.adjustment)
+          .toList();
+
+      expect(updated!.quantity, 7);
+      expect(adjustmentRows, hasLength(1));
+      expect(adjustmentRows.single['quantity_delta'], -3);
+    });
+
     test('replace import only replaces imported identities', () async {
       await db.insertProduct(
         Product(name: 'Keep Me', mrp: 100, purchasePrice: 80, quantity: 7),
@@ -191,4 +274,9 @@ Future<List<Map<String, Object?>>> _purchaseRows() async {
     whereArgs: ['purchase'],
     orderBy: 'id ASC',
   );
+}
+
+Future<List<Map<String, Object?>>> _stockRows() async {
+  final database = await DatabaseHelper.instance.database;
+  return database.query('stock_movements', orderBy: 'id ASC');
 }

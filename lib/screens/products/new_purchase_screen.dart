@@ -10,7 +10,7 @@ class _NewPurchaseScreen extends StatefulWidget {
 
   /// Edits an existing staged draft; returns the updated draft (or null).
   final Future<_PurchaseDraft?> Function(
-    Product draftProduct,
+    _PurchaseDraft draft,
     Set<String> stagedNames,
   )
   editProduct;
@@ -57,7 +57,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
     final current = _drafts[index];
     // Allow re-saving with the same name: exclude this draft from the blocklist.
     final blocked = _stagedNames..remove(current.name.toLowerCase());
-    final draft = await widget.editProduct(current.product, blocked);
+    final draft = await widget.editProduct(current, blocked);
     if (draft == null || !mounted) return;
     setState(() => _drafts[index] = draft);
   }

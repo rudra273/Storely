@@ -1,3 +1,5 @@
+import 'product.dart';
+
 class StockMovementType {
   static const purchase = 'purchase';
   static const sale = 'sale';
@@ -97,5 +99,17 @@ class ProductImportResult {
     required this.updated,
     required this.possibleDuplicate,
     this.duplicateOnDifferentDate = false,
+  });
+}
+
+class ProductPurchaseCommit {
+  final Product product;
+  final double quantityAdded;
+  final Product? restockTarget;
+
+  const ProductPurchaseCommit({
+    required this.product,
+    required this.quantityAdded,
+    this.restockTarget,
   });
 }

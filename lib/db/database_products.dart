@@ -4,29 +4,14 @@ mixin DatabaseProducts {
   Future<Database> get database;
   Future<GlobalPricingSettings> getGlobalPricingSettings();
 
-  Future<int> insertProduct(Product product) async {
+  Future<int> insertProduct(Product product, {DateTime? purchaseDate}) async {
     final db = await database;
     return db.transaction((txn) async {
-      final productToInsert = await _prepareProductForWrite(txn, product);
-      final id = await txn.insert(
-        'products',
-        productToInsert.toMap()..remove('id'),
-        conflictAlgorithm: ConflictAlgorithm.abort,
+      final id = await _insertProductInTransaction(
+        txn,
+        product,
+        purchaseDate: purchaseDate,
       );
-      if (productToInsert.quantity > 0) {
-        await _insertStockMovement(
-          txn,
-          productId: id,
-          productUuid: productToInsert.uuid,
-          movementType: StockMovementType.purchase,
-          quantityDelta: productToInsert.quantity,
-          unitCost: productToInsert.purchasePrice,
-          sourceType: productToInsert.source == ProductSource.imported
-              ? 'import'
-              : 'manual',
-          createdAt: productToInsert.createdAt,
-        );
-      }
       notifyDatabaseChanged();
       return id;
     });
@@ -110,6 +95,17 @@ mixin DatabaseProducts {
   Future<int> updateProduct(Product product) async {
     final db = await database;
     return db.transaction((txn) async {
+      final existing = product.id == null
+          ? const <Map<String, dynamic>>[]
+          : await _queryProducts(
+              txn,
+              where: 'p.id = ?',
+              whereArgs: [product.id],
+              limit: 1,
+            );
+      final current = existing.isEmpty
+          ? null
+          : Product.fromMap(existing.single);
       final productToUpdate = await _prepareProductForWrite(
         txn,
         product.copyWith(updatedAt: DateTime.now().toUtc()),
@@ -120,6 +116,19 @@ mixin DatabaseProducts {
         where: 'id = ?',
         whereArgs: [product.id],
       );
+      if (count > 0 && current != null) {
+        final quantityDelta = productToUpdate.quantity - current.quantity;
+        await _insertStockMovement(
+          txn,
+          productId: product.id!,
+          productUuid: productToUpdate.uuid,
+          movementType: StockMovementType.adjustment,
+          quantityDelta: quantityDelta,
+          unitCost: productToUpdate.purchasePrice,
+          sourceType: 'manual',
+          notes: 'Manual stock adjustment',
+        );
+      }
       notifyDatabaseChanged();
       return count;
     });
@@ -134,40 +143,60 @@ mixin DatabaseProducts {
     if (product.id == null) throw ArgumentError('Product id is required');
     final db = await database;
     return db.transaction((txn) async {
-      final existing = await _queryProducts(
+      final count = await _restockProductInTransaction(
         txn,
-        where: 'p.id = ?',
-        whereArgs: [product.id],
-        limit: 1,
-      );
-      if (existing.isEmpty) return 0;
-      final current = Product.fromMap(existing.single);
-      final updatedProduct = await _prepareProductForWrite(
-        txn,
-        product.copyWith(
-          quantity: current.quantity + quantityAdded,
-          source: source,
-          updatedAt: DateTime.now().toUtc(),
-        ),
-      );
-      final count = await txn.update(
-        'products',
-        updatedProduct.toMap(),
-        where: 'id = ?',
-        whereArgs: [product.id],
-      );
-      await _insertStockMovement(
-        txn,
-        productId: product.id!,
-        productUuid: updatedProduct.uuid,
-        movementType: StockMovementType.purchase,
-        quantityDelta: quantityAdded.toDouble(),
-        unitCost: updatedProduct.purchasePrice,
-        sourceType: source == ProductSource.imported ? 'import' : 'manual',
-        createdAt: purchaseDate,
+        product,
+        quantityAdded: quantityAdded,
+        purchaseDate: purchaseDate,
+        source: source,
       );
       notifyDatabaseChanged();
       return count;
+    });
+  }
+
+  Future<int> commitProductPurchaseBatch(
+    List<ProductPurchaseCommit> commits, {
+    required DateTime purchaseDate,
+    String source = ProductSource.mobile,
+  }) async {
+    if (commits.isEmpty) return 0;
+    final db = await database;
+    return db.transaction((txn) async {
+      var committed = 0;
+      for (final commit in commits) {
+        final target = commit.restockTarget;
+        if (target != null) {
+          if (target.id == null) {
+            throw ArgumentError('Restock target id is required');
+          }
+          final restockProduct = commit.product.copyWith(
+            id: target.id,
+            uuid: target.uuid,
+            shopId: target.shopId,
+            createdAt: target.createdAt,
+          );
+          final count = await _restockProductInTransaction(
+            txn,
+            restockProduct,
+            quantityAdded: commit.quantityAdded,
+            purchaseDate: purchaseDate,
+            source: source,
+          );
+          if (count == 0) {
+            throw StateError('Product "${target.name}" no longer exists');
+          }
+        } else {
+          await _insertProductInTransaction(
+            txn,
+            commit.product,
+            purchaseDate: purchaseDate,
+          );
+        }
+        committed++;
+      }
+      notifyDatabaseChanged();
+      return committed;
     });
   }
 
@@ -689,6 +718,77 @@ mixin DatabaseProducts {
       whereArgs: [product.name],
       limit: 1,
     );
+  }
+
+  Future<int> _insertProductInTransaction(
+    DatabaseExecutor executor,
+    Product product, {
+    DateTime? purchaseDate,
+  }) async {
+    final productToInsert = await _prepareProductForWrite(executor, product);
+    final id = await executor.insert(
+      'products',
+      productToInsert.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+    if (productToInsert.quantity > 0) {
+      await _insertStockMovement(
+        executor,
+        productId: id,
+        productUuid: productToInsert.uuid,
+        movementType: StockMovementType.purchase,
+        quantityDelta: productToInsert.quantity,
+        unitCost: productToInsert.purchasePrice,
+        sourceType: productToInsert.source == ProductSource.imported
+            ? 'import'
+            : 'manual',
+        createdAt: purchaseDate ?? productToInsert.createdAt,
+      );
+    }
+    return id;
+  }
+
+  Future<int> _restockProductInTransaction(
+    DatabaseExecutor executor,
+    Product product, {
+    required num quantityAdded,
+    required DateTime purchaseDate,
+    String source = ProductSource.mobile,
+  }) async {
+    if (product.id == null) throw ArgumentError('Product id is required');
+    final existing = await _queryProducts(
+      executor,
+      where: 'p.id = ?',
+      whereArgs: [product.id],
+      limit: 1,
+    );
+    if (existing.isEmpty) return 0;
+    final current = Product.fromMap(existing.single);
+    final updatedProduct = await _prepareProductForWrite(
+      executor,
+      product.copyWith(
+        quantity: current.quantity + quantityAdded,
+        source: source,
+        updatedAt: DateTime.now().toUtc(),
+      ),
+    );
+    final count = await executor.update(
+      'products',
+      updatedProduct.toMap(),
+      where: 'id = ?',
+      whereArgs: [product.id],
+    );
+    await _insertStockMovement(
+      executor,
+      productId: product.id!,
+      productUuid: updatedProduct.uuid,
+      movementType: StockMovementType.purchase,
+      quantityDelta: quantityAdded.toDouble(),
+      unitCost: updatedProduct.purchasePrice,
+      sourceType: source == ProductSource.imported ? 'import' : 'manual',
+      createdAt: purchaseDate,
+    );
+    return count;
   }
 
   Future<Product> _prepareProductForWrite(

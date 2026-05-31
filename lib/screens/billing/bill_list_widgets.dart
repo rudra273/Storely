@@ -49,7 +49,7 @@ class _UnpaidSummary extends StatelessWidget {
       final name = b.customerName.trim().isEmpty
           ? 'Walk-in'
           : b.customerName.trim();
-      customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
+      customerTotals[name] = (customerTotals[name] ?? 0) + b.balanceDue;
     }
 
     return Padding(
@@ -144,7 +144,7 @@ class _UnpaidSummary extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '₹${b.totalAmount.toStringAsFixed(0)}',
+                        '₹${b.balanceDue.toStringAsFixed(0)}',
                         style: AppText.body.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.error,

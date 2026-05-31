@@ -1300,12 +1300,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
             initialSupplier: selectedSupplier,
             stagedNames: stagedNames,
           ),
-          editProduct: (draftProduct, stagedNames) => _showAddEditSheet(
-            product: draftProduct,
+          editProduct: (draft, stagedNames) => _showAddEditSheet(
+            product: draft.product,
             stageOnly: true,
             initialPurchaseDate: purchaseDate,
             initialSupplier: selectedSupplier,
             stagedNames: stagedNames,
+            stagedRestockTarget: draft.restockTarget,
           ),
           pickAndParseImport: _pickAndParseImport,
           matchExisting: _matchExistingByName,
@@ -1327,38 +1328,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return null;
   }
 
-  /// Commits a staged purchase batch in one pass: restock matches, insert the
-  /// rest. Returns the number of items committed. Restock status is re-resolved
-  /// by name here so editing/import drafts never lose it.
+  /// Commits a staged purchase batch in one database transaction: restock
+  /// matches, insert the rest. Returns the number of items committed.
   Future<int> _commitPurchaseBatch(
     List<_PurchaseDraft> drafts,
     DateTime purchaseDate,
   ) async {
-    final db = DatabaseHelper.instance;
-    var committed = 0;
-    for (final draft in drafts) {
+    final commits = drafts.map((draft) {
       final target = draft.restockTarget ?? _matchExistingByName(draft.name);
-      if (target != null) {
-        // Carry the draft's edited catalog/pricing fields onto the existing
-        // product's identity, then add the quantity as a restock.
-        final restockProduct = draft.product.copyWith(
-          id: target.id,
-          uuid: target.uuid,
-          shopId: target.shopId,
-          createdAt: target.createdAt,
-        );
-        await db.restockProduct(
-          restockProduct,
-          quantityAdded: draft.quantityAdded,
-          purchaseDate: purchaseDate,
-          source: ProductSource.mobile,
-        );
-      } else {
-        await db.insertProduct(draft.product);
-      }
-      committed++;
-    }
-    return committed;
+      return ProductPurchaseCommit(
+        product: draft.product,
+        quantityAdded: draft.quantityAdded,
+        restockTarget: target,
+      );
+    }).toList();
+    return DatabaseHelper.instance.commitProductPurchaseBatch(
+      commits,
+      purchaseDate: purchaseDate,
+      source: ProductSource.mobile,
+    );
   }
 
   // ── Add/Edit Sheet ──
@@ -1371,7 +1359,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
     String? initialSupplier,
     bool stageOnly = false,
     Set<String> stagedNames = const {},
+    Product? stagedRestockTarget,
   }) async {
+    final isCatalogEditing = product != null && !stageOnly;
     final isEditing = product != null;
     final db = DatabaseHelper.instance;
     final globalPricing = await db.getGlobalPricingSettings();
@@ -1407,7 +1397,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier ?? initialSupplier;
     String? selectedUnit = product?.unit;
-    Product? selectedExistingProduct;
+    Product? selectedExistingProduct = stagedRestockTarget;
+    final lockedRestockTarget = stageOnly && stagedRestockTarget != null;
     var purchaseDate = initialPurchaseDate ?? DateTime.now();
     var hideProductSuggestions = false;
     double effectiveGst() =>
@@ -1636,13 +1627,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 try {
                   final name = nameCtrl.text.trim();
                   final restockingExisting =
-                      !isEditing && selectedExistingProduct != null;
+                      !isCatalogEditing && selectedExistingProduct != null;
 
                   // In staging mode, block a name already in this batch (unless it's
                   // the same staged item being edited).
-                  if (stageOnly &&
-                      !isEditing &&
-                      stagedNames.contains(name.toLowerCase())) {
+                  if (stageOnly && stagedNames.contains(name.toLowerCase())) {
                     if (ctx.mounted) {
                       setSheet(() {
                         nameError = '"$name" is already in this batch';
@@ -1786,7 +1775,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   if (isEditing) {
                     await DatabaseHelper.instance.updateProduct(p);
                   } else {
-                    await DatabaseHelper.instance.insertProduct(p);
+                    await DatabaseHelper.instance.insertProduct(
+                      p,
+                      purchaseDate: purchaseDate,
+                    );
                   }
                   hasUserEdited = false;
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1885,7 +1877,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           onChanged: (_) {
                                             markEdited();
                                             hideProductSuggestions = false;
-                                            selectedExistingProduct = null;
+                                            if (!lockedRestockTarget) {
+                                              selectedExistingProduct = null;
+                                            }
                                             if (nameError != null) {
                                               setSheet(() => nameError = null);
                                             } else {
