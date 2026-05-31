@@ -2436,6 +2436,10 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
   late final TextEditingController _emailCtrl;
   late final TextEditingController _addressCtrl;
   late final TextEditingController _notesCtrl;
+  late final TextEditingController _gstinCtrl;
+  late final TextEditingController _gstLegalNameCtrl;
+  late final TextEditingController _gstTradeNameCtrl;
+  late final TextEditingController _stateCodeCtrl;
 
   @override
   void initState() {
@@ -2446,6 +2450,16 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
     _emailCtrl = TextEditingController(text: customer?.email ?? '');
     _addressCtrl = TextEditingController(text: customer?.address ?? '');
     _notesCtrl = TextEditingController(text: customer?.notes ?? '');
+    _gstinCtrl = TextEditingController(text: customer?.gstin ?? '');
+    _gstLegalNameCtrl = TextEditingController(
+      text: customer?.gstLegalName ?? '',
+    );
+    _gstTradeNameCtrl = TextEditingController(
+      text: customer?.gstTradeName ?? '',
+    );
+    _stateCodeCtrl = TextEditingController(
+      text: customer?.placeOfSupplyStateCode ?? '',
+    );
   }
 
   @override
@@ -2455,6 +2469,10 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
     _emailCtrl.dispose();
     _addressCtrl.dispose();
     _notesCtrl.dispose();
+    _gstinCtrl.dispose();
+    _gstLegalNameCtrl.dispose();
+    _gstTradeNameCtrl.dispose();
+    _stateCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -2472,6 +2490,14 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
         email: _cleanOptional(_emailCtrl.text),
         address: _cleanOptional(_addressCtrl.text),
         notes: _cleanOptional(_notesCtrl.text),
+        gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
+        gstLegalName: _cleanOptional(_gstLegalNameCtrl.text),
+        gstTradeName: _cleanOptional(_gstTradeNameCtrl.text),
+        gstSource: _cleanOptional(_gstinCtrl.text) == null ? null : 'manual',
+        gstVerifiedAt: _cleanOptional(_gstinCtrl.text) == null
+            ? null
+            : DateTime.now(),
+        placeOfSupplyStateCode: _cleanOptional(_stateCodeCtrl.text),
         totalPurchaseAmount: current?.totalPurchaseAmount ?? 0,
         billCount: current?.billCount ?? 0,
         lastPurchaseAt: current?.lastPurchaseAt,
@@ -2525,6 +2551,42 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
                 if (email.isEmpty) return null;
                 return email.contains('@') ? null : 'Invalid email';
               },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _gstinCtrl,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'GSTIN',
+                prefixIcon: Icon(Icons.badge_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _gstLegalNameCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Legal Business Name',
+                prefixIcon: Icon(Icons.business_center_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _gstTradeNameCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Trade Name',
+                prefixIcon: Icon(Icons.storefront_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _stateCodeCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Place of Supply State Code',
+                prefixIcon: Icon(Icons.map_outlined, size: 18),
+              ),
             ),
             const SizedBox(height: 10),
             TextFormField(

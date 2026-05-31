@@ -7,8 +7,10 @@ const storelyCloudTables = [
   'suppliers',
   'customers',
   'products',
+  'invoice_series',
   'bills',
   'bill_items',
+  'bill_payments',
   'stock_movements',
 ];
 

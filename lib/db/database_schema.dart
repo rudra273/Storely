@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -29,12 +29,16 @@ mixin DatabaseSchema {
 
   Future<void> _ensureSchema(Database db) async {
     await _createCleanSchema(db);
+    await _ensureV16Columns(db);
+    await _backfillV16Billing(db);
   }
 
   Future<void> _dropLegacySchema(DatabaseExecutor executor) async {
     for (final table in [
       'bill_items',
+      'bill_payments',
       'bills',
+      'invoice_series',
       'stock_movements',
       'product_purchase_entries',
       'products',
@@ -60,9 +64,12 @@ mixin DatabaseSchema {
     await _createProductTable(executor);
     await _createCustomerTables(executor);
     await _createBillTables(executor);
+    await _createInvoiceSeriesTables(executor);
+    await _createPaymentTables(executor);
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
     await _seedPresetUnits(executor);
+    await _seedDefaultInvoiceSeries(executor);
   }
 
   Future<void> _createShopTables(DatabaseExecutor executor) async {
@@ -102,6 +109,9 @@ mixin DatabaseSchema {
         uuid TEXT NOT NULL UNIQUE,
         shop_id TEXT NOT NULL,
         name TEXT NOT NULL COLLATE NOCASE,
+        hsn_code TEXT,
+        hsn_type TEXT,
+        hsn_description TEXT,
         gst_percent REAL,
         overhead_cost REAL,
         profit_margin_percent REAL,
@@ -190,6 +200,9 @@ mixin DatabaseSchema {
         product_code TEXT,
         barcode TEXT,
         name TEXT NOT NULL COLLATE NOCASE,
+        hsn_code TEXT,
+        hsn_type TEXT,
+        hsn_description TEXT,
         category_id INTEGER,
         supplier_id INTEGER,
         selling_price REAL NOT NULL DEFAULT 0,
@@ -245,6 +258,14 @@ mixin DatabaseSchema {
         email TEXT,
         address TEXT,
         notes TEXT,
+        gstin TEXT,
+        gst_legal_name TEXT,
+        gst_trade_name TEXT,
+        gst_registration_status TEXT,
+        gst_taxpayer_type TEXT,
+        gst_verified_at TEXT,
+        gst_source TEXT,
+        place_of_supply_state_code TEXT,
         total_purchase_amount REAL NOT NULL DEFAULT 0,
         bill_count INTEGER NOT NULL DEFAULT 0,
         last_purchase_at TEXT,
@@ -275,18 +296,32 @@ mixin DatabaseSchema {
         uuid TEXT NOT NULL UNIQUE,
         shop_id TEXT NOT NULL,
         bill_number TEXT NOT NULL,
+        invoice_series_uuid TEXT,
+        bill_type TEXT NOT NULL DEFAULT 'b2c',
         customer_id INTEGER,
         customer_uuid TEXT,
         customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer',
         customer_phone TEXT,
+        customer_gstin TEXT,
+        customer_gst_legal_name TEXT,
+        customer_gst_trade_name TEXT,
+        customer_address_snapshot TEXT,
+        place_of_supply_state_code TEXT,
         subtotal_amount REAL NOT NULL DEFAULT 0,
         discount_percent REAL NOT NULL DEFAULT 0,
         discount_amount REAL NOT NULL DEFAULT 0,
         profit_commission_percent REAL NOT NULL DEFAULT 0,
+        taxable_amount REAL NOT NULL DEFAULT 0,
+        cgst_amount REAL NOT NULL DEFAULT 0,
+        sgst_amount REAL NOT NULL DEFAULT 0,
+        igst_amount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
         payment_method TEXT NOT NULL DEFAULT 'cash',
+        paid_amount REAL NOT NULL DEFAULT 0,
+        balance_due REAL NOT NULL DEFAULT 0,
+        payment_status TEXT NOT NULL DEFAULT 'unpaid',
         device_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -304,6 +339,8 @@ mixin DatabaseSchema {
         product_id INTEGER,
         product_uuid TEXT,
         product_name TEXT NOT NULL,
+        hsn_code_snapshot TEXT,
+        hsn_type_snapshot TEXT,
         unit_name TEXT,
         purchase_price_snapshot REAL NOT NULL DEFAULT 0,
         selling_price_snapshot REAL NOT NULL DEFAULT 0,
@@ -311,6 +348,11 @@ mixin DatabaseSchema {
         profit_snapshot REAL NOT NULL DEFAULT 0,
         commission_snapshot REAL NOT NULL DEFAULT 0,
         gst_snapshot REAL NOT NULL DEFAULT 0,
+        gst_percent_snapshot REAL,
+        taxable_value_snapshot REAL NOT NULL DEFAULT 0,
+        cgst_amount_snapshot REAL NOT NULL DEFAULT 0,
+        sgst_amount_snapshot REAL NOT NULL DEFAULT 0,
+        igst_amount_snapshot REAL NOT NULL DEFAULT 0,
         was_direct_price INTEGER NOT NULL DEFAULT 1,
         quantity REAL NOT NULL DEFAULT 0,
         subtotal REAL NOT NULL,
@@ -355,6 +397,70 @@ mixin DatabaseSchema {
     await executor.execute('''
       CREATE INDEX IF NOT EXISTS idx_bill_items_shop_updated
       ON bill_items(shop_id, updated_at)
+    ''');
+  }
+
+  Future<void> _createInvoiceSeriesTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS invoice_series(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        format_template TEXT NOT NULL,
+        sequence_padding INTEGER NOT NULL DEFAULT 4,
+        reset_period TEXT NOT NULL DEFAULT 'financial_year',
+        allocation_mode TEXT NOT NULL DEFAULT 'local_device',
+        next_sequence INTEGER NOT NULL DEFAULT 1,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        device_token_required INTEGER NOT NULL DEFAULT 1,
+        last_sequence_key TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_series_uuid
+      ON invoice_series(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_invoice_series_shop_updated
+      ON invoice_series(shop_id, updated_at)
+    ''');
+  }
+
+  Future<void> _createPaymentTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS bill_payments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        bill_uuid TEXT NOT NULL,
+        amount REAL NOT NULL,
+        payment_method TEXT NOT NULL DEFAULT 'cash',
+        payment_reference TEXT,
+        notes TEXT,
+        received_at TEXT NOT NULL,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bill_payments_uuid
+      ON bill_payments(uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_payments_bill_uuid
+      ON bill_payments(bill_uuid)
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_payments_shop_updated
+      ON bill_payments(shop_id, updated_at)
     ''');
   }
 
@@ -426,6 +532,139 @@ mixin DatabaseSchema {
     }
   }
 
+  Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor) async {
+    final existing = await executor.query(
+      'invoice_series',
+      columns: ['id'],
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [_defaultShopId],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return;
+    final now = _nowIso();
+    await executor.insert('invoice_series', {
+      'uuid': _newUuid(),
+      'shop_id': _defaultShopId,
+      'name': 'Default Local',
+      'format_template': 'SHOP-LOCAL-{DEVICE}-{YYYY}{MM}{DD}-{SEQ}',
+      'sequence_padding': 4,
+      'reset_period': 'daily',
+      'allocation_mode': 'local_device',
+      'next_sequence': 1,
+      'is_default': 1,
+      'is_active': 1,
+      'device_token_required': 1,
+      'device_id': 'local',
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<void> _ensureV16Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'categories', {
+      'hsn_code': 'TEXT',
+      'hsn_type': 'TEXT',
+      'hsn_description': 'TEXT',
+    });
+    await _ensureColumns(executor, 'products', {
+      'hsn_code': 'TEXT',
+      'hsn_type': 'TEXT',
+      'hsn_description': 'TEXT',
+    });
+    await _ensureColumns(executor, 'customers', {
+      'gstin': 'TEXT',
+      'gst_legal_name': 'TEXT',
+      'gst_trade_name': 'TEXT',
+      'gst_registration_status': 'TEXT',
+      'gst_taxpayer_type': 'TEXT',
+      'gst_verified_at': 'TEXT',
+      'gst_source': 'TEXT',
+      'place_of_supply_state_code': 'TEXT',
+    });
+    await _ensureColumns(executor, 'bills', {
+      'invoice_series_uuid': 'TEXT',
+      'bill_type': "TEXT NOT NULL DEFAULT 'b2c'",
+      'customer_gstin': 'TEXT',
+      'customer_gst_legal_name': 'TEXT',
+      'customer_gst_trade_name': 'TEXT',
+      'customer_address_snapshot': 'TEXT',
+      'place_of_supply_state_code': 'TEXT',
+      'taxable_amount': 'REAL NOT NULL DEFAULT 0',
+      'cgst_amount': 'REAL NOT NULL DEFAULT 0',
+      'sgst_amount': 'REAL NOT NULL DEFAULT 0',
+      'igst_amount': 'REAL NOT NULL DEFAULT 0',
+      'paid_amount': 'REAL NOT NULL DEFAULT 0',
+      'balance_due': 'REAL NOT NULL DEFAULT 0',
+      'payment_status': "TEXT NOT NULL DEFAULT 'unpaid'",
+    });
+    await _ensureColumns(executor, 'bill_items', {
+      'hsn_code_snapshot': 'TEXT',
+      'hsn_type_snapshot': 'TEXT',
+      'gst_percent_snapshot': 'REAL',
+      'taxable_value_snapshot': 'REAL NOT NULL DEFAULT 0',
+      'cgst_amount_snapshot': 'REAL NOT NULL DEFAULT 0',
+      'sgst_amount_snapshot': 'REAL NOT NULL DEFAULT 0',
+      'igst_amount_snapshot': 'REAL NOT NULL DEFAULT 0',
+    });
+  }
+
+  Future<void> _ensureColumns(
+    DatabaseExecutor executor,
+    String table,
+    Map<String, String> columns,
+  ) async {
+    final existing = await executor.rawQuery('PRAGMA table_info($table)');
+    final names = existing.map((row) => row['name']?.toString()).toSet();
+    for (final entry in columns.entries) {
+      if (names.contains(entry.key)) continue;
+      await executor.execute(
+        'ALTER TABLE $table ADD COLUMN ${entry.key} ${entry.value}',
+      );
+    }
+  }
+
+  Future<void> _backfillV16Billing(DatabaseExecutor executor) async {
+    final now = _nowIso();
+    await executor.rawUpdate('''
+      UPDATE bill_items
+      SET taxable_value_snapshot = MAX(selling_price_snapshot - gst_snapshot, 0)
+      WHERE taxable_value_snapshot = 0
+    ''');
+    await executor.rawUpdate('''
+      UPDATE bills
+      SET paid_amount = CASE WHEN is_paid = 1 THEN total_amount ELSE 0 END,
+          balance_due = CASE WHEN is_paid = 1 THEN 0 ELSE total_amount END,
+          payment_status = CASE WHEN is_paid = 1 THEN 'paid' ELSE 'unpaid' END,
+          taxable_amount = CASE WHEN taxable_amount = 0 THEN total_amount ELSE taxable_amount END
+      WHERE payment_status = 'unpaid' AND paid_amount = 0 AND balance_due = 0
+    ''');
+    final paidBills = await executor.query(
+      'bills',
+      columns: [
+        'uuid',
+        'shop_id',
+        'total_amount',
+        'payment_method',
+        'created_at',
+      ],
+      where:
+          "deleted_at IS NULL AND is_paid = 1 AND uuid NOT IN (SELECT bill_uuid FROM bill_payments WHERE deleted_at IS NULL)",
+    );
+    for (final bill in paidBills) {
+      await executor.insert('bill_payments', {
+        'uuid': _newUuid(),
+        'shop_id': bill['shop_id'] ?? _defaultShopId,
+        'bill_uuid': bill['uuid'],
+        'amount': bill['total_amount'],
+        'payment_method': bill['payment_method'] ?? 'cash',
+        'notes': 'Migrated from paid status',
+        'received_at': bill['created_at'] ?? now,
+        'created_at': now,
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
   Future<void> syncCustomersFromBills(DatabaseExecutor executor) async {
     final bills = await executor.query(
       'bills',
@@ -463,6 +702,11 @@ mixin DatabaseSchema {
         name: name,
         totalAmount: total,
         createdAt: createdAt,
+        gstin: bill['customer_gstin']?.toString(),
+        gstLegalName: bill['customer_gst_legal_name']?.toString(),
+        gstTradeName: bill['customer_gst_trade_name']?.toString(),
+        address: bill['customer_address_snapshot']?.toString(),
+        placeOfSupplyStateCode: bill['place_of_supply_state_code']?.toString(),
       );
     }
 
@@ -511,8 +755,25 @@ mixin DatabaseSchema {
         'total_purchase_amount': ledger.totalPurchaseAmount,
         'bill_count': ledger.billCount,
         'last_purchase_at': ledger.lastPurchaseAt,
+        'gstin': ledger.gstin,
+        'gst_legal_name': ledger.gstLegalName,
+        'gst_trade_name': ledger.gstTradeName,
+        'address': ledger.address,
+        'gst_source': ledger.gstin == null ? null : 'manual',
+        'gst_verified_at': ledger.gstin == null ? null : now,
+        'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
         'updated_at': now,
       };
+      if (existingId != null && ledger.gstin == null) {
+        data
+          ..remove('gstin')
+          ..remove('gst_legal_name')
+          ..remove('gst_trade_name')
+          ..remove('address')
+          ..remove('gst_source')
+          ..remove('gst_verified_at')
+          ..remove('place_of_supply_state_code');
+      }
 
       final customerId =
           existingId ??
@@ -560,6 +821,11 @@ class _CustomerLedgerDraft {
   final List<int> billIds = [];
   double totalPurchaseAmount = 0;
   int billCount = 0;
+  String? gstin;
+  String? gstLegalName;
+  String? gstTradeName;
+  String? address;
+  String? placeOfSupplyStateCode;
 
   _CustomerLedgerDraft({
     required this.name,
@@ -572,6 +838,11 @@ class _CustomerLedgerDraft {
     required String name,
     required double totalAmount,
     required String createdAt,
+    String? gstin,
+    String? gstLegalName,
+    String? gstTradeName,
+    String? address,
+    String? placeOfSupplyStateCode,
   }) {
     billIds.add(billId);
     totalPurchaseAmount += totalAmount;
@@ -581,6 +852,11 @@ class _CustomerLedgerDraft {
       if (name != 'Walk-in Customer') {
         this.name = name;
       }
+      this.gstin = _normaliseName(gstin)?.toUpperCase();
+      this.gstLegalName = _normaliseName(gstLegalName);
+      this.gstTradeName = _normaliseName(gstTradeName);
+      this.address = _normaliseName(address);
+      this.placeOfSupplyStateCode = _normaliseName(placeOfSupplyStateCode);
     }
   }
 }

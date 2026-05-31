@@ -104,7 +104,14 @@ class BillPdfGenerator {
             title: 'Bill To',
             lines: [
               bill.customerName,
+              if (bill.customerGstin != null) 'GSTIN: ${bill.customerGstin}',
+              if (bill.customerGstLegalName != null)
+                'Legal Name: ${bill.customerGstLegalName}',
+              if (bill.customerGstTradeName != null)
+                'Trade Name: ${bill.customerGstTradeName}',
               if (bill.customerPhone != null) 'Phone: ${bill.customerPhone}',
+              if (bill.customerAddressSnapshot != null)
+                bill.customerAddressSnapshot!,
             ],
           ),
         ),
@@ -113,8 +120,11 @@ class BillPdfGenerator {
           child: _infoBox(
             title: 'Payment',
             lines: [
-              bill.isPaid ? 'Status: Paid' : 'Status: Unpaid',
-              if (bill.isPaid) 'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
+              'Status: ${_paymentStatusLabel(bill.paymentStatus)}',
+              if (bill.paidAmount > 0)
+                'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
+              if (bill.paidAmount > 0) 'Paid: ${_money(bill.paidAmount)}',
+              if (bill.balanceDue > 0) 'Balance: ${_money(bill.balanceDue)}',
               if (shop?.gstRegistered == true) 'GST: Registered',
               if (shop?.gstRegistered != true) 'GST: Not registered',
             ],
@@ -128,6 +138,9 @@ class BillPdfGenerator {
     final headers = [
       '#',
       'Item',
+      if (gstRegistered ||
+          bill.items.any((item) => item.hsnCodeSnapshot != null))
+        'HSN',
       'Rate',
       'Qty',
       if (gstRegistered) 'Net Amount',
@@ -145,6 +158,9 @@ class BillPdfGenerator {
       return [
         '$index',
         item.productName,
+        if (gstRegistered ||
+            bill.items.any((item) => item.hsnCodeSnapshot != null))
+          item.hsnCodeSnapshot ?? '-',
         _money(item.sellingPriceSnapshot),
         item.quantityLabel,
         if (gstRegistered) _money(taxable),
@@ -164,12 +180,7 @@ class BillPdfGenerator {
       headerAlignment: pw.Alignment.centerLeft,
       cellAlignments: {
         0: pw.Alignment.center,
-        2: pw.Alignment.centerRight,
-        3: pw.Alignment.centerRight,
-        if (gstRegistered) 4: pw.Alignment.centerRight,
-        if (gstRegistered) 5: pw.Alignment.centerRight,
-        if (gstRegistered) 6: pw.Alignment.centerRight,
-        if (!gstRegistered) 4: pw.Alignment.centerRight,
+        for (var i = 2; i < headers.length; i++) i: pw.Alignment.centerRight,
       },
       columnWidths: {
         0: const pw.FixedColumnWidth(24),
@@ -209,6 +220,9 @@ class BillPdfGenerator {
               ),
             pw.Divider(),
             _totalRow('Grand total', bill.totalAmount, bold: true),
+            if (bill.paidAmount > 0) _totalRow('Paid', bill.paidAmount),
+            if (bill.balanceDue > 0)
+              _totalRow('Balance due', bill.balanceDue, bold: true),
           ],
         ),
       ),
@@ -291,11 +305,21 @@ class BillPdfGenerator {
     if (bill.billNumber.startsWith('SHOP-LOCAL-')) {
       return 'Bill #${bill.id ?? ''}';
     }
-    return bill.billNumber.isNotEmpty ? bill.billNumber : 'Bill #${bill.id ?? ''}';
+    return bill.billNumber.isNotEmpty
+        ? bill.billNumber
+        : 'Bill #${bill.id ?? ''}';
   }
 
   static String _money(double value) {
     final sign = value < 0 ? '-' : '';
     return '${sign}Rs. ${value.abs().toStringAsFixed(2)}';
+  }
+
+  static String _paymentStatusLabel(String status) {
+    return switch (status) {
+      Bill.statusPaid => 'Paid',
+      Bill.statusPartial => 'Partial',
+      _ => 'Unpaid',
+    };
   }
 }

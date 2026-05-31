@@ -1170,6 +1170,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       text: product?.productCode ?? '',
     );
     final barcodeCtrl = TextEditingController(text: product?.barcode ?? '');
+    final hsnCtrl = TextEditingController(text: product?.hsnCode ?? '');
     final purchaseCtrl = TextEditingController(
       text: product != null ? product.purchasePrice.toStringAsFixed(2) : '',
     );
@@ -1311,6 +1312,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         productCode: productCodeCtrl.text,
         barcode: barcodeCtrl.text,
         name: nameCtrl.text.trim().isEmpty ? 'Product' : nameCtrl.text.trim(),
+        hsnCode: hsnCtrl.text,
         categoryId: product?.categoryId,
         category: selectedCategory,
         supplierId: product?.supplierId,
@@ -1442,6 +1444,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   shopId: existing.shopId,
                   productCode: _optionalControllerText(productCodeCtrl),
                   barcode: _optionalControllerText(barcodeCtrl),
+                  hsnCode: _optionalControllerText(hsnCtrl),
                   name: existing.name,
                   categoryId: existing.categoryId,
                   category: selectedCategory,
@@ -1484,6 +1487,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 shopId: product?.shopId ?? 'local-shop',
                 productCode: _optionalControllerText(productCodeCtrl),
                 barcode: _optionalControllerText(barcodeCtrl),
+                hsnCode: _optionalControllerText(hsnCtrl),
                 name: name,
                 categoryId: product?.categoryId,
                 category: selectedCategory,
@@ -1631,6 +1635,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                               match.barcode ?? '',
                                             );
                                             setFieldText(
+                                              hsnCtrl,
+                                              match.hsnCode ?? '',
+                                            );
+                                            setFieldText(
                                               purchaseCtrl,
                                               match.purchasePrice
                                                   .toStringAsFixed(2),
@@ -1742,6 +1750,26 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           ),
                                         ),
                                       ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextFormField(
+                                      controller: hsnCtrl,
+                                      keyboardType: TextInputType.number,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        LengthLimitingTextInputFormatter(8),
+                                      ],
+                                      decoration: const InputDecoration(
+                                        labelText: 'HSN/SAC Code',
+                                        prefixIcon: Icon(
+                                          Icons.numbers_outlined,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      onChanged: (_) {
+                                        markEdited();
+                                        setSheet(() {});
+                                      },
                                     ),
                                     const SizedBox(height: 10),
                                     _OptionDropdown(

@@ -185,8 +185,14 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<int?> _completeBill({
     required String customerName,
     required String? customerPhone,
+    required String billType,
+    required String? customerGstin,
+    required String? customerGstLegalName,
+    required String? customerGstTradeName,
+    required String? customerAddress,
+    required String? placeOfSupplyStateCode,
     required double discountPercent,
-    required bool isPaid,
+    required double paidAmount,
     required String paymentMethod,
   }) async {
     if (_items.isEmpty) return null;
@@ -205,6 +211,8 @@ class _ScanScreenState extends State<ScanScreen> {
             productId: item.productId,
             productUuid: item.productUuid,
             productName: item.productName,
+            hsnCodeSnapshot: item.hsnCodeSnapshot,
+            hsnTypeSnapshot: item.hsnTypeSnapshot,
             mrp: item.mrp,
             unit: item.unit,
             purchasePriceSnapshot: item.purchasePriceSnapshot,
@@ -213,24 +221,48 @@ class _ScanScreenState extends State<ScanScreen> {
             profitSnapshot: item.profitSnapshot,
             commissionSnapshot: item.commissionSnapshot,
             gstSnapshot: item.gstSnapshot,
+            gstPercentSnapshot: item.gstPercentSnapshot,
+            taxableValueSnapshot: item.taxableValueSnapshot,
+            cgstAmountSnapshot: item.cgstAmountSnapshot,
+            sgstAmountSnapshot: item.sgstAmountSnapshot,
+            igstAmountSnapshot: item.igstAmountSnapshot,
             wasDirectPrice: item.wasDirectPrice,
             quantity: item.quantity,
           ),
         )
         .toList();
+    final received = paidAmount.clamp(0, total).toDouble();
+    final taxableTotal = itemCopies.fold(
+      0.0,
+      (sum, item) => sum + item.totalTaxableValue,
+    );
+    final cgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalCgst);
+    final sgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalSgst);
+    final igstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalIgst);
 
     final bill = Bill(
+      billType: billType,
       customerName: customerName.trim().isEmpty
           ? 'Walk-in Customer'
           : customerName.trim(),
       customerPhone: _cleanOptionalText(customerPhone),
+      customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
+      customerGstLegalName: _cleanOptionalText(customerGstLegalName),
+      customerGstTradeName: _cleanOptionalText(customerGstTradeName),
+      customerAddressSnapshot: _cleanOptionalText(customerAddress),
+      placeOfSupplyStateCode: _cleanOptionalText(placeOfSupplyStateCode),
       subtotalAmount: subtotal,
       discountPercent: percent,
       discountAmount: discount,
+      taxableAmount: taxableTotal,
+      cgstAmount: cgstTotal,
+      sgstAmount: sgstTotal,
+      igstAmount: igstTotal,
       totalAmount: total,
       itemCount: _itemCount,
-      isPaid: isPaid,
+      isPaid: received >= total,
       paymentMethod: paymentMethod,
+      paidAmount: received,
     );
 
     try {
@@ -245,16 +277,29 @@ class _ScanScreenState extends State<ScanScreen> {
 
     final customerController = TextEditingController();
     final phoneController = TextEditingController(text: '+91 ');
+    final gstinController = TextEditingController();
+    final legalNameController = TextEditingController();
+    final tradeNameController = TextEditingController();
+    final addressController = TextEditingController();
+    final stateCodeController = TextEditingController();
     final discountController = TextEditingController();
+    final paidAmountController = TextEditingController();
     final customers = await DatabaseHelper.instance.getAllCustomers();
     if (!mounted) {
       customerController.dispose();
       phoneController.dispose();
+      gstinController.dispose();
+      legalNameController.dispose();
+      tradeNameController.dispose();
+      addressController.dispose();
+      stateCodeController.dispose();
       discountController.dispose();
+      paidAmountController.dispose();
       return;
     }
     var discountPercent = 0.0;
-    var isPaid = false;
+    var billType = Bill.typeB2c;
+    var paymentStatus = Bill.statusUnpaid;
     var paymentMethod = 'cash';
     var hideCustomerSuggestions = false;
 
@@ -273,6 +318,12 @@ class _ScanScreenState extends State<ScanScreen> {
               final percent = discountPercent.clamp(0, 100).toDouble();
               final discount = _subtotal * percent / 100;
               final total = _subtotal - discount;
+              final parsedPaid = paymentStatus == Bill.statusPaid
+                  ? total
+                  : paymentStatus == Bill.statusPartial
+                  ? (double.tryParse(paidAmountController.text) ?? 0)
+                  : 0.0;
+              final paidAmount = parsedPaid.clamp(0, total).toDouble();
               final customerMatches = hideCustomerSuggestions
                   ? <Customer>[]
                   : _matchingCustomers(
@@ -330,6 +381,77 @@ class _ScanScreenState extends State<ScanScreen> {
                           prefixIcon: Icon(Icons.phone_outlined),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: Bill.typeB2c,
+                            icon: Icon(Icons.person_outline_rounded),
+                            label: Text('B2C'),
+                          ),
+                          ButtonSegment(
+                            value: Bill.typeB2b,
+                            icon: Icon(Icons.business_outlined),
+                            label: Text('B2B'),
+                          ),
+                        ],
+                        selected: {billType},
+                        onSelectionChanged: (value) =>
+                            setSheetState(() => billType = value.first),
+                      ),
+                      if (billType == Bill.typeB2b) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: gstinController,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Customer GSTIN',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: legalNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Legal business name',
+                            prefixIcon: Icon(Icons.business_center_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: tradeNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Trade name (optional)',
+                            prefixIcon: Icon(Icons.storefront_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: addressController,
+                          minLines: 2,
+                          maxLines: 3,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            labelText: 'Business address',
+                            prefixIcon: Icon(Icons.location_on_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: stateCodeController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(2),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Place of supply state code',
+                            prefixIcon: Icon(Icons.map_outlined),
+                          ),
+                        ),
+                      ],
                       if (customerMatches.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         _CustomerSuggestionList(
@@ -344,6 +466,29 @@ class _ScanScreenState extends State<ScanScreen> {
                                 phoneController,
                                 _formatCustomerPhoneInput(customer.phone),
                               );
+                              _setControllerText(
+                                gstinController,
+                                customer.gstin ?? '',
+                              );
+                              _setControllerText(
+                                legalNameController,
+                                customer.gstLegalName ?? '',
+                              );
+                              _setControllerText(
+                                tradeNameController,
+                                customer.gstTradeName ?? '',
+                              );
+                              _setControllerText(
+                                addressController,
+                                customer.address ?? '',
+                              );
+                              _setControllerText(
+                                stateCodeController,
+                                customer.placeOfSupplyStateCode ?? '',
+                              );
+                              if (customer.gstin != null) {
+                                billType = Bill.typeB2b;
+                              }
                               hideCustomerSuggestions = true;
                             });
                           },
@@ -380,24 +525,63 @@ class _ScanScreenState extends State<ScanScreen> {
                         },
                       ),
                       const SizedBox(height: 14),
-                      SegmentedButton<bool>(
+                      SegmentedButton<String>(
                         segments: const [
                           ButtonSegment(
-                            value: true,
+                            value: Bill.statusPaid,
                             icon: Icon(Icons.check_circle_outline),
-                            label: Text('Paid'),
+                            label: Text('Paid full'),
                           ),
                           ButtonSegment(
-                            value: false,
+                            value: Bill.statusPartial,
+                            icon: Icon(Icons.payments_outlined),
+                            label: Text('Partial'),
+                          ),
+                          ButtonSegment(
+                            value: Bill.statusUnpaid,
                             icon: Icon(Icons.pending_actions_outlined),
                             label: Text('Unpaid'),
                           ),
                         ],
-                        selected: {isPaid},
-                        onSelectionChanged: (value) =>
-                            setSheetState(() => isPaid = value.first),
+                        selected: {paymentStatus},
+                        onSelectionChanged: (value) => setSheetState(() {
+                          paymentStatus = value.first;
+                          if (paymentStatus == Bill.statusPaid) {
+                            _setControllerText(
+                              paidAmountController,
+                              total.toStringAsFixed(2),
+                            );
+                          } else if (paymentStatus == Bill.statusUnpaid) {
+                            _setControllerText(paidAmountController, '');
+                          }
+                        }),
                       ),
-                      if (isPaid) ...[
+                      if (paymentStatus == Bill.statusPartial) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: paidAmountController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((
+                              oldValue,
+                              newValue,
+                            ) {
+                              final isValid = RegExp(
+                                r'^\d*\.?\d{0,2}$',
+                              ).hasMatch(newValue.text);
+                              return isValid ? newValue : oldValue;
+                            }),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Amount received',
+                            prefixText: '₹ ',
+                          ),
+                          onChanged: (_) => setSheetState(() {}),
+                        ),
+                      ],
+                      if (paymentStatus != Bill.statusUnpaid) ...[
                         const SizedBox(height: 12),
                         SegmentedButton<String>(
                           segments: const [
@@ -437,6 +621,18 @@ class _ScanScreenState extends State<ScanScreen> {
                               value: '₹${total.toStringAsFixed(2)}',
                               isTotal: true,
                             ),
+                            if (paidAmount > 0) ...[
+                              const Divider(height: 20),
+                              _BillSummaryRow(
+                                label: 'Received',
+                                value: '₹${paidAmount.toStringAsFixed(2)}',
+                              ),
+                              _BillSummaryRow(
+                                label: 'Balance',
+                                value:
+                                    '₹${(total - paidAmount).clamp(0, total).toStringAsFixed(2)}',
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -450,8 +646,15 @@ class _ScanScreenState extends State<ScanScreen> {
                               _BillDraft(
                                 customerName: customerController.text,
                                 customerPhone: phoneController.text,
+                                billType: billType,
+                                customerGstin: gstinController.text,
+                                customerGstLegalName: legalNameController.text,
+                                customerGstTradeName: tradeNameController.text,
+                                customerAddress: addressController.text,
+                                placeOfSupplyStateCode:
+                                    stateCodeController.text,
                                 discountPercent: percent,
-                                isPaid: isPaid,
+                                paidAmount: paidAmount,
                                 paymentMethod: paymentMethod,
                               ),
                             );
@@ -477,8 +680,14 @@ class _ScanScreenState extends State<ScanScreen> {
       final billId = await _completeBill(
         customerName: draft.customerName,
         customerPhone: draft.customerPhone,
+        billType: draft.billType,
+        customerGstin: draft.customerGstin,
+        customerGstLegalName: draft.customerGstLegalName,
+        customerGstTradeName: draft.customerGstTradeName,
+        customerAddress: draft.customerAddress,
+        placeOfSupplyStateCode: draft.placeOfSupplyStateCode,
         discountPercent: draft.discountPercent,
-        isPaid: draft.isPaid,
+        paidAmount: draft.paidAmount,
         paymentMethod: draft.paymentMethod,
       );
       if (billId == null || !mounted) return;
@@ -490,12 +699,20 @@ class _ScanScreenState extends State<ScanScreen> {
         totalAmount:
             _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
         itemCount: _itemCount,
-        isPaid: draft.isPaid,
+        isPaid:
+            draft.paidAmount >=
+            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
       );
     } finally {
       customerController.dispose();
       phoneController.dispose();
+      gstinController.dispose();
+      legalNameController.dispose();
+      tradeNameController.dispose();
+      addressController.dispose();
+      stateCodeController.dispose();
       discountController.dispose();
+      paidAmountController.dispose();
     }
   }
 
@@ -1271,15 +1488,27 @@ String _formatQuantityInput(double value) {
 class _BillDraft {
   final String customerName;
   final String? customerPhone;
+  final String billType;
+  final String? customerGstin;
+  final String? customerGstLegalName;
+  final String? customerGstTradeName;
+  final String? customerAddress;
+  final String? placeOfSupplyStateCode;
   final double discountPercent;
-  final bool isPaid;
+  final double paidAmount;
   final String paymentMethod;
 
   const _BillDraft({
     required this.customerName,
     required this.customerPhone,
+    required this.billType,
+    required this.customerGstin,
+    required this.customerGstLegalName,
+    required this.customerGstTradeName,
+    required this.customerAddress,
+    required this.placeOfSupplyStateCode,
     required this.discountPercent,
-    required this.isPaid,
+    required this.paidAmount,
     required this.paymentMethod,
   });
 }

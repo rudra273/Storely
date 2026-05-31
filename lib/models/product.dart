@@ -25,6 +25,9 @@ class Product {
   final String? productCode;
   final String? barcode;
   final String name;
+  final String? hsnCode;
+  final String? hsnType;
+  final String? hsnDescription;
   final int? categoryId;
   final String? category;
   final int? supplierId;
@@ -53,6 +56,9 @@ class Product {
     String? productCode,
     String? barcode,
     required this.name,
+    String? hsnCode,
+    String? hsnType,
+    String? hsnDescription,
     this.categoryId,
     this.category,
     this.supplierId,
@@ -76,6 +82,9 @@ class Product {
   }) : uuid = uuid ?? '',
        productCode = _cleanOptional(productCode ?? itemCode),
        barcode = _cleanOptional(barcode),
+       hsnCode = _cleanHsnCode(hsnCode),
+       hsnType = _cleanOptional(hsnType),
+       hsnDescription = _cleanOptional(hsnDescription),
        sellingPrice = sellingPrice ?? mrp ?? 0,
        purchasePrice = purchasePrice ?? sellingPrice ?? mrp ?? 0,
        quantity = quantity.toDouble(),
@@ -112,6 +121,9 @@ class Product {
     'product_code': productCode,
     'barcode': barcode,
     'name': name,
+    'hsn_code': hsnCode,
+    'hsn_type': hsnType,
+    'hsn_description': hsnDescription,
     'category_id': categoryId,
     'supplier_id': supplierId,
     'selling_price': sellingPrice,
@@ -137,6 +149,9 @@ class Product {
     productCode: map['product_code'] as String? ?? map['item_code'] as String?,
     barcode: map['barcode'] as String?,
     name: map['name'] as String,
+    hsnCode: map['hsn_code'] as String?,
+    hsnType: map['hsn_type'] as String?,
+    hsnDescription: map['hsn_description'] as String?,
     categoryId: map['category_id'] as int?,
     category: _cleanOptional(
       map['category_name'] as String? ?? map['category'] as String?,
@@ -186,6 +201,12 @@ class Product {
     bool clearBarcode = false,
     String? barcode,
     String? name,
+    bool clearHsnCode = false,
+    String? hsnCode,
+    bool clearHsnType = false,
+    String? hsnType,
+    bool clearHsnDescription = false,
+    String? hsnDescription,
     bool clearCategory = false,
     int? categoryId,
     String? category,
@@ -223,6 +244,11 @@ class Product {
         : productCode ?? itemCode ?? this.productCode,
     barcode: clearBarcode ? null : barcode ?? this.barcode,
     name: name ?? this.name,
+    hsnCode: clearHsnCode ? null : hsnCode ?? this.hsnCode,
+    hsnType: clearHsnType ? null : hsnType ?? this.hsnType,
+    hsnDescription: clearHsnDescription
+        ? null
+        : hsnDescription ?? this.hsnDescription,
     categoryId: clearCategory ? null : categoryId ?? this.categoryId,
     category: clearCategory ? null : category ?? this.category,
     supplierId: clearSupplier ? null : supplierId ?? this.supplierId,
@@ -258,6 +284,7 @@ class Product {
     if (unitValue != null && unitValue.isNotEmpty) map['unit'] = unitValue;
     if (productCode != null) map['code'] = productCode;
     if (barcode != null) map['barcode'] = barcode;
+    if (hsnCode != null) map['hsn'] = hsnCode;
     if (category != null) map['cat'] = category;
     return jsonEncode(map);
   }
@@ -265,5 +292,10 @@ class Product {
   static String? _cleanOptional(String? value) {
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  static String? _cleanHsnCode(String? value) {
+    final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits == null || digits.isEmpty ? null : digits;
   }
 }

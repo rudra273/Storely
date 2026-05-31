@@ -442,6 +442,10 @@ mixin DatabaseProducts {
   }
 
   Future<BillItem> buildBillItemForProduct(Product product) async {
+    final db = await database;
+    final category = product.category == null
+        ? null
+        : await _getCategoryPricing(db, product.category!);
     final breakdown = await resolveProductPrice(product);
     return BillItem(
       uuid: _newUuid(),
@@ -449,6 +453,8 @@ mixin DatabaseProducts {
       productId: product.id,
       productUuid: product.uuid,
       productName: product.name,
+      hsnCodeSnapshot: product.hsnCode ?? category?.hsnCode,
+      hsnTypeSnapshot: product.hsnType ?? category?.hsnType,
       unit: product.unit,
       purchasePriceSnapshot: breakdown.purchasePrice,
       sellingPriceSnapshot: breakdown.sellingPrice,
@@ -456,6 +462,10 @@ mixin DatabaseProducts {
       profitSnapshot: breakdown.profitAmount,
       commissionSnapshot: 0,
       gstSnapshot: breakdown.gstAmount,
+      gstPercentSnapshot: breakdown.gstPercent,
+      taxableValueSnapshot: breakdown.preGstSellingPrice,
+      cgstAmountSnapshot: breakdown.gstRegistered ? breakdown.gstAmount / 2 : 0,
+      sgstAmountSnapshot: breakdown.gstRegistered ? breakdown.gstAmount / 2 : 0,
       wasDirectPrice: breakdown.wasDirectPrice,
     );
   }

@@ -40,6 +40,19 @@ mixin DatabaseBills {
           createdAt: bill.createdAt,
         );
       }
+      if (bill.paidAmount > 0) {
+        await txn.insert('bill_payments', {
+          'uuid': _newUuid(),
+          'shop_id': bill.shopId.isEmpty ? _defaultShopId : bill.shopId,
+          'bill_uuid': billUuid,
+          'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
+          'payment_method': bill.paymentMethod,
+          'received_at': bill.createdAt.toIso8601String(),
+          'created_at': bill.createdAt.toIso8601String(),
+          'updated_at': _nowIso(),
+        });
+        await _updateBillPaymentSummary(txn, billId, billUuid);
+      }
       notifyDatabaseChanged();
       return billId;
     });
@@ -129,7 +142,17 @@ mixin DatabaseBills {
       );
       await txn.update(
         'bills',
-        {'customer_name': name, 'customer_phone': phone, 'updated_at': now},
+        {
+          'customer_name': name,
+          'customer_phone': phone,
+          'customer_gstin': customer.gstin,
+          'customer_gst_legal_name': customer.gstLegalName,
+          'customer_gst_trade_name': customer.gstTradeName,
+          'customer_address_snapshot': customer.address,
+          'place_of_supply_state_code': customer.placeOfSupplyStateCode,
+          'bill_type': customer.gstin == null ? Bill.typeB2c : Bill.typeB2b,
+          'updated_at': now,
+        },
         where: 'deleted_at IS NULL AND customer_id = ?',
         whereArgs: [customer.id],
       );
@@ -180,6 +203,12 @@ mixin DatabaseBills {
         where: 'bill_id = ?',
         whereArgs: [id],
       );
+      await txn.update(
+        'bill_payments',
+        {'deleted_at': now, 'updated_at': now},
+        where: 'bill_uuid = ?',
+        whereArgs: [billUuid],
+      );
       final count = await txn.update(
         'bills',
         {'deleted_at': now, 'updated_at': now},
@@ -205,21 +234,89 @@ mixin DatabaseBills {
     String? paymentMethod,
   }) async {
     final db = await database;
-    final updates = <String, dynamic>{
-      'is_paid': isPaid ? 1 : 0,
-      'updated_at': _nowIso(),
-    };
-    if (paymentMethod != null) {
-      updates['payment_method'] = paymentMethod;
-    }
-    final count = await db.update(
-      'bills',
-      updates,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (count > 0) notifyDatabaseChanged();
-    return count;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['uuid', 'shop_id', 'total_amount'],
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isEmpty) return 0;
+      final bill = rows.single;
+      final billUuid = bill['uuid'] as String;
+      final shopId = bill['shop_id'] as String? ?? _defaultShopId;
+      final total = (bill['total_amount'] as num).toDouble();
+      final now = _nowIso();
+      if (!isPaid) {
+        await txn.update(
+          'bill_payments',
+          {'deleted_at': now, 'updated_at': now},
+          where: 'bill_uuid = ? AND deleted_at IS NULL',
+          whereArgs: [billUuid],
+        );
+      } else {
+        await txn.insert('bill_payments', {
+          'uuid': _newUuid(),
+          'shop_id': shopId,
+          'bill_uuid': billUuid,
+          'amount': total,
+          'payment_method': paymentMethod ?? 'cash',
+          'received_at': now,
+          'created_at': now,
+          'updated_at': now,
+        });
+      }
+      await _updateBillPaymentSummary(txn, id, billUuid);
+      notifyDatabaseChanged();
+      return 1;
+    });
+  }
+
+  Future<int> recordBillPayment(
+    int billId, {
+    required double amount,
+    String paymentMethod = 'cash',
+    String? paymentReference,
+    String? notes,
+    DateTime? receivedAt,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Payment amount must be positive');
+    final db = await database;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['uuid', 'shop_id', 'balance_due', 'deleted_at'],
+        where: 'id = ?',
+        whereArgs: [billId],
+        limit: 1,
+      );
+      if (rows.isEmpty || rows.single['deleted_at'] != null) return 0;
+      final balance = (rows.single['balance_due'] as num?)?.toDouble() ?? 0;
+      if (amount > balance + 0.005) {
+        throw ArgumentError('Payment cannot exceed balance due');
+      }
+      final now = _nowIso();
+      await txn.insert('bill_payments', {
+        'uuid': _newUuid(),
+        'shop_id': rows.single['shop_id'] as String? ?? _defaultShopId,
+        'bill_uuid': rows.single['uuid'] as String,
+        'amount': amount,
+        'payment_method': paymentMethod,
+        'payment_reference': _normaliseName(paymentReference),
+        'notes': _normaliseName(notes),
+        'received_at': (receivedAt ?? DateTime.now()).toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
+      });
+      await _updateBillPaymentSummary(
+        txn,
+        billId,
+        rows.single['uuid'] as String,
+      );
+      notifyDatabaseChanged();
+      return 1;
+    });
   }
 
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
@@ -303,6 +400,67 @@ mixin DatabaseBills {
     );
     final seq = (rows.first['next_seq'] as num?)?.toInt() ?? 1;
     return '$prefix-${seq.toString().padLeft(4, '0')}';
+  }
+
+  Future<void> _updateBillPaymentSummary(
+    DatabaseExecutor executor,
+    int billId,
+    String billUuid,
+  ) async {
+    final billRows = await executor.query(
+      'bills',
+      columns: ['total_amount'],
+      where: 'id = ?',
+      whereArgs: [billId],
+      limit: 1,
+    );
+    if (billRows.isEmpty) return;
+    final total = (billRows.single['total_amount'] as num).toDouble();
+    final paymentRows = await executor.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS paid
+      FROM bill_payments
+      WHERE bill_uuid = ? AND deleted_at IS NULL
+      ''',
+      [billUuid],
+    );
+    final paid = (paymentRows.single['paid'] as num?)?.toDouble() ?? 0;
+    final due = (total - paid) <= 0.005 ? 0.0 : total - paid;
+    final status = paid <= 0.005
+        ? Bill.statusUnpaid
+        : due <= 0.005
+        ? Bill.statusPaid
+        : Bill.statusPartial;
+    await executor.update(
+      'bills',
+      {
+        'paid_amount': paid,
+        'balance_due': due,
+        'payment_status': status,
+        'is_paid': status == Bill.statusPaid ? 1 : 0,
+        'payment_method': status == Bill.statusUnpaid
+            ? 'cash'
+            : await _latestPaymentMethod(executor, billUuid),
+        'updated_at': _nowIso(),
+      },
+      where: 'id = ?',
+      whereArgs: [billId],
+    );
+  }
+
+  Future<String> _latestPaymentMethod(
+    DatabaseExecutor executor,
+    String billUuid,
+  ) async {
+    final rows = await executor.query(
+      'bill_payments',
+      columns: ['payment_method'],
+      where: 'bill_uuid = ? AND deleted_at IS NULL',
+      whereArgs: [billUuid],
+      orderBy: 'received_at DESC, id DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? 'cash' : rows.single['payment_method'] as String;
   }
 
   Future<void> _applySaleStockMovement(
@@ -391,6 +549,11 @@ mixin DatabaseBills {
       executor,
       name: name,
       phone: phone,
+      gstin: bill.customerGstin,
+      gstLegalName: bill.customerGstLegalName,
+      gstTradeName: bill.customerGstTradeName,
+      address: bill.customerAddressSnapshot,
+      placeOfSupplyStateCode: bill.placeOfSupplyStateCode,
       amountDelta: bill.totalAmount,
       billCountDelta: 1,
       purchaseAt: bill.createdAt.toIso8601String(),
@@ -409,6 +572,11 @@ Future<_CustomerRef> _upsertCustomerLedger(
   DatabaseExecutor executor, {
   required String name,
   required String phone,
+  String? gstin,
+  String? gstLegalName,
+  String? gstTradeName,
+  String? address,
+  String? placeOfSupplyStateCode,
   required double amountDelta,
   required int billCountDelta,
   required String purchaseAt,
@@ -428,6 +596,13 @@ Future<_CustomerRef> _upsertCustomerLedger(
       'shop_id': _defaultShopId,
       'name': name,
       'phone': phone,
+      'gstin': gstin,
+      'gst_legal_name': gstLegalName,
+      'gst_trade_name': gstTradeName,
+      'address': address,
+      'gst_source': gstin == null ? null : 'manual',
+      'gst_verified_at': gstin == null ? null : _nowIso(),
+      'place_of_supply_state_code': placeOfSupplyStateCode,
       'total_purchase_amount': amountDelta,
       'bill_count': billCountDelta,
       'last_purchase_at': purchaseAt,
@@ -445,6 +620,13 @@ Future<_CustomerRef> _upsertCustomerLedger(
     UPDATE customers
     SET
       name = CASE WHEN ? THEN ? ELSE name END,
+      gstin = COALESCE(?, gstin),
+      gst_legal_name = COALESCE(?, gst_legal_name),
+      gst_trade_name = COALESCE(?, gst_trade_name),
+      address = COALESCE(?, address),
+      gst_source = CASE WHEN ? IS NOT NULL THEN 'manual' ELSE gst_source END,
+      gst_verified_at = CASE WHEN ? IS NOT NULL THEN ? ELSE gst_verified_at END,
+      place_of_supply_state_code = COALESCE(?, place_of_supply_state_code),
       total_purchase_amount = MAX(total_purchase_amount + ?, 0),
       bill_count = MAX(bill_count + ?, 0),
       last_purchase_at = ?,
@@ -454,6 +636,14 @@ Future<_CustomerRef> _upsertCustomerLedger(
     [
       updateName ? 1 : 0,
       name,
+      gstin,
+      gstLegalName,
+      gstTradeName,
+      address,
+      gstin,
+      gstin,
+      gstin == null ? null : now,
+      placeOfSupplyStateCode,
       amountDelta,
       billCountDelta,
       purchaseAt,

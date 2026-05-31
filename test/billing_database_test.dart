@@ -151,6 +151,46 @@ void main() {
       expect(bill.paymentMethod, 'cash');
     });
 
+    test('partial bill payment is tracked with balance due', () async {
+      final billId = await db.insertBill(
+        Bill(
+          customerName: 'B2B Buyer',
+          customerPhone: '9876543210',
+          billType: Bill.typeB2b,
+          customerGstin: '27AAAAA0000A1Z5',
+          customerGstLegalName: 'B2B Buyer Private Limited',
+          totalAmount: 1000,
+          itemCount: 1,
+          isPaid: false,
+          paidAmount: 400,
+          paymentMethod: 'online',
+        ),
+        [
+          BillItem(
+            productName: 'Taxed Item',
+            mrp: 1000,
+            hsnCodeSnapshot: '123456',
+            gstPercentSnapshot: 18,
+            taxableValueSnapshot: 847.46,
+            gstSnapshot: 152.54,
+          ),
+        ],
+      );
+
+      var bill = (await db.getAllBills()).single;
+      expect(bill.paymentStatus, Bill.statusPartial);
+      expect(bill.paidAmount, 400);
+      expect(bill.balanceDue, 600);
+      expect(bill.customerGstin, '27AAAAA0000A1Z5');
+      expect(bill.items.single.hsnCodeSnapshot, '123456');
+
+      await db.recordBillPayment(billId, amount: 600);
+      bill = (await db.getAllBills()).single;
+      expect(bill.paymentStatus, Bill.statusPaid);
+      expect(bill.isPaid, isTrue);
+      expect(bill.balanceDue, 0);
+    });
+
     test('same customer phone is unique and accumulates bill totals', () async {
       await db.insertBill(
         Bill(
