@@ -110,6 +110,11 @@ mixin DatabaseProducts {
         txn,
         product.copyWith(updatedAt: DateTime.now().toUtc()),
       );
+      await _assertProductCodeAndBarcodeUnique(
+        txn,
+        productToUpdate,
+        excludeId: product.id,
+      );
       final count = await txn.update(
         'products',
         productToUpdate.toMap(),
@@ -541,6 +546,7 @@ mixin DatabaseProducts {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         }
+        await _softDeletePurchaseMovementsForProduct(txn, id);
         await _insertStockMovement(
           txn,
           productId: id,
@@ -549,6 +555,7 @@ mixin DatabaseProducts {
           quantityDelta: p.quantity,
           unitCost: writeProduct.purchasePrice,
           sourceType: 'import',
+          sourceId: writeProduct.supplierId,
           importBatchKey: batchKey,
           createdAt: date,
         );
@@ -557,6 +564,19 @@ mixin DatabaseProducts {
       notifyDatabaseChanged();
       return count;
     });
+  }
+
+  Future<void> _softDeletePurchaseMovementsForProduct(
+    DatabaseExecutor executor,
+    int productId,
+  ) async {
+    final now = _nowIso();
+    await executor.update(
+      'stock_movements',
+      {'deleted_at': now, 'updated_at': now},
+      where: 'deleted_at IS NULL AND product_id = ? AND movement_type = ?',
+      whereArgs: [productId, StockMovementType.purchase],
+    );
   }
 
   Future<ProductImportResult> mergeProducts(
@@ -606,6 +626,7 @@ mixin DatabaseProducts {
             quantityDelta: p.quantity,
             unitCost: merged.purchasePrice,
             sourceType: 'import',
+            sourceId: merged.supplierId,
             importBatchKey: batchKey,
             createdAt: date,
           );
@@ -625,6 +646,7 @@ mixin DatabaseProducts {
             quantityDelta: p.quantity,
             unitCost: writeProduct.purchasePrice,
             sourceType: 'import',
+            sourceId: writeProduct.supplierId,
             importBatchKey: batchKey,
             createdAt: date,
           );
@@ -678,7 +700,11 @@ mixin DatabaseProducts {
   List<Product> _uniqueProductsByIdentity(List<Product> products) {
     final byIdentity = <String, Product>{};
     for (final product in products) {
-      byIdentity[_productIdentity(product)] = product;
+      final identity = _productIdentity(product);
+      final existing = byIdentity[identity];
+      byIdentity[identity] = existing == null
+          ? product
+          : product.copyWith(quantity: existing.quantity + product.quantity);
     }
     return byIdentity.values.toList();
   }
@@ -720,12 +746,42 @@ mixin DatabaseProducts {
     );
   }
 
+  Future<void> _assertProductCodeAndBarcodeUnique(
+    DatabaseExecutor executor,
+    Product product, {
+    int? excludeId,
+  }) async {
+    Future<void> checkField(
+      String column,
+      String label,
+      String? rawValue,
+    ) async {
+      final value = _normaliseName(rawValue);
+      if (value == null) return;
+      final rows = await _queryProducts(
+        executor,
+        where: excludeId == null
+            ? 'LOWER(p.$column) = LOWER(?)'
+            : 'LOWER(p.$column) = LOWER(?) AND p.id != ?',
+        whereArgs: excludeId == null ? [value] : [value, excludeId],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        throw ArgumentError('$label "$value" already exists');
+      }
+    }
+
+    await checkField('product_code', 'Product code', product.productCode);
+    await checkField('barcode', 'Barcode', product.barcode);
+  }
+
   Future<int> _insertProductInTransaction(
     DatabaseExecutor executor,
     Product product, {
     DateTime? purchaseDate,
   }) async {
     final productToInsert = await _prepareProductForWrite(executor, product);
+    await _assertProductCodeAndBarcodeUnique(executor, productToInsert);
     final id = await executor.insert(
       'products',
       productToInsert.toMap()..remove('id'),
@@ -742,6 +798,7 @@ mixin DatabaseProducts {
         sourceType: productToInsert.source == ProductSource.imported
             ? 'import'
             : 'manual',
+        sourceId: productToInsert.supplierId,
         createdAt: purchaseDate ?? productToInsert.createdAt,
       );
     }
@@ -772,6 +829,11 @@ mixin DatabaseProducts {
         updatedAt: DateTime.now().toUtc(),
       ),
     );
+    await _assertProductCodeAndBarcodeUnique(
+      executor,
+      updatedProduct,
+      excludeId: product.id,
+    );
     final count = await executor.update(
       'products',
       updatedProduct.toMap(),
@@ -786,6 +848,7 @@ mixin DatabaseProducts {
       quantityDelta: quantityAdded.toDouble(),
       unitCost: updatedProduct.purchasePrice,
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
+      sourceId: updatedProduct.supplierId,
       createdAt: purchaseDate,
     );
     return count;
@@ -795,6 +858,9 @@ mixin DatabaseProducts {
     DatabaseExecutor executor,
     Product product,
   ) async {
+    if (product.quantity < 0) {
+      throw ArgumentError('Product quantity cannot be negative');
+    }
     final now = DateTime.now().toUtc();
     final categoryId = product.category == null
         ? product.categoryId
@@ -832,6 +898,12 @@ mixin DatabaseProducts {
   }) async {
     if (quantityDelta == 0) return;
     final now = DateTime.now().toUtc();
+    final sourceTable = _sourceTable(sourceType);
+    final resolvedSourceUuid =
+        sourceUuid ??
+        (sourceId == null || sourceTable == null
+            ? null
+            : await _uuidForId(executor, sourceTable, sourceId));
     await executor.insert('stock_movements', {
       'uuid': _newUuid(),
       'shop_id': _defaultShopId,
@@ -842,7 +914,7 @@ mixin DatabaseProducts {
       'unit_cost': unitCost,
       'source_type': sourceType,
       'source_id': sourceId,
-      'source_uuid': sourceUuid,
+      'source_uuid': resolvedSourceUuid,
       'import_batch_key': importBatchKey,
       'notes': notes,
       'created_at': (createdAt ?? now).toIso8601String(),

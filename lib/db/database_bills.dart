@@ -473,12 +473,22 @@ mixin DatabaseBills {
     if (item.quantity <= 0 || item.productId == null) return;
     final productRows = await executor.query(
       'products',
-      columns: ['uuid'],
+      columns: ['uuid', 'name', 'quantity_cache'],
       where: 'id = ?',
       whereArgs: [item.productId],
       limit: 1,
     );
-    if (productRows.isEmpty) return;
+    if (productRows.isEmpty) {
+      throw StateError('Product "${item.productName}" no longer exists');
+    }
+    final available =
+        (productRows.single['quantity_cache'] as num?)?.toDouble() ?? 0;
+    if (item.quantity > available) {
+      final name = productRows.single['name']?.toString() ?? item.productName;
+      throw StateError(
+        'Only ${_formatDbQuantity(available)} available for "$name"',
+      );
+    }
     final productUuid =
         item.productUuid ?? productRows.single['uuid'] as String;
     await _insertBillStockMovement(
@@ -530,7 +540,7 @@ mixin DatabaseBills {
     await executor.rawUpdate(
       '''
       UPDATE products
-      SET quantity_cache = MAX(quantity_cache + ?, 0),
+      SET quantity_cache = quantity_cache + ?,
           updated_at = ?
       WHERE id = ?
       ''',
@@ -559,6 +569,15 @@ mixin DatabaseBills {
       purchaseAt: bill.createdAt.toIso8601String(),
     );
   }
+}
+
+String _formatDbQuantity(double value) {
+  return value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value
+            .toStringAsFixed(3)
+            .replaceFirst(RegExp(r'0+$'), '')
+            .replaceFirst(RegExp(r'\.$'), '');
 }
 
 class _CustomerRef {

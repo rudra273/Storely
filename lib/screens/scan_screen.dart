@@ -164,6 +164,14 @@ class _ScanScreenState extends State<ScanScreen> {
               existingItem.productName.toLowerCase() ==
                   item.productName.toLowerCase()),
     );
+    final available = _availableStockForItem(item);
+    if (available != null) {
+      final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
+      if (available <= 0 || currentQty + 1 > available) {
+        _showStockLimitMessage(item.productName, available);
+        return;
+      }
+    }
 
     setState(() {
       if (existing >= 0) {
@@ -174,6 +182,29 @@ class _ScanScreenState extends State<ScanScreen> {
       }
       _showAddedStatus = _entryMode == BillingEntryMode.scan;
     });
+  }
+
+  double? _availableStockForItem(BillItem item) {
+    final productId = item.productId;
+    if (productId == null) return null;
+    for (final product in _allProducts) {
+      if (product.id == productId) return product.quantity;
+    }
+    return null;
+  }
+
+  void _showStockLimitMessage(String productName, double available) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            available <= 0
+                ? '"$productName" is out of stock'
+                : 'Only ${_formatQuantityInput(available)} available for "$productName"',
+          ),
+        ),
+      );
   }
 
   void _allowNextScanAfter(Duration duration) {
@@ -709,6 +740,12 @@ class _ScanScreenState extends State<ScanScreen> {
             draft.paidAmount >=
             _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
       );
+    } catch (e) {
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Bad state: ', '');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
     } finally {
       customerController.dispose();
       phoneController.dispose();
@@ -779,6 +816,13 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _updateQty(int index, int delta) {
+    if (delta > 0) {
+      final available = _availableStockForItem(_items[index]);
+      if (available != null && _items[index].quantity + delta > available) {
+        _showStockLimitMessage(_items[index].productName, available);
+        return;
+      }
+    }
     setState(() {
       _items[index].quantity += delta;
       if (_items[index].quantity <= 0) _items.removeAt(index);
@@ -787,6 +831,12 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _setQty(int index, double quantity) {
     if (quantity <= 0) return;
+    final available = _availableStockForItem(_items[index]);
+    if (available != null && quantity > available) {
+      _showStockLimitMessage(_items[index].productName, available);
+      setState(() => _items[index].quantity = available);
+      return;
+    }
     setState(() => _items[index].quantity = quantity);
   }
 

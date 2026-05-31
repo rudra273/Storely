@@ -348,26 +348,34 @@ void main() {
       },
     );
 
-    test('stock deduction never makes product quantity negative', () async {
-      final productId = await db.insertProduct(
-        Product(name: 'Low Stock Item', mrp: 25, quantity: 2),
-      );
+    test(
+      'bill creation rejects product quantity above available stock',
+      () async {
+        final productId = await db.insertProduct(
+          Product(name: 'Low Stock Item', mrp: 25, quantity: 2),
+        );
 
-      await db.insertBill(
-        Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
-        [
-          BillItem(
-            productId: productId,
-            productName: 'Low Stock Item',
-            mrp: 25,
-            quantity: 5,
+        expect(
+          () => db.insertBill(
+            Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
+            [
+              BillItem(
+                productId: productId,
+                productName: 'Low Stock Item',
+                mrp: 25,
+                quantity: 5,
+              ),
+            ],
           ),
-        ],
-      );
+          throwsA(isA<StateError>()),
+        );
 
-      final product = await db.getProductById(productId);
-      expect(product!.quantity, 0);
-    });
+        final product = await db.getProductById(productId);
+        final bills = await db.getAllBills();
+        expect(product!.quantity, 2);
+        expect(bills, isEmpty);
+      },
+    );
   });
 }
 

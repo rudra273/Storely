@@ -58,8 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _todayBillCount = todayBillCount;
       _unpaidBills = unpaidBills;
       _shopName = shopName;
-      _lowStockProducts =
-          products.where((p) => p.quantity <= lowStockThreshold).toList();
+      _lowStockProducts = products
+          .where((p) => p.quantity <= lowStockThreshold)
+          .toList();
     });
   }
 
@@ -101,10 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _SalesHero(
-                      sales: _todaySales,
-                      billCount: _todayBillCount,
-                    ),
+                    _SalesHero(sales: _todaySales, billCount: _todayBillCount),
                     const SizedBox(height: AppSpacing.md),
                     _StatsRow(
                       productCount: _productCount,
@@ -151,9 +149,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final products = await DatabaseHelper.instance.getAllProducts();
     if (!mounted) return;
     if (products.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add products first!')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Add products first!')));
       return;
     }
     Navigator.push(
@@ -297,13 +295,15 @@ class _StatTile extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                    height: 1.1,
-                  )),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                  height: 1.1,
+                ),
+              ),
               Text(label, style: AppText.caption),
             ],
           ),
@@ -407,11 +407,7 @@ class _QuickActionTile extends StatelessWidget {
                   color: filled ? Colors.transparent : AppColors.border,
                 ),
               ),
-              child: Icon(
-                icon,
-                color: filled ? Colors.white : color,
-                size: 24,
-              ),
+              child: Icon(icon, color: filled ? Colors.white : color, size: 24),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
@@ -447,32 +443,34 @@ class _UnpaidBillsSection extends StatelessWidget {
     }
     return CompactListCard(
       rows: bills
-          .map((bill) => CompactListRow(
-                leading: const LeadingIconChip(
-                  icon: Icons.pending_actions_outlined,
-                  color: AppColors.error,
-                ),
-                title: bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
-                subtitle:
-                    '${_cleanBillNumber(bill)} · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
-                trailing: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '₹${bill.balanceDue.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: AppColors.ink,
-                      ),
+          .map(
+            (bill) => CompactListRow(
+              leading: const LeadingIconChip(
+                icon: Icons.pending_actions_outlined,
+                color: AppColors.error,
+              ),
+              title: bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
+              subtitle:
+                  '${_cleanBillNumber(bill)} · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
+              trailing: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '₹${bill.balanceDue.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: AppColors.ink,
                     ),
-                    bill.paymentStatus == Bill.statusPartial
-                        ? StatusPill.partial()
-                        : StatusPill.unpaid(),
-                  ],
-                ),
-              ))
+                  ),
+                  bill.paymentStatus == Bill.statusPartial
+                      ? StatusPill.partial()
+                      : StatusPill.unpaid(),
+                ],
+              ),
+            ),
+          )
           .toList(),
     );
   }
@@ -484,7 +482,10 @@ class _NeedsAttentionSection extends StatefulWidget {
   final List<Product> products;
   final VoidCallback onUpdate;
 
-  const _NeedsAttentionSection({required this.products, required this.onUpdate});
+  const _NeedsAttentionSection({
+    required this.products,
+    required this.onUpdate,
+  });
 
   @override
   State<_NeedsAttentionSection> createState() => _NeedsAttentionSectionState();
@@ -505,8 +506,8 @@ class _NeedsAttentionSectionState extends State<_NeedsAttentionSection> {
     final filtered = _query.isEmpty
         ? widget.products
         : widget.products
-            .where((p) => p.name.toLowerCase().contains(_query))
-            .toList();
+              .where((p) => p.name.toLowerCase().contains(_query))
+              .toList();
 
     return Column(
       children: [
@@ -521,8 +522,11 @@ class _NeedsAttentionSectionState extends State<_NeedsAttentionSection> {
         if (filtered.isEmpty)
           const Padding(
             padding: EdgeInsets.all(AppSpacing.lg),
-            child: Text('No items match your search',
-                style: AppText.caption, textAlign: TextAlign.center),
+            child: Text(
+              'No items match your search',
+              style: AppText.caption,
+              textAlign: TextAlign.center,
+            ),
           )
         else
           CompactListCard(
@@ -545,9 +549,7 @@ class _LowStockRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOut = product.quantity == 0;
     return CompactListRow(
-      leading: StatusDot(
-        color: isOut ? AppColors.error : AppColors.amber,
-      ),
+      leading: StatusDot(color: isOut ? AppColors.error : AppColors.amber),
       title: product.name,
       subtitle: isOut ? 'Out of stock' : 'Only ${product.quantityLabel} left',
       trailing: StatusPill(
@@ -583,9 +585,18 @@ class _LowStockRow extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () async {
-              final newQty = double.tryParse(qtyCtrl.text) ?? 0;
-              await DatabaseHelper.instance
-                  .updateProduct(product.copyWith(quantity: newQty));
+              final newQty = double.tryParse(qtyCtrl.text);
+              if (newQty == null || newQty < 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Quantity must be zero or more'),
+                  ),
+                );
+                return;
+              }
+              await DatabaseHelper.instance.updateProduct(
+                product.copyWith(quantity: newQty),
+              );
               if (ctx.mounted) Navigator.pop(ctx, true);
             },
             child: const Text('Save'),
@@ -618,8 +629,10 @@ class _EmptyState extends StatelessWidget {
         children: [
           Icon(icon, size: 20, color: AppColors.inkFaint),
           const SizedBox(width: AppSpacing.sm),
-          Text(message,
-              style: AppText.caption.copyWith(color: AppColors.inkMuted)),
+          Text(
+            message,
+            style: AppText.caption.copyWith(color: AppColors.inkMuted),
+          ),
         ],
       ),
     );

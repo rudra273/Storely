@@ -109,6 +109,37 @@ void main() {
       expect(second.possibleDuplicate, isTrue);
     });
 
+    test(
+      'duplicate rows in one import are summed by product identity',
+      () async {
+        final result = await db.mergeProducts([
+          Product(
+            itemCode: 'SKU-1',
+            name: 'Cement Bag',
+            mrp: 350,
+            purchasePrice: 300,
+            quantity: 10,
+          ),
+          Product(
+            itemCode: 'SKU-1',
+            name: 'Cement Bag',
+            mrp: 360,
+            purchasePrice: 310,
+            quantity: 5,
+          ),
+        ], purchaseDate: DateTime(2026, 4, 25));
+
+        final products = await db.getAllProducts();
+        final rows = await _purchaseRows();
+
+        expect(result.added, 1);
+        expect(products.single.quantity, 15);
+        expect(products.single.purchasePrice, 310);
+        expect(rows, hasLength(1));
+        expect(rows.single['quantity_delta'], 15);
+      },
+    );
+
     test('purchase date filter returns products bought on that date', () async {
       final firstDate = DateTime(2026, 4, 20);
       final secondDate = DateTime(2026, 4, 25);
@@ -213,6 +244,44 @@ void main() {
       expect(adjustmentRows.single['quantity_delta'], -3);
     });
 
+    test('duplicate product code and barcode are rejected', () async {
+      await db.insertProduct(
+        Product(
+          name: 'Original',
+          itemCode: 'SKU-1',
+          barcode: 'BAR-1',
+          mrp: 100,
+          purchasePrice: 80,
+          quantity: 1,
+        ),
+      );
+
+      expect(
+        () => db.insertProduct(
+          Product(
+            name: 'Duplicate Code',
+            itemCode: 'SKU-1',
+            mrp: 100,
+            purchasePrice: 80,
+            quantity: 1,
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => db.insertProduct(
+          Product(
+            name: 'Duplicate Barcode',
+            barcode: 'BAR-1',
+            mrp: 100,
+            purchasePrice: 80,
+            quantity: 1,
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
     test('replace import only replaces imported identities', () async {
       await db.insertProduct(
         Product(name: 'Keep Me', mrp: 100, purchasePrice: 80, quantity: 7),
@@ -235,6 +304,47 @@ void main() {
       expect(byName['Replace Me']!.quantity, 3);
       expect(byName['Replace Me']!.purchasePrice, 45);
       expect(byName['New Item']!.quantity, 2);
+    });
+
+    test(
+      'replace import resets old purchase history for replaced product',
+      () async {
+        await db.insertProduct(
+          Product(name: 'Replace Me', mrp: 50, purchasePrice: 40, quantity: 10),
+        );
+
+        await db.replaceAllProducts([
+          Product(name: 'Replace Me', mrp: 60, purchasePrice: 45, quantity: 3),
+        ], purchaseDate: DateTime(2026, 4, 25));
+
+        final products = await db.getAllProducts();
+        final summaries = await db.getProductPurchaseSummaries();
+        final rows = await _purchaseRows();
+
+        expect(products.single.quantity, 3);
+        expect(summaries[products.single.id]!.totalPurchased, 3);
+        expect(rows, hasLength(1));
+        expect(rows.single['quantity_delta'], 3);
+      },
+    );
+
+    test('purchase movements retain supplier for analytics', () async {
+      await db.mergeProducts([
+        Product(
+          name: 'Supplier Item',
+          mrp: 100,
+          purchasePrice: 80,
+          quantity: 4,
+          supplier: 'Acme',
+        ),
+      ], purchaseDate: DateTime(2026, 4, 25));
+
+      final rows = await db.kpiTopSuppliers();
+
+      expect(rows, hasLength(1));
+      expect(rows.single['name'], 'Acme');
+      expect(rows.single['units_received'], 4);
+      expect(rows.single['value_received'], 320);
     });
 
     test('cloud import compares parsed timestamps instead of text', () async {

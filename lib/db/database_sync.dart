@@ -314,7 +314,7 @@ String? _sourceTable(String? sourceType) {
       return 'bills';
     case 'manual':
     case 'import':
-      return null;
+      return 'suppliers';
     default:
       return null;
   }
