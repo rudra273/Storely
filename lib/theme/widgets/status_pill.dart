@@ -18,6 +18,8 @@ class StatusPill extends StatelessWidget {
       const StatusPill(label: 'Paid', variant: PillVariant.paid);
   factory StatusPill.unpaid() =>
       const StatusPill(label: 'Unpaid', variant: PillVariant.unpaid);
+  factory StatusPill.partial() =>
+      const StatusPill(label: 'Partial', variant: PillVariant.warning);
 
   @override
   Widget build(BuildContext context) {

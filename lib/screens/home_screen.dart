@@ -460,14 +460,16 @@ class _UnpaidBillsSection extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '₹${bill.totalAmount.toStringAsFixed(0)}',
+                      '₹${bill.balanceDue.toStringAsFixed(0)}',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
                         color: AppColors.ink,
                       ),
                     ),
-                    StatusPill.unpaid(),
+                    bill.paymentStatus == Bill.statusPartial
+                        ? StatusPill.partial()
+                        : StatusPill.unpaid(),
                   ],
                 ),
               ))
