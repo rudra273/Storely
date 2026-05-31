@@ -1716,7 +1716,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                     : _SourcePill(
                                         label: isEditing
                                             ? product.sourceLabel
-                                            : 'Mobile product',
+                                            : 'In-app',
                                         imported: product?.isImported ?? false,
                                       ),
                                 child: Column(

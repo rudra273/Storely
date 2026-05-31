@@ -94,7 +94,7 @@ class Product {
   String? get itemCode => productCode;
   double get mrp => sellingPrice;
   bool get isImported => source == ProductSource.imported;
-  String get sourceLabel => isImported ? 'Imported' : 'Mobile';
+  String get sourceLabel => isImported ? 'Imported' : 'In-app';
 
   String get priceLabel {
     final amount = sellingPrice.toStringAsFixed(
