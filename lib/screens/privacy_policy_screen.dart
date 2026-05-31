@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});
@@ -62,12 +62,9 @@ rosmoxx@gmail.com
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text(
-          'Privacy Policy',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
+        title: const Text('Privacy Policy'),
         actions: [
           IconButton(
             tooltip: 'Copy policy',
@@ -82,21 +79,13 @@ rosmoxx@gmail.com
           ),
         ],
       ),
-      body: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const SingleChildScrollView(
-          child: SelectableText(
-            _policyText,
-            style: TextStyle(
-              color: AppColors.textDark,
-              fontSize: 14,
-              height: 1.5,
+      body: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: AppCard(
+          child: SingleChildScrollView(
+            child: SelectableText(
+              _policyText,
+              style: AppText.body.copyWith(height: 1.55),
             ),
           ),
         ),

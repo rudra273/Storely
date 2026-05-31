@@ -28,12 +28,7 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'QR Code Sheet',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
+      appBar: AppBar(title: const Text('QR Code Sheet')),
       body: Column(
         children: [
           // ── Layout configuration card ──

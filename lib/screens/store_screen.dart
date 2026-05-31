@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
@@ -490,20 +490,16 @@ class _StoreScreenState extends State<StoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: const Text(
-          'Store',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Store')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
+              color: AppColors.amber,
               onRefresh: _loadStoreData,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 112),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 112),
                 children: [
                   ValueListenableBuilder<CloudState>(
                     valueListenable: CloudService.instance.state,
@@ -517,16 +513,16 @@ class _StoreScreenState extends State<StoreScreen> {
                           : null,
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Settings Configuration'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Categories',
                     subtitle: '${_categories.length} saved',
                     icon: Icons.category_outlined,
                     onTap: _showCategoryManager,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Suppliers',
                     subtitle:
@@ -534,7 +530,7 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.local_shipping_outlined,
                     onTap: _showSupplierManager,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Pricing Defaults',
                     subtitle:
@@ -542,41 +538,41 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.calculate_outlined,
                     onTap: _showGlobalPricingSettings,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Needs Attention',
                     subtitle: 'Show stock at $_lowStockThreshold or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Customers',
                     subtitle: '${_customers.length} saved',
                     icon: Icons.people_outline_rounded,
                     onTap: _showCustomerTable,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Analytics',
                     subtitle: 'Revenue, profit, GST and unit volume',
                     icon: Icons.analytics_outlined,
                     onTap: _openAnalytics,
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Advanced'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _CloudSyncPanel(onSetup: _openCloudSetup, onSync: _syncCloud),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Legal & App Information'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Privacy policy',
                     subtitle: 'Privacy policy and data usage details',
                     icon: Icons.privacy_tip_outlined,
                     onTap: _openPrivacyPolicy,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
                     subtitle: 'App information and version 1.0.1',
@@ -597,19 +593,7 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.0,
-          color: AppColors.textMuted,
-          height: 1.1,
-        ),
-      ),
-    );
+    return Text(title.toUpperCase(), style: AppText.label);
   }
 }
 
@@ -1104,37 +1088,14 @@ class _ShopPanel extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'Shop',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
+                    Text('Shop', style: AppText.caption),
                     if (roleLabel != null) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: roleLabel == 'owner' || roleLabel == 'admin'
-                              ? AppColors.amber.withValues(alpha: 0.15)
-                              : AppColors.navy.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          roleLabel!.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: roleLabel == 'owner' || roleLabel == 'admin'
-                                ? AppColors.amber
-                                : AppColors.textMuted,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
+                      const SizedBox(width: AppSpacing.sm),
+                      StatusPill(
+                        label: roleLabel!.toUpperCase(),
+                        variant: roleLabel == 'owner' || roleLabel == 'admin'
+                            ? PillVariant.warning
+                            : PillVariant.info,
                       ),
                     ],
                   ],
@@ -1144,22 +1105,15 @@ class _ShopPanel extends StatelessWidget {
                   profile?.name ?? 'No shop name',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: AppText.title,
                 ),
                 if (details.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
-                    details.join(' • '),
+                    details.join(' · '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                    ),
+                    style: AppText.caption,
                   ),
                 ],
               ],
@@ -1201,44 +1155,28 @@ class _StoreActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _StorePanel(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Row(
-          children: [
-            _PanelIcon(icon: icon),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.navy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          _PanelIcon(icon: icon),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppText.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(subtitle, style: AppText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
             ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
-          ],
-        ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: AppColors.inkFaint, size: 20),
+        ],
       ),
     );
   }
@@ -1259,41 +1197,37 @@ class _OptionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
-      decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.xs, AppSpacing.xs),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.subtitle),
             ),
-          ),
-          if (onSettings != null)
+            if (onSettings != null)
+              IconButton(
+                onPressed: onSettings,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                tooltip: 'Pricing',
+                visualDensity: VisualDensity.compact,
+              ),
             IconButton(
-              onPressed: onSettings,
-              icon: const Icon(Icons.tune_rounded, size: 20),
-              tooltip: 'Pricing',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
             ),
-          IconButton(
-            onPressed: onEdit,
-            icon: const Icon(Icons.edit_outlined, size: 20),
-            tooltip: 'Edit',
-          ),
-          IconButton(
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline, size: 20),
-            color: AppColors.error,
-            tooltip: 'Delete',
-          ),
-        ],
+            IconButton(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              color: AppColors.error,
+              tooltip: 'Delete',
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1465,11 +1399,10 @@ class _StorePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+    return AppCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
       ),
       child: child,
     );
@@ -1483,15 +1416,7 @@ class _PanelIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 34,
-      width: 34,
-      decoration: BoxDecoration(
-        color: AppColors.amber.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, color: AppColors.amber, size: 21),
-    );
+    return LeadingIconChip(icon: icon, color: AppColors.amber);
   }
 }
 

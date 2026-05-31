@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -43,10 +43,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
+      backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.xxl, AppSpacing.xxl, AppSpacing.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -64,27 +64,19 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   size: 36,
                 ),
               ),
-              const SizedBox(height: 28),
-              const Text(
+              const SizedBox(height: AppSpacing.xxl),
+              Text(
                 'Welcome to Storely',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: AppText.display.copyWith(color: AppColors.navy),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               Text(
-                'Add your shop name',
+                'Add your shop name to get started',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: AppText.body.copyWith(color: AppColors.inkMuted),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: AppSpacing.xxxl),
               Form(
                 key: _formKey,
                 child: TextFormField(
@@ -101,24 +93,22 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   onFieldSubmitted: (_) => _saveShopName(),
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: AppSpacing.lg),
               FilledButton.icon(
                 onPressed: _isSaving ? null : _saveShopName,
                 icon: _isSaving
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.arrow_forward_rounded),
                 label: const Text('Continue'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.navy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
                 ),
               ),
               const Spacer(flex: 2),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/shop_profile.dart';
@@ -39,9 +39,7 @@ class _BillsScreenState extends State<BillsScreen> {
   @override
   void didUpdateWidget(covariant BillsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.refreshToken != widget.refreshToken) {
-      _loadBills();
-    }
+    if (oldWidget.refreshToken != widget.refreshToken) _loadBills();
   }
 
   Future<void> _loadBills() async {
@@ -80,11 +78,7 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _updateBillStatus(
-    Bill bill,
-    bool isPaid, {
-    String? paymentMethod,
-  }) async {
+  Future<void> _updateBillStatus(Bill bill, bool isPaid, {String? paymentMethod}) async {
     if (bill.id == null) return;
     await DatabaseHelper.instance.updateBillPaidStatus(
       bill.id!,
@@ -111,17 +105,14 @@ class _BillsScreenState extends State<BillsScreen> {
               children: [
                 TextField(
                   controller: amountCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Amount received',
                     prefixText: '₹ ',
-                    helperText:
-                        'Balance: ₹${bill.balanceDue.toStringAsFixed(2)}',
+                    helperText: 'Balance: ₹${bill.balanceDue.toStringAsFixed(2)}',
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.md),
                 SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
@@ -151,7 +142,6 @@ class _BillsScreenState extends State<BillsScreen> {
                   final value = double.tryParse(amountCtrl.text) ?? 0;
                   Navigator.pop(ctx, value);
                 },
-                style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
                 child: const Text('Save'),
               ),
             ],
@@ -181,28 +171,21 @@ class _BillsScreenState extends State<BillsScreen> {
   Future<void> _sendBillOnWhatsApp(Bill bill) async {
     final phone = _whatsAppPhone(bill.customerPhone);
     if (phone == null) return;
-
     final uri = Uri.https('wa.me', '/$phone', {
-      'text': _buildBillMessage(
-        bill,
-        await DatabaseHelper.instance.getShopProfile(),
-      ),
+      'text': _buildBillMessage(bill, await DatabaseHelper.instance.getShopProfile()),
     });
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Unable to open WhatsApp')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open WhatsApp')),
+      );
     }
   }
 
   Future<void> _shareBillPdf(Bill bill) async {
     final shop = await DatabaseHelper.instance.getShopProfile();
     final bytes = await BillPdfGenerator.generate(bill: bill, shop: shop);
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: BillPdfGenerator.filename(bill),
-    );
+    await Printing.sharePdf(bytes: bytes, filename: BillPdfGenerator.filename(bill));
   }
 
   String? _whatsAppPhone(String? value) {
@@ -217,14 +200,10 @@ class _BillsScreenState extends State<BillsScreen> {
       ..writeln(shop?.name ?? 'Storely')
       ..writeln(_billDisplayId(bill))
       ..writeln('Customer: ${bill.customerName}')
-      ..writeln(
-        'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}',
-      );
+      ..writeln('Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}');
     if (shop?.gstin != null) buffer.writeln('GSTIN: ${shop!.gstin}');
     if (shop?.address != null) buffer.writeln(shop!.address);
-    buffer
-      ..writeln('')
-      ..writeln('Items:');
+    buffer..writeln('')..writeln('Items:');
     for (final item in bill.items) {
       buffer.writeln(
         '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ₹${item.subtotal.toStringAsFixed(2)}',
@@ -252,228 +231,67 @@ class _BillsScreenState extends State<BillsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: const Text(
-          'Bills',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _bills.isEmpty
-          ? _buildEmpty()
-          : RefreshIndicator(
-              onRefresh: _loadBills,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                children: [
-                  _buildSearchBar(),
-                  const SizedBox(height: 16),
-                  _buildUnpaidSummary(),
-                  ..._buildGroupedBillCards(),
-                ],
+      backgroundColor: AppColors.bg,
+      body: RefreshIndicator(
+        color: AppColors.amber,
+        onRefresh: _loadBills,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: AppScreenHeaderDelegate(
+                title: 'Bills',
+                topPadding: MediaQuery.paddingOf(context).top,
               ),
             ),
+            if (_isLoading)
+              const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_bills.isEmpty)
+              SliverFillRemaining(child: _buildEmpty())
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  96,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SearchBar(
+                        controller: _searchCtrl,
+                        query: _searchQuery,
+                        onChanged: (val) =>
+                            setState(() => _searchQuery = val.trim().toLowerCase()),
+                        onClear: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      if (_searchQuery.isEmpty) ...[
+                        _UnpaidSummary(bills: _bills),
+                      ],
+                      ..._buildGroupedBillCards(),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
       floatingActionButton: _isLoading || _bills.isEmpty
           ? null
           : FloatingActionButton.extended(
               onPressed: () => _openBillCreator(BillingEntryMode.manual),
-              backgroundColor: AppColors.navy,
-              foregroundColor: Colors.white,
               icon: const Icon(Icons.receipt_long_rounded),
               label: const Text('New Bill'),
             ),
-    );
-  }
-
-  Widget _buildSearchBar() {
-    return TextField(
-      controller: _searchCtrl,
-      decoration: InputDecoration(
-        hintText: 'Search by name, bill # or date...',
-        prefixIcon: const Icon(Icons.search_rounded),
-        suffixIcon: _searchQuery.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.clear_rounded, size: 20),
-                onPressed: () {
-                  _searchCtrl.clear();
-                  setState(() => _searchQuery = '');
-                },
-              )
-            : null,
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-      ),
-      onChanged: (val) {
-        setState(() => _searchQuery = val.trim().toLowerCase());
-      },
-    );
-  }
-
-  Widget _buildUnpaidSummary() {
-    if (_searchQuery.isNotEmpty) return const SizedBox.shrink();
-
-    final unpaid = _bills.where((b) => !b.isPaid).toList();
-    if (unpaid.isEmpty) return const SizedBox.shrink();
-
-    unpaid.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    Map<String, double> customerTotals = {};
-    for (var b in unpaid) {
-      final name = b.customerName.trim().isEmpty
-          ? 'Walk-in'
-          : b.customerName.trim();
-      customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
-    }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: Colors.white,
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: false,
-          leading: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.error.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.warning_amber_rounded,
-              color: AppColors.error,
-              size: 20,
-            ),
-          ),
-          title: const Text(
-            'Unpaid Bills Summary',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: AppColors.error,
-            ),
-          ),
-          subtitle: Text(
-            '${unpaid.length} pending bill${unpaid.length != 1 ? 's' : ''}',
-            style: const TextStyle(fontSize: 12),
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          children: [
-            const Divider(),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Total Due by Customer',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ...customerTotals.entries.map(
-              (e) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        e.key,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '₹${e.value.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.error,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'All Unpaid Bills',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ...unpaid.map(
-              (b) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 50,
-                      child: Text(
-                        DateFormat('dd MMM').format(b.createdAt),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            b.customerName,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            '#${b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber}',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      '₹${b.totalAmount.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.error,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -483,12 +301,10 @@ class _BillsScreenState extends State<BillsScreen> {
 
     final filtered = _bills.where((b) {
       if (_searchQuery.isEmpty) return true;
-      final query = _searchQuery;
-      final nameMatches = b.customerName.toLowerCase().contains(query);
-      final numMatches = b.billNumber.toLowerCase().contains(query);
-      final dateMatches = DateFormat(
-        'dd MMM yyyy',
-      ).format(b.createdAt).toLowerCase().contains(query);
+      final nameMatches = b.customerName.toLowerCase().contains(_searchQuery);
+      final numMatches = b.billNumber.toLowerCase().contains(_searchQuery);
+      final dateMatches =
+          DateFormat('dd MMM yyyy').format(b.createdAt).toLowerCase().contains(_searchQuery);
       return nameMatches || numMatches || dateMatches;
     }).toList();
 
@@ -496,9 +312,10 @@ class _BillsScreenState extends State<BillsScreen> {
       final group = _dateGroupTitle(bill.createdAt);
       if (group != currentGroup) {
         currentGroup = group;
-        widgets.add(_DateHeader(title: group));
+        if (widgets.isNotEmpty) widgets.add(const SizedBox(height: AppSpacing.xl));
+        widgets.add(_DateLabel(title: group));
+        widgets.add(const SizedBox(height: AppSpacing.sm));
       }
-
       widgets.add(
         _BillCard(
           bill: bill,
@@ -511,7 +328,6 @@ class _BillsScreenState extends State<BillsScreen> {
         ),
       );
     }
-
     return widgets;
   }
 
@@ -527,64 +343,216 @@ class _BillsScreenState extends State<BillsScreen> {
 
   Widget _buildEmpty() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: AppColors.creamDark,
-              shape: BoxShape.circle,
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xxl),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: AppRadius.lgRadius,
+              ),
+              child: Icon(
+                Icons.receipt_long_outlined,
+                size: 36,
+                color: AppColors.inkFaint,
+              ),
             ),
-            child: Icon(
-              Icons.receipt_long_outlined,
-              size: 56,
-              color: AppColors.textMuted.withValues(alpha: 0.5),
+            const SizedBox(height: AppSpacing.lg),
+            Text('No bills yet', style: AppText.title),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Create your first bill to get started',
+              style: AppText.caption,
+              textAlign: TextAlign.center,
             ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'No bills yet',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Search products to create your first bill',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => _openBillCreator(BillingEntryMode.manual),
-            icon: const Icon(Icons.receipt_long_rounded),
-            label: const Text('Create Bill'),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DateHeader extends StatelessWidget {
-  final String title;
-  const _DateHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-      child: Text(
-        title,
-        style: TextStyle(
-          color: AppColors.textMuted,
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.8,
+            const SizedBox(height: AppSpacing.xl),
+            FilledButton.icon(
+              onPressed: () => _openBillCreator(BillingEntryMode.manual),
+              icon: const Icon(Icons.receipt_long_rounded),
+              label: const Text('Create Bill'),
+            ),
+          ],
         ),
       ),
     );
   }
 }
+
+// ── Search bar ────────────────────────────────────────────────────────────────
+
+class _SearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final String query;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _SearchBar({
+    required this.controller,
+    required this.query,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        hintText: 'Search by name, bill # or date...',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        suffixIcon: query.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear_rounded, size: 18),
+                onPressed: onClear,
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+// ── Unpaid summary (collapsible) ──────────────────────────────────────────────
+
+class _UnpaidSummary extends StatelessWidget {
+  final List<Bill> bills;
+  const _UnpaidSummary({required this.bills});
+
+  @override
+  Widget build(BuildContext context) {
+    final unpaid = bills.where((b) => !b.isPaid).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (unpaid.isEmpty) return const SizedBox.shrink();
+
+    final customerTotals = <String, double>{};
+    for (final b in unpaid) {
+      final name = b.customerName.trim().isEmpty ? 'Walk-in' : b.customerName.trim();
+      customerTotals[name] = (customerTotals[name] ?? 0) + b.totalAmount;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      child: AppCard(
+        padding: EdgeInsets.zero,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.sm,
+            ),
+            leading: const LeadingIconChip(
+              icon: Icons.warning_amber_rounded,
+              color: AppColors.error,
+            ),
+            title: Text(
+              'Unpaid Bills Summary',
+              style: AppText.subtitle.copyWith(color: AppColors.error),
+            ),
+            subtitle: Text(
+              '${unpaid.length} pending bill${unpaid.length != 1 ? 's' : ''}',
+              style: AppText.caption,
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg,
+            ),
+            children: [
+              const Divider(height: 1),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'TOTAL DUE BY CUSTOMER',
+                style: AppText.label.copyWith(letterSpacing: 0.8),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              ...customerTotals.entries.map(
+                (e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(e.key, style: AppText.body)),
+                      Text(
+                        '₹${e.value.toStringAsFixed(2)}',
+                        style: AppText.subtitle.copyWith(color: AppColors.error),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'ALL UNPAID BILLS',
+                style: AppText.label.copyWith(letterSpacing: 0.8),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              ...unpaid.map(
+                (b) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 44,
+                        child: Text(
+                          DateFormat('dd MMM').format(b.createdAt),
+                          style: AppText.caption,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.customerName,
+                              style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              '#${b.billNumber.length > 4 ? b.billNumber.substring(b.billNumber.length - 4) : b.billNumber}',
+                              style: AppText.caption,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        '₹${b.totalAmount.toStringAsFixed(0)}',
+                        style: AppText.body.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Date label ────────────────────────────────────────────────────────────────
+
+class _DateLabel extends StatelessWidget {
+  final String title;
+  const _DateLabel({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title.toUpperCase(),
+      style: AppText.label,
+    );
+  }
+}
+
+// ── Bill card ─────────────────────────────────────────────────────────────────
 
 class _BillCard extends StatefulWidget {
   final Bill bill;
@@ -593,6 +561,7 @@ class _BillCard extends StatefulWidget {
   final VoidCallback onSharePdf;
   final void Function(bool isPaid, String? paymentMethod) onStatusChanged;
   final VoidCallback onRecordPayment;
+
   const _BillCard({
     required this.bill,
     required this.onDelete,
@@ -601,6 +570,7 @@ class _BillCard extends StatefulWidget {
     required this.onStatusChanged,
     required this.onRecordPayment,
   });
+
   @override
   State<_BillCard> createState() => _BillCardState();
 }
@@ -628,14 +598,11 @@ class _BillCardState extends State<_BillCard> {
               onPressed: () => Navigator.pop(ctx, 'online'),
               icon: const Icon(Icons.account_balance_wallet_outlined),
               label: const Text('Online'),
-              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
             ),
           ],
         ),
       );
-      if (method != null) {
-        widget.onStatusChanged(true, method);
-      }
+      if (method != null) widget.onStatusChanged(true, method);
     }
   }
 
@@ -648,289 +615,214 @@ class _BillCardState extends State<_BillCard> {
     );
   }
 
-  Widget _buildActionButton(
-    VoidCallback onPressed,
-    IconData icon,
-    String label,
-    Color color,
-  ) {
-    return FractionallySizedBox(
-      widthFactor: 0.5,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 18),
-          label: Text(label, overflow: TextOverflow.ellipsis),
-          style: TextButton.styleFrom(
-            foregroundColor: color,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final bill = widget.bill;
-    final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt);
+    final dateStr = DateFormat('hh:mm a').format(bill.createdAt);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          // Header
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppColors.amber.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.receipt_outlined,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              borderRadius: AppRadius.mdRadius,
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Row(
+                  children: [
+                    const LeadingIconChip(
+                      icon: Icons.receipt_outlined,
                       color: AppColors.amber,
-                      size: 22,
                     ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
+                            style: AppText.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${_billDisplayId(bill)} · $dateStr · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
+                            style: AppText.caption,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          bill.customerName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                          ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _PaymentChip(status: bill.paymentStatus),
+                            if (bill.paidAmount > 0) ...[
+                              const SizedBox(width: 4),
+                              _MethodChip(method: bill.paymentMethod),
+                            ],
+                          ],
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 4),
                         Text(
-                          '${_billDisplayId(bill)} • $dateStr',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
-                          ),
+                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          style: AppText.subtitle.copyWith(fontSize: 14),
                         ),
                       ],
                     ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _PaymentChip(status: bill.paymentStatus),
-                          if (bill.paidAmount > 0) ...[
-                            const SizedBox(width: 4),
-                            _MethodChip(method: bill.paymentMethod),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₹${bill.totalAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                        ),
-                      ),
-                      Text(
-                        '${bill.itemCount} items',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    _expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    color: AppColors.textMuted,
-                  ),
-                ],
+                    const SizedBox(width: AppSpacing.xs),
+                    Icon(
+                      _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      color: AppColors.inkFaint,
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          // Expanded items
-          if (_expanded) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Column(
-                children: [
-                  if (bill.customerPhone != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.phone_outlined,
-                            size: 16,
-                            color: AppColors.textMuted,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            bill.customerPhone!,
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ...bill.items.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item.productName,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ),
-                          Text(
-                            '${item.quantityLabel} x ${item.priceLabel}',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Text(
-                            '₹${item.subtotal.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const Divider(),
-                  if (bill.discountAmount > 0) ...[
-                    _AmountRow(
-                      label: 'Subtotal',
-                      value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
-                    ),
-                    _AmountRow(
-                      label: 'Discount',
-                      value:
-                          '${bill.discountPercent.toStringAsFixed(2)}% • - ₹${bill.discountAmount.toStringAsFixed(2)}',
-                    ),
-                    const SizedBox(height: 4),
-                  ],
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Total Amount',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textMuted,
+            if (_expanded) ...[
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  children: [
+                    if (bill.customerPhone != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: Row(
+                          children: [
+                            Icon(Icons.phone_outlined, size: 15, color: AppColors.inkMuted),
+                            const SizedBox(width: AppSpacing.sm),
+                            Text(bill.customerPhone!, style: AppText.caption),
+                          ],
                         ),
                       ),
-                      Text(
-                        '₹${bill.totalAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
+                    ...bill.items.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(item.productName, style: AppText.body),
+                            ),
+                            Text(
+                              '${item.quantityLabel} × ${item.priceLabel}',
+                              style: AppText.caption,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Text(
+                              '₹${item.subtotal.toStringAsFixed(2)}',
+                              style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Divider(height: AppSpacing.lg),
+                    if (bill.discountAmount > 0) ...[
+                      _AmountRow(
+                        label: 'Subtotal',
+                        value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
+                      ),
+                      _AmountRow(
+                        label: 'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
+                        value: '−₹${bill.discountAmount.toStringAsFixed(2)}',
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                    ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Total', style: AppText.subtitle),
+                        Text(
+                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          style: AppText.subtitle.copyWith(color: AppColors.navy),
+                        ),
+                      ],
+                    ),
+                    if (bill.paidAmount > 0 || bill.balanceDue > 0) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      _AmountRow(
+                        label: 'Paid',
+                        value: '₹${bill.paidAmount.toStringAsFixed(2)}',
+                      ),
+                      _AmountRow(
+                        label: 'Balance',
+                        value: '₹${bill.balanceDue.toStringAsFixed(2)}',
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.sm),
+                    const Divider(height: 1),
+                    const SizedBox(height: AppSpacing.xs),
+                    Wrap(
+                      children: [
+                        if (CloudService.instance.state.value.isAdmin)
+                          _ActionButton(
+                            onPressed: widget.onDelete,
+                            icon: Icons.delete_outline,
+                            label: 'Delete',
+                            color: AppColors.error,
+                          ),
+                        _ActionButton(
+                          onPressed: _togglePaidStatus,
+                          icon: bill.isPaid
+                              ? Icons.pending_actions_outlined
+                              : Icons.check_circle_outline,
+                          label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
+                          color: bill.isPaid ? AppColors.inkMuted : AppColors.success,
+                        ),
+                        if (bill.balanceDue > 0)
+                          _ActionButton(
+                            onPressed: widget.onRecordPayment,
+                            icon: Icons.payments_outlined,
+                            label: 'Record Payment',
+                            color: AppColors.amber,
+                          ),
+                        if (bill.customerPhone != null)
+                          _ActionButton(
+                            onPressed: widget.onSendWhatsApp,
+                            icon: Icons.send_outlined,
+                            label: 'WhatsApp',
+                            color: AppColors.success,
+                          ),
+                        _ActionButton(
+                          onPressed: widget.onSharePdf,
+                          icon: Icons.ios_share_rounded,
+                          label: 'Share',
                           color: AppColors.navy,
                         ),
-                      ),
-                    ],
-                  ),
-                  if (bill.paidAmount > 0 || bill.balanceDue > 0) ...[
-                    const SizedBox(height: 4),
-                    _AmountRow(
-                      label: 'Paid',
-                      value: '₹${bill.paidAmount.toStringAsFixed(2)}',
-                    ),
-                    _AmountRow(
-                      label: 'Balance',
-                      value: '₹${bill.balanceDue.toStringAsFixed(2)}',
+                        _ActionButton(
+                          onPressed: _showProfitSummary,
+                          icon: Icons.trending_up_rounded,
+                          label: 'View Profit',
+                          color: AppColors.navy,
+                        ),
+                      ],
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    children: [
-                      if (CloudService.instance.state.value.isAdmin)
-                        _buildActionButton(
-                          widget.onDelete,
-                          Icons.delete_outline,
-                          'Delete',
-                          AppColors.error,
-                        ),
-                      _buildActionButton(
-                        _togglePaidStatus,
-                        bill.isPaid
-                            ? Icons.pending_actions_outlined
-                            : Icons.check_circle_outline,
-                        bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
-                        bill.isPaid ? AppColors.textMuted : AppColors.success,
-                      ),
-                      if (bill.balanceDue > 0)
-                        _buildActionButton(
-                          widget.onRecordPayment,
-                          Icons.payments_outlined,
-                          'Record Payment',
-                          AppColors.amber,
-                        ),
-                      if (bill.customerPhone != null)
-                        _buildActionButton(
-                          widget.onSendWhatsApp,
-                          Icons.send_outlined,
-                          'WhatsApp',
-                          AppColors.success,
-                        ),
-                      _buildActionButton(
-                        widget.onSharePdf,
-                        Icons.ios_share_rounded,
-                        'Share',
-                        AppColors.navy,
-                      ),
-                      _buildActionButton(
-                        _showProfitSummary,
-                        Icons.trending_up_rounded,
-                        'View Profit',
-                        AppColors.navy,
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
+// ── Profit sheet ──────────────────────────────────────────────────────────────
+
 class _BillProfitSheet extends StatefulWidget {
   final Bill bill;
-
   const _BillProfitSheet({required this.bill});
 
   @override
@@ -946,9 +838,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
     super.initState();
     _commissionPercent = widget.bill.profitCommissionPercent;
     _commissionCtrl = TextEditingController(
-      text: _commissionPercent == 0
-          ? ''
-          : _commissionPercent.toStringAsFixed(2),
+      text: _commissionPercent == 0 ? '' : _commissionPercent.toStringAsFixed(2),
     );
   }
 
@@ -987,69 +877,50 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
         constraints: BoxConstraints(
           maxHeight: MediaQuery.sizeOf(context).height * 0.9,
         ),
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        margin: const EdgeInsets.fromLTRB(
+          AppSpacing.md, 0, AppSpacing.md, AppSpacing.md,
+        ),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
+          color: AppColors.surface,
+          borderRadius: AppRadius.lgRadius,
+          border: Border.all(color: AppColors.border),
         ),
         child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.xl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               Center(
                 child: Container(
-                  width: 40,
+                  width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
-                    borderRadius: BorderRadius.circular(2),
+                    color: AppColors.border,
+                    borderRadius: AppRadius.pillRadius,
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                '${_billDisplayId(bill)} Profit',
-                style: const TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.cream,
-                  borderRadius: BorderRadius.circular(16),
-                ),
+              const SizedBox(height: AppSpacing.lg),
+              Text('${_billDisplayId(bill)} Profit', style: AppText.title),
+              const SizedBox(height: AppSpacing.lg),
+              AppCard(
+                color: AppColors.bg,
                 child: Column(
                   children: [
-                    _ProfitTotalRow('Total Revenue', revenue),
-                    _ProfitTotalRow('Purchase Cost', cost),
-                    _ProfitTotalRow(
-                      'Overhead',
-                      0.0,
-                    ), // Placeholder for future feature
-                    if (gst > 0) _ProfitTotalRow('GST', gst),
-                    const Divider(height: 16),
-                    _ProfitTotalRow(
-                      'Gross Profit',
-                      profit,
-                      isBold: true,
-                      color: AppColors.success,
-                    ),
-                    const SizedBox(height: 16),
+                    _ProfitRow('Total Revenue', revenue),
+                    _ProfitRow('Purchase Cost', cost),
+                    _ProfitRow('Overhead', 0.0),
+                    if (gst > 0) _ProfitRow('GST', gst),
+                    const Divider(height: AppSpacing.lg),
+                    _ProfitRow('Gross Profit', profit,
+                        isBold: true, color: AppColors.success),
+                    const SizedBox(height: AppSpacing.lg),
                     Row(
                       children: [
-                        const Text(
+                        Text(
                           'Partner Commission %',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: AppText.caption.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const Spacer(),
                         SizedBox(
@@ -1057,9 +928,8 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                           height: 36,
                           child: TextField(
                             controller: _commissionCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
+                            keyboardType:
+                                const TextInputType.numberWithOptions(decimal: true),
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               fontSize: 14,
@@ -1069,48 +939,39 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                               contentPadding: EdgeInsets.zero,
                               suffixText: '%',
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide.none,
+                                borderRadius: AppRadius.smRadius,
+                                borderSide: const BorderSide(color: AppColors.border),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: AppRadius.smRadius,
+                                borderSide: const BorderSide(color: AppColors.border),
                               ),
                               filled: true,
-                              fillColor: Colors.white,
+                              fillColor: AppColors.surface,
                             ),
                             onChanged: (value) => setState(() {
-                              _commissionPercent = (double.tryParse(value) ?? 0)
-                                  .clamp(0, 100)
-                                  .toDouble();
+                              _commissionPercent =
+                                  (double.tryParse(value) ?? 0).clamp(0, 100).toDouble();
                             }),
                           ),
                         ),
                       ],
                     ),
                     if (commission > 0) ...[
-                      const SizedBox(height: 10),
-                      _ProfitTotalRow(
-                        'Commission Payable',
-                        -commission,
-                        color: AppColors.error,
-                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      _ProfitRow('Commission Payable', -commission,
+                          color: AppColors.error),
                     ],
-                    const Divider(height: 20),
-                    _ProfitTotalRow(
-                      'Net Profit',
-                      net,
-                      isBold: true,
-                      fontSize: 18,
-                    ),
+                    const Divider(height: AppSpacing.xl),
+                    _ProfitRow('Net Profit', net, isBold: true, fontSize: 18),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: AppSpacing.xl),
               FilledButton.icon(
                 onPressed: _saveCommission,
                 icon: const Icon(Icons.save_outlined),
                 label: const Text('Save Commission'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.navy,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
               ),
             ],
           ),
@@ -1120,14 +981,16 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
   }
 }
 
-class _ProfitTotalRow extends StatelessWidget {
+// ── Small widgets ─────────────────────────────────────────────────────────────
+
+class _ProfitRow extends StatelessWidget {
   final String label;
   final double value;
   final bool isBold;
   final Color? color;
   final double fontSize;
 
-  const _ProfitTotalRow(
+  const _ProfitRow(
     this.label,
     this.value, {
     this.isBold = false,
@@ -1138,20 +1001,20 @@ class _ProfitTotalRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             label,
             style: TextStyle(
-              color: color ?? AppColors.textMuted,
+              color: color ?? AppColors.inkMuted,
               fontSize: fontSize,
               fontWeight: isBold ? FontWeight.w700 : FontWeight.normal,
             ),
           ),
           Text(
-            '${value < 0 ? '-' : ''}₹${value.abs().toStringAsFixed(2)}',
+            '${value < 0 ? '−' : ''}₹${value.abs().toStringAsFixed(2)}',
             style: TextStyle(
               fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
               fontSize: fontSize,
@@ -1162,86 +1025,6 @@ class _ProfitTotalRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _PaymentChip extends StatelessWidget {
-  final String status;
-  const _PaymentChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final isPaid = status == Bill.statusPaid;
-    final isPartial = status == Bill.statusPartial;
-    final color = isPaid
-        ? AppColors.success
-        : isPartial
-        ? AppColors.amber
-        : AppColors.error;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        _paymentStatusLabel(status),
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w700,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-}
-
-String _paymentStatusLabel(String status) {
-  return switch (status) {
-    Bill.statusPaid => 'Paid',
-    Bill.statusPartial => 'Partial',
-    _ => 'Unpaid',
-  };
-}
-
-class _MethodChip extends StatelessWidget {
-  final String method;
-  const _MethodChip({required this.method});
-
-  @override
-  Widget build(BuildContext context) {
-    final online = method == 'online';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: (online ? AppColors.navy : AppColors.amber).withValues(
-          alpha: 0.12,
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        _paymentMethodLabel(method),
-        style: TextStyle(
-          color: online ? AppColors.navy : AppColors.amber,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-}
-
-String _paymentMethodLabel(String method) {
-  return method == 'online' ? 'Online' : 'Cash';
-}
-
-String _billDisplayId(Bill bill) {
-  if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';
-  // Strip the internal SHOP-LOCAL-local- prefix for display.
-  final cleaned = bill.billNumber.replaceFirst(
-    RegExp(r'^SHOP-LOCAL-local-'),
-    'INV-',
-  );
-  return cleaned;
 }
 
 class _AmountRow extends StatelessWidget {
@@ -1255,17 +1038,88 @@ class _AmountRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Text(label, style: TextStyle(color: AppColors.textMuted)),
+          Text(label, style: AppText.caption),
           const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(value, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
+}
+
+class _ActionButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _ActionButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FractionallySizedBox(
+      widthFactor: 0.5,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 17),
+        label: Text(label, overflow: TextOverflow.ellipsis),
+        style: TextButton.styleFrom(
+          foregroundColor: color,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentChip extends StatelessWidget {
+  final String status;
+  const _PaymentChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final isPaid = status == Bill.statusPaid;
+    final isPartial = status == Bill.statusPartial;
+    return StatusPill(
+      label: _paymentStatusLabel(status),
+      variant: isPaid
+          ? PillVariant.paid
+          : isPartial
+              ? PillVariant.warning
+              : PillVariant.unpaid,
+    );
+  }
+}
+
+class _MethodChip extends StatelessWidget {
+  final String method;
+  const _MethodChip({required this.method});
+
+  @override
+  Widget build(BuildContext context) {
+    final online = method == 'online';
+    return StatusPill(
+      label: _paymentMethodLabel(method),
+      variant: online ? PillVariant.info : PillVariant.warning,
+    );
+  }
+}
+
+String _paymentStatusLabel(String status) => switch (status) {
+      Bill.statusPaid => 'Paid',
+      Bill.statusPartial => 'Partial',
+      _ => 'Unpaid',
+    };
+
+String _paymentMethodLabel(String method) => method == 'online' ? 'Online' : 'Cash';
+
+String _billDisplayId(Bill bill) {
+  if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';
+  return bill.billNumber.replaceFirst(RegExp(r'^SHOP-LOCAL-local-'), 'INV-');
 }

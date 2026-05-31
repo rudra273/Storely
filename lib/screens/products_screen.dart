@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
@@ -2277,13 +2277,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
         if (!didPop && _selectionMode) _clearProductSelection();
       },
       child: Scaffold(
-        backgroundColor: AppColors.cream,
+        backgroundColor: AppColors.bg,
         appBar: AppBar(
           title: _selectionMode
-              ? Text(
-                  '${_selectedProductIds.length} selected',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                )
+              ? Text('${_selectedProductIds.length} selected')
               : _searchOpen
               ? TextField(
                   controller: _searchCtrl,
@@ -2291,17 +2288,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   style: const TextStyle(color: Colors.white, fontSize: 16),
                   decoration: InputDecoration(
                     hintText: 'Search products...',
-                    hintStyle: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
+                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                     border: InputBorder.none,
                     filled: false,
                   ),
                 )
-              : const Text(
-                  'Products',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
+              : const Text('Products'),
           actions: [
             if (_selectionMode) ...[
               IconButton(
@@ -2310,19 +2302,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 tooltip: 'Clear selection',
               ),
             ] else ...[
-              // Search toggle
               IconButton(
                 onPressed: () {
                   setState(() {
                     _searchOpen = !_searchOpen;
-                    if (!_searchOpen) {
-                      _searchCtrl.clear();
-                    }
+                    if (!_searchOpen) _searchCtrl.clear();
                   });
                 },
                 icon: Icon(_searchOpen ? Icons.close : Icons.search),
               ),
-              // QR Sheet
               IconButton(
                 onPressed: _openQrSheet,
                 icon: const Icon(Icons.qr_code_2),
@@ -2332,23 +2320,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.amber,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${_allProducts.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
+                    child: StatusPill(
+                      label: '${_allProducts.length}',
+                      variant: PillVariant.info,
                     ),
                   ),
                 ),
@@ -2372,12 +2346,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     foregroundColor: Colors.white,
                     child: const Icon(Icons.upload_file_rounded),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: AppSpacing.sm),
                   FloatingActionButton(
                     heroTag: 'add',
                     onPressed: () => _showAddEditSheet(),
-                    backgroundColor: AppColors.navy,
-                    foregroundColor: Colors.white,
                     child: const Icon(Icons.add_rounded),
                   ),
                 ],
@@ -2388,45 +2360,36 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   Widget _buildEmpty() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(28),
-            decoration: const BoxDecoration(
-              color: AppColors.creamDark,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.inventory_2_outlined,
-              size: 56,
-              color: AppColors.textMuted.withValues(alpha: 0.5),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'No products yet',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Add manually or import from CSV',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton.icon(
-            onPressed: _importCsv,
-            icon: const Icon(Icons.upload_file_rounded),
-            label: const Text('Import CSV'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.navy,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xxl),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: AppRadius.lgRadius,
               ),
+              child: Icon(Icons.inventory_2_outlined, size: 36, color: AppColors.inkFaint),
             ),
-          ),
-        ],
+            const SizedBox(height: AppSpacing.lg),
+            Text('No products yet', style: AppText.title),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Add manually or import from CSV',
+              style: AppText.caption,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            OutlinedButton.icon(
+              onPressed: _importCsv,
+              icon: const Icon(Icons.upload_file_rounded),
+              label: const Text('Import CSV'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2435,7 +2398,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.sm),
           child: Row(
             children: [
               Expanded(
@@ -2444,7 +2407,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   onTap: _showProductFilters,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: _SortDropdownButton(
                   label: 'Sort: ${_sortMode.label}',
@@ -2456,7 +2419,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         ),
         if (_activeFilterCount > 0)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.sm),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Wrap(
@@ -2505,26 +2468,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
             ),
           ),
         if (_isUpdatingPrices)
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.amber.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Row(
-              children: [
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  'Updating prices...',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.sm),
+            child: AppCard(
+              color: AppColors.amber.withValues(alpha: 0.08),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: const Row(
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: AppSpacing.sm),
+                  Text('Updating prices...', style: AppText.body),
+                ],
+              ),
             ),
           ),
         if (_selectionMode)
@@ -2546,13 +2508,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
         Expanded(
           child: _filtered.isEmpty
               ? Center(
-                  child: Text(
-                    'No matching products',
-                    style: TextStyle(color: AppColors.textMuted),
-                  ),
+                  child: Text('No matching products', style: AppText.caption),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, 120),
                   itemCount: _filtered.length,
                   itemBuilder: (_, i) => _ProductCard(
                     product: _filtered[i],
@@ -3553,10 +3512,10 @@ class _PricingInputRow extends StatelessWidget {
                         deltaText,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
+                        style: const TextStyle(
+                          color: AppColors.textDark,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     Text(
@@ -3565,9 +3524,9 @@ class _PricingInputRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.end,
                       style: const TextStyle(
-                        color: AppColors.textDark,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -4292,228 +4251,124 @@ class _ProductCard extends StatelessWidget {
     final isLowStock = product.quantity <= lowStockThreshold;
     final isOutOfStock = product.quantity == 0;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: isSelected
-            ? AppColors.navy.withValues(alpha: 0.06)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: isSelected
-            ? Border.all(color: AppColors.navy, width: 1.4)
-            : isOutOfStock
-            ? Border.all(color: AppColors.error.withValues(alpha: 0.3))
-            : null,
-      ),
-      child: InkWell(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
         onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Top row: category badge + source + delete
-              Row(
-                children: [
-                  if (selectionMode) ...[
-                    Icon(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        color: isSelected ? AppColors.navy.withValues(alpha: 0.05) : AppColors.surface,
+        borderRadius: isSelected
+            ? AppRadius.mdRadius
+            : isOutOfStock
+                ? AppRadius.mdRadius
+                : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (selectionMode) ...[
+                  GestureDetector(
+                    onTap: onTap,
+                    child: Icon(
                       isSelected
                           ? Icons.check_circle_rounded
                           : Icons.radio_button_unchecked_rounded,
-                      size: 22,
-                      color: isSelected ? AppColors.navy : AppColors.textMuted,
+                      size: 20,
+                      color: isSelected ? AppColors.navy : AppColors.inkFaint,
                     ),
-                    const SizedBox(width: 8),
-                  ],
-
-                  _sourceBadge(product.sourceLabel, product.isImported),
-                  const SizedBox(width: 8),
-                  _sourceBadge(
-                    product.directPriceToggle ? 'direct' : 'auto',
-                    product.directPriceToggle,
                   ),
-                  const Spacer(),
-                  // Stock badge
-                  if (isOutOfStock)
-                    _stockBadge('OUT', AppColors.error)
-                  else if (isLowStock)
-                    _stockBadge('LOW', AppColors.amber),
-                  const SizedBox(width: 4),
-                  if (!selectionMode)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          onPressed: onHistory,
-                          icon: const Icon(Icons.history_rounded, size: 18),
-                          tooltip: 'Stock history',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        IconButton(
-                          onPressed: onDelete,
-                          icon: const Icon(Icons.delete_outline, size: 18),
-                          tooltip: 'Delete',
-                          color: AppColors.textMuted.withValues(alpha: 0.5),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ],
-                    ),
+                  const SizedBox(width: AppSpacing.sm),
                 ],
-              ),
-              const SizedBox(height: 10),
-              // Product name
-              Text(
-                product.name,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
+                _SourceBadge(label: product.sourceLabel, highlighted: product.isImported),
+                const SizedBox(width: AppSpacing.sm),
+                _SourceBadge(
+                  label: product.directPriceToggle ? 'direct' : 'auto',
+                  highlighted: product.directPriceToggle,
                 ),
+                const Spacer(),
+                if (isOutOfStock)
+                  StatusPill(label: 'Out', variant: PillVariant.out)
+                else if (isLowStock)
+                  StatusPill(label: 'Low', variant: PillVariant.low),
+                if (!selectionMode) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  InkWell(
+                    onTap: onHistory,
+                    borderRadius: AppRadius.smRadius,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.history_rounded, size: 16, color: AppColors.inkFaint),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: onDelete,
+                    borderRadius: AppRadius.smRadius,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.delete_outline, size: 16, color: AppColors.inkFaint),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            GestureDetector(
+              onLongPress: onLongPress,
+              child: Text(
+                product.name,
+                style: AppText.subtitle,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              if (product.barcode != null) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _InfoChip(
-                      icon: Icons.qr_code_scanner_rounded,
-                      label: product.barcode!,
-                    ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 10),
-              if (purchaseSummary?.lastPurchaseDate != null) ...[
-                Row(
-                  children: [
-                    Icon(
-                      Icons.event_available_outlined,
-                      size: 14,
-                      color: AppColors.textMuted,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      'Last purchase ${_formatFullDate(purchaseSummary!.lastPurchaseDate!)}',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-              ],
-              // Bottom row: price + qty + supplier
+            ),
+            if (product.barcode != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              _InfoChip(icon: Icons.qr_code_scanner_rounded, label: product.barcode!),
+            ],
+            if (purchaseSummary?.lastPurchaseDate != null) ...[
+              const SizedBox(height: AppSpacing.xs),
               Row(
                 children: [
-                  // Price
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.amber.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      product.priceLabel,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.amber,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  // Quantity
-                  Icon(
-                    Icons.inventory_2_outlined,
-                    size: 14,
-                    color: AppColors.textMuted,
-                  ),
-                  const SizedBox(width: 4),
+                  Icon(Icons.event_available_outlined, size: 12, color: AppColors.inkFaint),
+                  const SizedBox(width: AppSpacing.xs),
                   Text(
-                    product.quantityLabel,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isLowStock ? AppColors.error : AppColors.textMuted,
-                      fontWeight: isLowStock
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                    ),
+                    'Last purchase ${_formatFullDate(purchaseSummary!.lastPurchaseDate!)}',
+                    style: AppText.caption,
                   ),
-                  const Spacer(),
-                  // Supplier
-                  if (product.supplier != null)
-                    Flexible(
-                      child: Text(
-                        product.supplier!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textMuted,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
                 ],
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _stockBadge(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-
-  Widget _sourceBadge(String text, bool imported) {
-    final color = imported ? AppColors.amber : AppColors.navy;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            imported ? Icons.upload_file_rounded : Icons.phone_android_rounded,
-            size: 12,
-            color: color,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                StatusPill(
+                  label: product.priceLabel,
+                  variant: PillVariant.warning,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Icon(Icons.inventory_2_outlined, size: 13, color: AppColors.inkFaint),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  product.quantityLabel,
+                  style: AppText.caption.copyWith(
+                    color: isLowStock ? AppColors.error : AppColors.inkMuted,
+                    fontWeight: isLowStock ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+                const Spacer(),
+                if (product.supplier != null)
+                  Flexible(
+                    child: Text(
+                      product.supplier!,
+                      style: AppText.caption,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4530,13 +4385,13 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(7),
+        color: AppColors.bg,
+        borderRadius: AppRadius.smRadius,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppColors.textMuted),
+          Icon(icon, size: 12, color: AppColors.inkMuted),
           const SizedBox(width: 4),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 150),
@@ -4544,12 +4399,42 @@ class _InfoChip extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
+              style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String label;
+  final bool highlighted;
+
+  const _SourceBadge({required this.label, required this.highlighted});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = highlighted ? AppColors.amber : AppColors.navy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: AppRadius.smRadius,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            highlighted ? Icons.upload_file_rounded : Icons.phone_android_rounded,
+            size: 11,
+            color: color,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
           ),
         ],
       ),

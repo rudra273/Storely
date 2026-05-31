@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
@@ -603,10 +603,11 @@ class _ScanScreenState extends State<ScanScreen> {
                       ],
                       const SizedBox(height: 16),
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(AppSpacing.lg),
                         decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(14),
+                          color: AppColors.bg,
+                          borderRadius: AppRadius.mdRadius,
+                          border: Border.all(color: AppColors.border),
                         ),
                         child: Column(
                           children: [
@@ -932,11 +933,11 @@ class _ScanScreenState extends State<ScanScreen> {
     return Container(
       height: height,
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.surface,
+        borderRadius: AppRadius.lgRadius,
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         children: [
@@ -948,7 +949,7 @@ class _ScanScreenState extends State<ScanScreen> {
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.sm),
           Expanded(
             child: _isLoadingProducts
                 ? const Center(child: CircularProgressIndicator())
@@ -998,7 +999,6 @@ class _ScanScreenState extends State<ScanScreen> {
       appBar: AppBar(
         title: Text(
           _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
-          style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
@@ -1052,17 +1052,22 @@ class _ScanScreenState extends State<ScanScreen> {
       // ── Bottom Total + Complete Button ──
       bottomNavigationBar: _items.isNotEmpty
           ? Container(
-              color: AppColors.cream,
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              color: AppColors.bg,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                AppSpacing.sm,
+              ),
               child: SafeArea(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
+                    horizontal: AppSpacing.xl,
+                    vertical: AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
                     color: AppColors.navy,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: AppRadius.lgRadius,
                   ),
                   child: Row(
                     children: [
@@ -1119,8 +1124,8 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget _buildBillItemsPanel() {
     return Container(
       decoration: const BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        color: AppColors.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: _items.isEmpty
           ? Center(
@@ -1146,11 +1151,12 @@ class _ScanScreenState extends State<ScanScreen> {
               itemBuilder: (_, i) {
                 final item = _items[i];
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(14),
+                  margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
+                    color: AppColors.surface,
+                    borderRadius: AppRadius.mdRadius,
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Row(
                     children: [
@@ -1179,8 +1185,8 @@ class _ScanScreenState extends State<ScanScreen> {
                       // Qty controls
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(10),
+                          color: AppColors.bg,
+                          borderRadius: AppRadius.smRadius,
                         ),
                         child: Row(
                           children: [
@@ -1300,13 +1306,16 @@ class _ManualProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOut = product.quantity == 0;
     return Material(
-      color: AppColors.cream,
-      borderRadius: BorderRadius.circular(12),
+      color: AppColors.bg,
+      borderRadius: AppRadius.mdRadius,
       child: InkWell(
         onTap: onAdd,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppRadius.mdRadius,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
           child: Row(
             children: [
               Expanded(
@@ -1381,16 +1390,16 @@ class _CustomerSuggestionList extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(maxHeight: 220),
       decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.surface,
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.border),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: customers.length,
         separatorBuilder: (_, index) =>
-            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+            Divider(height: 1, indent: 56, color: AppColors.border),
         itemBuilder: (_, index) {
           final customer = customers[index];
           return ListTile(

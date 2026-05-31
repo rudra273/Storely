@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -56,67 +56,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: const Text(
-          'Notifications',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
-      body: _isLoading 
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Notifications')),
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _customerDebits.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No notifications are there.',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: AppColors.textMuted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+              ? Center(
+                  child: Text('No pending dues', style: AppText.caption),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   itemCount: _customerDebits.length,
                   itemBuilder: (context, index) {
                     final data = _customerDebits[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      color: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.error.withValues(alpha: 0.1),
-                          child: const Icon(Icons.warning_amber_rounded, color: AppColors.error),
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: AppCard(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
                         ),
-                        title: Text(
-                          data['name'],
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(
-                          data['phone'],
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                        child: Row(
                           children: [
-                            const Text(
-                              'Pending Due',
-                              style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+                            const LeadingIconChip(
+                              icon: Icons.warning_amber_rounded,
+                              color: AppColors.error,
                             ),
-                            Text(
-                              '₹${(data['amount'] as double).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                                color: AppColors.error,
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(data['name'] as String, style: AppText.subtitle),
+                                  Text(data['phone'] as String, style: AppText.caption),
+                                ],
                               ),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('PENDING', style: AppText.label),
+                                Text(
+                                  '₹${(data['amount'] as double).toStringAsFixed(2)}',
+                                  style: AppText.subtitle.copyWith(color: AppColors.error),
+                                ),
+                              ],
                             ),
                           ],
                         ),
