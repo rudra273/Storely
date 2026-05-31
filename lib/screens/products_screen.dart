@@ -1155,8 +1155,139 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
+  // ── New Purchase (step 1: date + supplier) ──
+  Future<void> _showNewPurchaseFlow() async {
+    var purchaseDate = DateTime.now();
+    String? selectedSupplier;
+
+    final proceed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          return SafeArea(
+            top: false,
+            child: Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ProductSheetHeader(
+                    title: 'New Purchase',
+                    onClose: () => Navigator.pop(ctx, false),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _EditorSection(
+                          title: 'Purchase Details',
+                          icon: Icons.receipt_long_outlined,
+                          child: Column(
+                            children: [
+                              InkWell(
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: ctx,
+                                    initialDate: purchaseDate,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime.now().add(
+                                      const Duration(days: 365),
+                                    ),
+                                  );
+                                  if (picked == null) return;
+                                  setSheet(() => purchaseDate = picked);
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: InputDecorator(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Purchase Date',
+                                    prefixIcon: Icon(
+                                      Icons.event_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _formatFullDate(purchaseDate),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _OptionDropdown(
+                                label: 'Supplier',
+                                value: selectedSupplier,
+                                options: _suppliers,
+                                onChanged: (value) =>
+                                    setSheet(() => selectedSupplier = value),
+                                onAdd: () async {
+                                  final value = await _showAddOptionDialog(
+                                    'Supplier',
+                                  );
+                                  if (value == null ||
+                                      !mounted ||
+                                      !ctx.mounted) {
+                                    return;
+                                  }
+                                  await DatabaseHelper.instance
+                                      .addSupplierOption(value);
+                                  if (!mounted || !ctx.mounted) return;
+                                  setState(() {
+                                    if (!_suppliers.contains(value)) {
+                                      _suppliers.add(value);
+                                      _suppliers.sort();
+                                    }
+                                  });
+                                  setSheet(() => selectedSupplier = value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        FilledButton.icon(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          icon: const Icon(Icons.arrow_forward_rounded),
+                          label: const Text('Next'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (proceed != true || !mounted) return;
+    await _showAddEditSheet(
+      initialPurchaseDate: purchaseDate,
+      initialSupplier: selectedSupplier,
+    );
+  }
+
   // ── Add/Edit Sheet ──
-  Future<void> _showAddEditSheet({Product? product}) async {
+  Future<void> _showAddEditSheet({
+    Product? product,
+    DateTime? initialPurchaseDate,
+    String? initialSupplier,
+  }) async {
     final isEditing = product != null;
     final db = DatabaseHelper.instance;
     final globalPricing = await db.getGlobalPricingSettings();
@@ -1190,10 +1321,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
           : '',
     );
     String? selectedCategory = product?.category;
-    String? selectedSupplier = product?.supplier;
+    String? selectedSupplier = product?.supplier ?? initialSupplier;
     String? selectedUnit = product?.unit;
     Product? selectedExistingProduct;
-    var purchaseDate = DateTime.now();
+    var purchaseDate = initialPurchaseDate ?? DateTime.now();
     var hideProductSuggestions = false;
     double effectiveGst() =>
         selectedCategoryPricing?.gstPercent ?? globalPricing.defaultGstPercent;
@@ -1445,7 +1576,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   productCode: _optionalControllerText(productCodeCtrl),
                   barcode: _optionalControllerText(barcodeCtrl),
                   hsnCode: _optionalControllerText(hsnCtrl),
-                  name: existing.name,
+                  name: name,
                   categoryId: existing.categoryId,
                   category: selectedCategory,
                   supplierId: existing.supplierId,
@@ -1566,6 +1697,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              if (!isEditing)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _PurchaseContextBar(
+                                    date: purchaseDate,
+                                    supplier: selectedSupplier,
+                                  ),
+                                ),
                               _EditorSection(
                                 title: 'Product Details',
                                 icon: Icons.inventory_2_outlined,
@@ -1651,7 +1790,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             setFieldText(qtyCtrl, '');
                                             setFieldText(totalCtrl, '');
                                             selectedCategory = match.category;
-                                            selectedSupplier = match.supplier;
                                             selectedUnit = match.unit;
                                             gstCustom =
                                                 match.gstPercent != null;
@@ -1807,134 +1945,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                       },
                                     ),
                                     const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _OptionDropdown(
-                                            label: 'Supplier',
-                                            value: selectedSupplier,
-                                            options: _suppliers,
-                                            onChanged: (value) {
-                                              markEdited();
-                                              setSheet(
-                                                () => selectedSupplier = value,
-                                              );
-                                            },
-                                            onAdd: () async {
-                                              final value =
-                                                  await _showAddOptionDialog(
-                                                    'Supplier',
-                                                  );
-                                              if (value == null ||
-                                                  !mounted ||
-                                                  !ctx.mounted) {
-                                                return;
-                                              }
-                                              await DatabaseHelper.instance
-                                                  .addSupplierOption(value);
-                                              if (!mounted || !ctx.mounted) {
-                                                return;
-                                              }
-                                              setState(() {
-                                                if (!_suppliers.contains(
-                                                  value,
-                                                )) {
-                                                  _suppliers.add(value);
-                                                  _suppliers.sort();
-                                                }
-                                              });
-                                              markEdited();
-                                              setSheet(
-                                                () => selectedSupplier = value,
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: _OptionDropdown(
-                                            label: 'Unit',
-                                            value: selectedUnit,
-                                            options: _units,
-                                            noValueLabel: 'No Unit',
-                                            addLabel: 'Add custom',
-                                            onChanged: (value) {
-                                              markEdited();
-                                              setSheet(
-                                                () => selectedUnit = value,
-                                              );
-                                            },
-                                            onAdd: () async {
-                                              final value =
-                                                  await _showAddOptionDialog(
-                                                    'Unit',
-                                                  );
-                                              if (value == null ||
-                                                  !mounted ||
-                                                  !ctx.mounted) {
-                                                return;
-                                              }
-                                              await DatabaseHelper.instance
-                                                  .addUnitOption(value);
-                                              if (!mounted || !ctx.mounted) {
-                                                return;
-                                              }
-                                              setState(() {
-                                                if (!_units.any(
-                                                  (unit) =>
-                                                      unit.toLowerCase() ==
-                                                      value.toLowerCase(),
-                                                )) {
-                                                  _units.add(value);
-                                                  _units.sort(
-                                                    (a, b) => a
-                                                        .toLowerCase()
-                                                        .compareTo(
-                                                          b.toLowerCase(),
-                                                        ),
-                                                  );
-                                                }
-                                              });
-                                              markEdited();
-                                              setSheet(
-                                                () => selectedUnit = value,
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              _EditorSection(
-                                title: 'Pricing',
-                                icon: Icons.payments_outlined,
-                                trailing: _ModePill(
-                                  label: globalPricing.gstRegistered
-                                      ? 'GST registered'
-                                      : 'GST not registered',
-                                  active: globalPricing.gstRegistered,
-                                ),
-                                child: Column(
-                                  children: [
-                                    _DirectPriceControl(
-                                      directPrice: directPrice,
-                                      onChanged: (value) => setSheet(() {
-                                        markEdited();
-                                        if (!directPrice) {
-                                          formulaMarginText = marginCtrl.text;
-                                        }
-                                        directPrice = value;
-                                        if (directPrice) {
-                                          updateMarginFromDirectPrice();
-                                        } else {
-                                          restoreFormulaMargin();
-                                        }
-                                      }),
-                                    ),
-                                    const SizedBox(height: 10),
                                     TextFormField(
                                       controller: purchaseCtrl,
                                       keyboardType:
@@ -1967,6 +1977,153 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             ? 'Invalid'
                                             : null;
                                       },
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _OptionDropdown(
+                                      label: 'Unit',
+                                      value: selectedUnit,
+                                      options: _units,
+                                      noValueLabel: 'No Unit',
+                                      addLabel: 'Add custom',
+                                      onChanged: (value) {
+                                        markEdited();
+                                        setSheet(() => selectedUnit = value);
+                                      },
+                                      onAdd: () async {
+                                        final value =
+                                            await _showAddOptionDialog('Unit');
+                                        if (value == null ||
+                                            !mounted ||
+                                            !ctx.mounted) {
+                                          return;
+                                        }
+                                        await DatabaseHelper.instance
+                                            .addUnitOption(value);
+                                        if (!mounted || !ctx.mounted) {
+                                          return;
+                                        }
+                                        setState(() {
+                                          if (!_units.any(
+                                            (unit) =>
+                                                unit.toLowerCase() ==
+                                                value.toLowerCase(),
+                                          )) {
+                                            _units.add(value);
+                                            _units.sort(
+                                              (a, b) => a
+                                                  .toLowerCase()
+                                                  .compareTo(b.toLowerCase()),
+                                            );
+                                          }
+                                        });
+                                        markEdited();
+                                        setSheet(() => selectedUnit = value);
+                                      },
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: qtyCtrl,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,3}'),
+                                              ),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Quantity *',
+                                              prefixIcon: Icon(
+                                                Icons.layers_outlined,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              setSheet(() {});
+                                            },
+                                            validator: (v) {
+                                              if (v == null || v.isEmpty) {
+                                                return 'Required';
+                                              }
+                                              final n = double.tryParse(v);
+                                              return (n == null || n < 0)
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: totalCtrl,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,2}'),
+                                              ),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Stock Value (₹)',
+                                              prefixIcon: Icon(
+                                                Icons.calculate_outlined,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              updateQtyFromTotal();
+                                              setSheet(() {});
+                                            },
+                                            validator: (v) {
+                                              if (v == null || v.isEmpty) {
+                                                return null;
+                                              }
+                                              final n = double.tryParse(v);
+                                              return (n == null || n < 0)
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _EditorSection(
+                                title: 'Selling Price',
+                                icon: Icons.payments_outlined,
+                                trailing: _ModePill(
+                                  label: globalPricing.gstRegistered
+                                      ? 'GST registered'
+                                      : 'GST not registered',
+                                  active: globalPricing.gstRegistered,
+                                ),
+                                child: Column(
+                                  children: [
+                                    _DirectPriceControl(
+                                      directPrice: directPrice,
+                                      onChanged: (value) => setSheet(() {
+                                        markEdited();
+                                        if (!directPrice) {
+                                          formulaMarginText = marginCtrl.text;
+                                        }
+                                        directPrice = value;
+                                        if (directPrice) {
+                                          updateMarginFromDirectPrice();
+                                        } else {
+                                          restoreFormulaMargin();
+                                        }
+                                      }),
                                     ),
                                     if (directPrice) ...[
                                       const SizedBox(height: 10),
@@ -2087,121 +2244,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         () => priceBreakdownOpen =
                                             !priceBreakdownOpen,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              _EditorSection(
-                                title: 'Stock',
-                                icon: Icons.warehouse_outlined,
-                                child: Column(
-                                  children: [
-                                    InkWell(
-                                      onTap: () async {
-                                        final picked = await showDatePicker(
-                                          context: ctx,
-                                          initialDate: purchaseDate,
-                                          firstDate: DateTime(2020),
-                                          lastDate: DateTime.now().add(
-                                            const Duration(days: 365),
-                                          ),
-                                        );
-                                        if (picked == null) return;
-                                        markEdited();
-                                        setSheet(() => purchaseDate = picked);
-                                      },
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: InputDecorator(
-                                        decoration: const InputDecoration(
-                                          labelText: 'Purchase Date',
-                                          prefixIcon: Icon(
-                                            Icons.event_outlined,
-                                            size: 18,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          _formatFullDate(purchaseDate),
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: TextFormField(
-                                            controller: qtyCtrl,
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.allow(
-                                                RegExp(r'^\d*\.?\d{0,3}'),
-                                              ),
-                                            ],
-                                            decoration: const InputDecoration(
-                                              labelText: 'Quantity *',
-                                              prefixIcon: Icon(
-                                                Icons.layers_outlined,
-                                                size: 18,
-                                              ),
-                                            ),
-                                            onChanged: (_) {
-                                              markEdited();
-                                              setSheet(() {});
-                                            },
-                                            validator: (v) {
-                                              if (v == null || v.isEmpty) {
-                                                return 'Required';
-                                              }
-                                              final n = double.tryParse(v);
-                                              return (n == null || n < 0)
-                                                  ? 'Invalid'
-                                                  : null;
-                                            },
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: TextFormField(
-                                            controller: totalCtrl,
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.allow(
-                                                RegExp(r'^\d*\.?\d{0,2}'),
-                                              ),
-                                            ],
-                                            decoration: const InputDecoration(
-                                              labelText: 'Stock Value (₹)',
-                                              prefixIcon: Icon(
-                                                Icons.calculate_outlined,
-                                                size: 18,
-                                              ),
-                                            ),
-                                            onChanged: (_) {
-                                              markEdited();
-                                              updateQtyFromTotal();
-                                              setSheet(() {});
-                                            },
-                                            validator: (v) {
-                                              if (v == null || v.isEmpty) {
-                                                return null;
-                                              }
-                                              final n = double.tryParse(v);
-                                              return (n == null || n < 0)
-                                                  ? 'Invalid'
-                                                  : null;
-                                            },
-                                          ),
-                                        ),
-                                      ],
                                     ),
                                   ],
                                 ),
@@ -2349,7 +2391,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   FloatingActionButton(
                     heroTag: 'add',
-                    onPressed: () => _showAddEditSheet(),
+                    onPressed: _showNewPurchaseFlow,
                     child: const Icon(Icons.add_rounded),
                   ),
                 ],
@@ -2926,6 +2968,46 @@ class _ProductSheetHeader extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PurchaseContextBar extends StatelessWidget {
+  final DateTime date;
+  final String? supplier;
+
+  const _PurchaseContextBar({required this.date, required this.supplier});
+
+  @override
+  Widget build(BuildContext context) {
+    final supplierLabel = (supplier == null || supplier!.isEmpty)
+        ? 'No supplier'
+        : supplier!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.creamDark),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.receipt_long_outlined, size: 16, color: AppColors.navy),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${_formatFullDate(date)}  ·  $supplierLabel',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.navy,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
