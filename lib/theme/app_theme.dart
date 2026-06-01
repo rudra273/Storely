@@ -8,3 +8,4 @@ export 'widgets/compact_list_row.dart';
 export 'widgets/section_header.dart';
 export 'widgets/status_pill.dart';
 export 'widgets/app_screen_header.dart';
+export 'widgets/app_info_action.dart';

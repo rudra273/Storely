@@ -530,7 +530,34 @@ class _StoreScreenState extends State<StoreScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Store')),
+      appBar: AppBar(
+        title: const Text('Store'),
+        actions: const [
+          AppInfoAction(
+            title: 'Store Help',
+            intro:
+                'Store is where you set the business rules used by products, bills, and sync.',
+            sections: [
+              AppInfoSection(
+                title: 'Before daily use',
+                points: [
+                  'Fill Shop Profile first so bills show the right business details.',
+                  'Add suppliers before purchases if you want supplier-wise stock history.',
+                  'Set Pricing Defaults before importing products that use automatic pricing.',
+                ],
+              ),
+              AppInfoSection(
+                title: 'Settings',
+                points: [
+                  'Bill Settings controls invoice numbering, logo, signature, footer, and visible bill fields.',
+                  'Needs Attention controls the low-stock warning threshold.',
+                  'Cloud Sync is optional and should be configured only by the shop owner or admin.',
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -626,7 +653,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.1',
+                    subtitle: 'App information and version 1.0.2',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),

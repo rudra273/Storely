@@ -2188,6 +2188,29 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 icon: const Icon(Icons.qr_code_2),
                 tooltip: 'Product labels',
               ),
+              const AppInfoAction(
+                title: 'Products Help',
+                intro:
+                    'Products are managed through purchases so stock, supplier, and date stay accurate.',
+                sections: [
+                  AppInfoSection(
+                    title: 'Add stock',
+                    points: [
+                      'Use New Purchase to select date and supplier, then add or import products.',
+                      'If a product name already exists, the purchase becomes a restock for that product.',
+                      'Product import is inside New Purchase; it is not a separate catalog action.',
+                    ],
+                  ),
+                  AppInfoSection(
+                    title: 'Find and manage products',
+                    points: [
+                      'Search by name, product code, barcode, category, unit, supplier, or source.',
+                      'Long press products to select multiple rows for bulk category, supplier, or delete actions.',
+                      'Product labels opens QR or barcode sheets for printing.',
+                    ],
+                  ),
+                ],
+              ),
               const SizedBox(width: 8),
             ],
           ],

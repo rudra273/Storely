@@ -20,12 +20,12 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Storely', style: AppText.title),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  'Inventory and billing companion for small stores.',
+                  'Offline-first inventory, purchase, billing, and customer management for small stores.',
                   style: AppText.caption,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
-                  'Storely helps small retailers manage products, generate bills, and track daily sales from one simple mobile app.',
+                  'Storely is built for shop owners who need a practical mobile workflow: set up the shop, add stock through purchases, bill customers, track unpaid balances, and keep product pricing consistent.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
@@ -49,8 +49,11 @@ class AboutAppScreen extends StatelessWidget {
                 FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
                   builder: (context, snapshot) {
+                    final info = snapshot.data;
                     return Text(
-                      snapshot.data?.version ?? '—',
+                      info == null
+                          ? '1.0.2'
+                          : '${info.version}+${info.buildNumber}',
                       style: AppText.body.copyWith(color: AppColors.inkMuted),
                     );
                   },
@@ -66,10 +69,58 @@ class AboutAppScreen extends StatelessWidget {
                 Text('What You Can Do', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  '• Add and organize products by category and supplier.\n'
-                  '• Scan barcodes/QR codes for faster billing.\n'
-                  '• Track unpaid bills and daily sales.\n'
-                  '• Export and print billing/QR data for store operations.',
+                  '• Create purchases with date and supplier, then add or import products.\n'
+                  '• Use automatic pricing from GST, overhead, and margin defaults, or direct selling price per product.\n'
+                  '• Generate bills with payment status, discounts, GST snapshots, and customer balances.\n'
+                  '• Print or share PDF bills with optional shop logo and digital signature.\n'
+                  '• Generate product QR or barcode label sheets for scanning.\n'
+                  '• Track low stock, unpaid bills, customers, suppliers, and analytics.',
+                  style: AppText.body.copyWith(height: 1.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('How Data Works', style: AppText.subtitle),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Storely works offline by default and stores business data on your device. Optional cloud sync can be connected to your own Supabase project for owner and staff access across devices.',
+                  style: AppText.body.copyWith(height: 1.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Recommended Setup', style: AppText.subtitle),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  '1. Complete Shop Profile and GST status.\n'
+                  '2. Set Pricing Defaults and Bill Settings.\n'
+                  '3. Add suppliers, categories, and units as needed.\n'
+                  '4. Add stock through Products > New Purchase.\n'
+                  '5. Create bills from Scan & Bill or Manual Bill.',
+                  style: AppText.body.copyWith(height: 1.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Support', style: AppText.subtitle),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'For privacy questions, setup help, or production support, contact rosmoxx@gmail.com.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
@@ -83,7 +134,7 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Release Notes', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Version 1.0.1 includes core inventory management, billing, QR scanning, and store setup features for first production release.',
+                  'Version 1.0.2 prepares Storely for production with purchase-based product import, strict CSV/XLSX column rules, optional direct selling price imports, bill customization, QR/barcode labels, owner/staff cloud onboarding, and stronger billing and stock safeguards.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],

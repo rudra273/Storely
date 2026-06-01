@@ -186,6 +186,32 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
         backgroundColor: AppColors.bg,
         appBar: AppBar(
           title: const Text('New Purchase'),
+          actions: const [
+            AppInfoAction(
+              title: 'New Purchase Help',
+              intro:
+                  'Use this screen to stage a supplier purchase before it touches stock.',
+              sections: [
+                AppInfoSection(
+                  title: 'Add or import products',
+                  points: [
+                    'Add product opens the full product editor for one item.',
+                    'Import file reads CSV or XLSX rows into this same purchase batch.',
+                    'Confirm saves all staged rows together; leaving the screen before confirm discards the batch.',
+                  ],
+                ),
+                AppInfoSection(
+                  title: 'Import columns',
+                  points: [
+                    'Required columns are product_name, quantity, purchase_price.',
+                    'Optional columns are product_code, barcode, category, selling_price, unit.',
+                    'Use selling_price only when you want direct pricing. Leave it blank or remove it to use automatic pricing.',
+                    'Supplier and purchase date come from this purchase, not from the file.',
+                  ],
+                ),
+              ],
+            ),
+          ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(30),
             child: Padding(
@@ -219,28 +245,22 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Column(
+              child: Row(
                 children: [
-                  const _ImportColumnGuide(),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _committing ? null : _import,
-                          icon: const Icon(Icons.upload_file_rounded, size: 18),
-                          label: const Text('Import file'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _committing ? null : _addProduct,
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('Add product'),
-                        ),
-                      ),
-                    ],
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _committing ? null : _import,
+                      icon: const Icon(Icons.upload_file_rounded, size: 18),
+                      label: const Text('Import file'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _committing ? null : _addProduct,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('Add product'),
+                    ),
                   ),
                 ],
               ),
@@ -352,60 +372,6 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
             color: AppColors.inkMuted,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ImportColumnGuide extends StatelessWidget {
-  const _ImportColumnGuide();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.creamDark),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Import file columns',
-            style: TextStyle(
-              color: AppColors.navy,
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Required: product_name, quantity, purchase_price',
-            style: TextStyle(
-              color: AppColors.textDark,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          SizedBox(height: 2),
-          Text(
-            'Optional: product_code, barcode, category, selling_price, unit',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-          ),
-          SizedBox(height: 2),
-          Text(
-            'Use selling_price only for direct pricing; leave it out for auto pricing.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-          ),
-          SizedBox(height: 2),
-          Text(
-            'Supplier and purchase date come from this purchase screen.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-          ),
-        ],
       ),
     );
   }

@@ -685,6 +685,29 @@ class _ScanScreenState extends State<ScanScreen> {
         backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
         actions: [
+          const AppInfoAction(
+            title: 'Billing Help',
+            intro:
+                'Build the bill first, then complete checkout with customer and payment details.',
+            sections: [
+              AppInfoSection(
+                title: 'Add items',
+                points: [
+                  'Scan mode reads Storely product labels and barcode values.',
+                  'Manual mode lets you search by product name, code, category, or supplier.',
+                  'Use quantity controls on each bill row before completing the bill.',
+                ],
+              ),
+              AppInfoSection(
+                title: 'Complete bill',
+                points: [
+                  'Complete Bill opens checkout for customer, discount, and payment details.',
+                  'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
+                  'If stock is insufficient, bill creation is blocked before saving.',
+                ],
+              ),
+            ],
+          ),
           if (_items.isNotEmpty)
             TextButton(
               onPressed: () => setState(() => _items.clear()),

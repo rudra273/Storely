@@ -261,7 +261,34 @@ class _BillsScreenState extends State<BillsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Bills')),
+      appBar: AppBar(
+        title: const Text('Bills'),
+        actions: const [
+          AppInfoAction(
+            title: 'Bills Help',
+            intro:
+                'Bills keep the sale record, payment status, and printable invoice together.',
+            sections: [
+              AppInfoSection(
+                title: 'Create bills',
+                points: [
+                  'Use New Bill for manual billing, or Scan & Bill from home for product labels.',
+                  'Products added to a bill use price snapshots so old bills do not change when product prices change later.',
+                  'Bill settings in Store control invoice title, numbering, logo, signature, and visible fields.',
+                ],
+              ),
+              AppInfoSection(
+                title: 'Payments and sharing',
+                points: [
+                  'Unpaid and partial bills can be updated with Record Payment.',
+                  'Share PDF creates a printable invoice from the saved bill data.',
+                  'WhatsApp sharing uses the customer phone saved on the bill.',
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         color: AppColors.amber,
         onRefresh: _loadBills,
