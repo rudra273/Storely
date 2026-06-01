@@ -1,324 +1,341 @@
-# Storely — Supabase Cloud Sync Setup Guide
+# Storely Supabase Cloud Sync Setup Guide
 
-Storely works 100% offline by default. Cloud sync is **optional** — enable it to share data across devices or with your team.
+Storely is offline-first. Cloud sync is optional, and it is used when one shop needs multiple devices or staff members.
 
----
+The current onboarding has two paths:
 
-## Table of Contents
+- **Start Fresh**: create a new local shop. Supabase login is not required.
+- **Join Existing Shop**: sign in to Supabase and join a shop where the owner/admin already added your account.
 
-1. [Create a Supabase Project](#1-create-a-supabase-project)
-2. [Create the Database Schema](#2-create-the-database-schema)
-3. [Get Your Project Credentials](#3-get-your-project-credentials)
-4. [Create a User Account](#4-create-a-user-account)
-5. [Connect the App](#5-connect-the-app)
-6. [First Sync (Auto Owner)](#6-first-sync-auto-owner)
-7. [Adding Team Members](#7-adding-team-members)
-8. [Managing Roles](#8-managing-roles)
-9. [Troubleshooting](#9-troubleshooting)
+Staff members do **not** self-join a shop automatically.
 
 ---
 
-## 1. Create a Supabase Project
+## 1. Create Supabase Project
 
-1. Go to [supabase.com](https://supabase.com) and sign up / sign in
-2. Click **New Project**
-3. Fill in:
-   - **Name**: `storely` (or anything you like)
-   - **Database Password**: save this somewhere safe
-   - **Region**: choose the closest to you
-4. Click **Create new project** and wait for it to finish (~2 minutes)
+1. Go to [supabase.com](https://supabase.com).
+2. Create a new project.
+3. Save the database password somewhere safe.
+4. Wait for the project to finish provisioning.
 
 ---
 
-## 2. Create the Database Schema
+## 2. Create Fresh Cloud Schema
 
-1. In your Supabase dashboard, go to **SQL Editor** (left sidebar)
-2. Click **New query**
-3. Open the file `supabase/storely_cloud_schema.sql` from this project
-4. Copy the **entire contents** and paste into the SQL Editor
-5. Click **Run** (or press Ctrl+Enter)
-6. You should see: `Success. No rows returned` — that means it worked
+For a clean setup:
 
-This creates all the tables (shops, products, bills, etc.), Row Level Security policies, and helper functions.
+1. Open **Supabase Dashboard** -> **SQL Editor**.
+2. Run `supabase/drop_storely_cloud_schema.sql` if you want to wipe old Storely cloud tables.
+3. Run `supabase/storely_cloud_schema.sql`.
 
----
+The drop script removes Storely tables, policies, functions, and triggers. It does **not** delete Supabase Auth users.
 
-## 3. Get Your Project Credentials
+The schema creates:
 
-1. Go to **Project Settings** → **API** (left sidebar → gear icon)
-2. You need two values:
-   - **Project URL** — looks like `https://abcdefgh.supabase.co`
-   - **anon public key** — a long `eyJ...` string under "Project API keys"
-
-> ⚠️ **Never use the `service_role` key in the app.** Only use the `anon` key.
+- `shops`
+- `shop_members`
+- catalog tables
+- billing/payment/stock tables
+- RLS policies
+- helper functions for role checks
+- auth trigger for `profiles`
 
 ---
 
-## 4. Create a User Account
+## 3. Get App Credentials
 
-1. Go to **Authentication** → **Users** (left sidebar)
-2. Click **Add user** → **Create new user**
-3. Enter:
-   - **Email**: your email (e.g. `you@gmail.com`)
-   - **Password**: a strong password
-   - **Auto Confirm User**: ✅ toggle ON
-4. Click **Create user**
+In Supabase:
 
-Repeat this for each team member who needs access.
+1. Go to **Project Settings** -> **API**.
+2. Copy:
+   - **Project URL**
+   - **anon public key**
 
----
-
-## 5. Connect the App
-
-1. Open Storely on your device
-2. Go to **Store** tab (bottom nav)
-3. Tap **Cloud Sync** → gear icon (⚙️)
-4. Enter:
-   - **Supabase URL**: paste the Project URL from Step 3
-   - **Anon Key**: paste the anon public key from Step 3
-5. Save, then tap **Sign In**
-6. Enter the email and password from Step 4
+Only use the anon public key in Storely. Never put the `service_role` key in the app.
 
 ---
 
-## 6. First Sync (Auto Owner)
+## 4. Owner Onboarding
 
-After signing in, tap the **sync button** (🔄). The app will:
+Use this flow for the first shop owner.
 
-1. Create the shop in the cloud (using your local shop data)
-2. Automatically register you as the **owner**
-3. Push all your local data (products, bills, etc.) to the cloud
+1. Open Storely.
+2. On the welcome screen, choose **Start Fresh**.
+3. Enter the shop name.
+4. Go to **Store** -> **Cloud Sync**.
+5. Enter Supabase URL and anon key.
+6. Sign up or sign in with the owner email.
+7. Let sync run.
 
-You'll see your role as **OWNER** on the Shop panel.
+On first successful sync, Storely will:
 
-> 💡 The first user to sync always becomes the owner. No SQL needed.
+- create the cloud `shops` row
+- add the signed-in user to `shop_members`
+- set role to `owner`
+- upload local shop/catalog/billing data
 
----
-
-## 7. Adding Team Members
-
-### For staff members:
-
-1. Create their account in Supabase (**Authentication** → **Add user**)
-2. Give them the Supabase URL and anon key
-3. They open the app → Store → Cloud Sync → enter credentials → sign in
-4. On first sync, they automatically join as **staff**
-
-Staff members can:
-- ✅ View all shop data (products, bills, customers)
-- ✅ Create bills and add products
-- ✅ Sync data to/from cloud
-- ❌ Cannot edit the shop profile (name, phone, GSTIN, etc.)
-
-### Role hierarchy:
-
-| Role | Edit Shop | Sync Data | Create Bills | Manage Members |
-|------|-----------|-----------|--------------|----------------|
-| **Owner** | ✅ | ✅ | ✅ | ✅ (via SQL) |
-| **Admin** | ✅ | ✅ | ✅ | ✅ (via SQL) |
-| **Staff** | ❌ | ✅ | ✅ | ❌ |
+The first synced user for a fresh shop becomes the owner.
 
 ---
 
-## 8. Managing Roles
+## 5. Staff Member Onboarding
 
-All role management is done via the **Supabase SQL Editor**. Use the shop UUID
-shown in the app/cloud `shops.uuid`; Storely no longer uses a shared
-`local-shop` cloud id.
+Staff must be added to the shop before their first successful sync.
 
-### Check current members:
+### Step A: Create Or Invite Staff Auth User
+
+In Supabase:
+
+1. Go to **Authentication** -> **Users**.
+2. Add the staff user, or let the staff create an account from the Storely welcome screen.
+3. If you create the user manually, turn on **Auto Confirm User**.
+
+### Step B: Find Shop UUID
+
+Run:
 
 ```sql
-SELECT
-  sm.user_id,
+select uuid, name
+from public.shops
+order by created_at desc;
+```
+
+Copy the owner shop UUID.
+
+### Step C: Add Staff Member
+
+Run:
+
+```sql
+insert into public.shop_members (shop_id, user_id, role)
+select
+  '<shop_uuid>',
+  id,
+  'staff'
+from auth.users
+where email = 'staff@example.com'
+on conflict (shop_id, user_id)
+do update set role = excluded.role;
+```
+
+### Step D: Staff Joins From App
+
+On the staff device:
+
+1. Open Storely.
+2. Choose **Join Existing Shop**.
+3. Enter Supabase URL and anon key.
+4. Enter staff email and password.
+5. Tap **Sign In and Join**.
+
+Storely checks `shop_members`. If the account is not added yet, it stops and shows an error instead of creating a separate shop.
+
+---
+
+## 6. Staff Account Creation From Welcome Screen
+
+If the staff user does not exist yet:
+
+1. Staff opens Storely.
+2. Chooses **Join Existing Shop**.
+3. Enters Supabase URL, anon key, email, and password.
+4. Taps **Create Account**.
+5. Owner/admin adds that email to `shop_members`.
+6. Staff returns to **Join Existing Shop** and taps **Sign In and Join**.
+
+Creating an account is not the same as joining a shop. The membership row is still required.
+
+---
+
+## 7. Add Admin Instead Of Staff
+
+Use `admin` when a team member should manage catalog/settings.
+
+```sql
+insert into public.shop_members (shop_id, user_id, role)
+select
+  '<shop_uuid>',
+  id,
+  'admin'
+from auth.users
+where email = 'admin@example.com'
+on conflict (shop_id, user_id)
+do update set role = excluded.role;
+```
+
+---
+
+## 8. Role Permissions
+
+| Role | Catalog/settings | Bills/payments | Customers | Manage members |
+| --- | --- | --- | --- | --- |
+| Owner | Yes | Yes | Yes | Yes, via SQL |
+| Admin | Yes | Yes | Yes | Yes, via SQL |
+| Staff | Read only | Yes | Yes | No |
+
+Admin-managed data:
+
+- shop profile/settings
+- categories
+- units
+- suppliers
+- products
+- invoice series
+
+Staff can still create operational data:
+
+- bills
+- bill items
+- bill payments
+- customer updates from billing
+- stock movements from bills
+
+---
+
+## 9. Manage Existing Members
+
+### List Members
+
+```sql
+select
+  sm.shop_id,
+  s.name as shop_name,
   u.email,
   sm.role,
   sm.created_at
-FROM public.shop_members sm
-JOIN auth.users u ON u.id = sm.user_id
-WHERE sm.shop_id = '<shop_uuid>';
+from public.shop_members sm
+join public.shops s on s.uuid = sm.shop_id
+join auth.users u on u.id = sm.user_id
+order by s.name, sm.created_at;
 ```
 
-### Promote a staff member to admin:
+### Promote Staff To Admin
 
 ```sql
-UPDATE public.shop_members
-SET role = 'admin'
-WHERE shop_id = '<shop_uuid>'
-  AND user_id = (SELECT id FROM auth.users WHERE email = 'staff@example.com');
+update public.shop_members
+set role = 'admin'
+where shop_id = '<shop_uuid>'
+  and user_id = (
+    select id from auth.users where email = 'staff@example.com'
+  );
 ```
 
-### Demote an admin back to staff:
+### Demote Admin To Staff
 
 ```sql
-UPDATE public.shop_members
-SET role = 'staff'
-WHERE shop_id = '<shop_uuid>'
-  AND user_id = (SELECT id FROM auth.users WHERE email = 'admin@example.com');
+update public.shop_members
+set role = 'staff'
+where shop_id = '<shop_uuid>'
+  and user_id = (
+    select id from auth.users where email = 'admin@example.com'
+  );
 ```
 
-### Remove a member:
+### Remove Member
 
 ```sql
-DELETE FROM public.shop_members
-WHERE shop_id = '<shop_uuid>'
-  AND user_id = (SELECT id FROM auth.users WHERE email = 'remove-me@example.com');
+delete from public.shop_members
+where shop_id = '<shop_uuid>'
+  and user_id = (
+    select id from auth.users where email = 'remove@example.com'
+  );
 ```
 
-### Transfer ownership:
+### Transfer Ownership
 
 ```sql
--- Demote current owner to admin:
-UPDATE public.shop_members
-SET role = 'admin'
-WHERE shop_id = '<shop_uuid>'
-  AND user_id = (SELECT id FROM auth.users WHERE email = 'old-owner@example.com');
+update public.shop_members
+set role = 'admin'
+where shop_id = '<shop_uuid>'
+  and user_id = (
+    select id from auth.users where email = 'old-owner@example.com'
+  );
 
--- Promote new owner:
-UPDATE public.shop_members
-SET role = 'owner'
-WHERE shop_id = '<shop_uuid>'
-  AND user_id = (SELECT id FROM auth.users WHERE email = 'new-owner@example.com');
+update public.shop_members
+set role = 'owner'
+where shop_id = '<shop_uuid>'
+  and user_id = (
+    select id from auth.users where email = 'new-owner@example.com'
+  );
 ```
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
-### Error: `42501 — new row violates row level security policy`
+### Staff Sees: Account Is Not Added To A Shop Yet
 
-**Cause**: The user doesn't have the right permissions for the operation.
+Cause: the Supabase Auth user exists, but there is no `shop_members` row.
 
-**Fix**:
-1. Check if the user is a member: run the "Check current members" query above
-2. If they're not a member, an owner/admin must add them. Storely does not allow automatic staff self-join.
-3. Manually add them:
+Fix:
 
 ```sql
--- Create the shop if it doesn't exist:
-INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
-ON CONFLICT (uuid) DO NOTHING;
-
--- Add the user as staff (or 'owner'/'admin'):
-INSERT INTO public.shop_members (shop_id, user_id, role)
-SELECT '<shop_uuid>', id, 'staff'
-FROM auth.users WHERE email = 'user@example.com'
-ON CONFLICT (shop_id, user_id) DO NOTHING;
+insert into public.shop_members (shop_id, user_id, role)
+select '<shop_uuid>', id, 'staff'
+from auth.users
+where email = 'staff@example.com'
+on conflict (shop_id, user_id)
+do update set role = excluded.role;
 ```
+
+### Staff Accidentally Chose Start Fresh
+
+If they did not create any business data, they can clear app data/reinstall and choose **Join Existing Shop**.
+
+If they already created products/bills locally, the app will block joining another cloud shop. Clear local app data before joining.
+
+### `42501` Row Level Security Error
+
+Cause: the signed-in user is not allowed to write that table.
+
+Fix:
+
+1. Confirm membership:
+
+```sql
+select sm.shop_id, u.email, sm.role
+from public.shop_members sm
+join auth.users u on u.id = sm.user_id
+where u.email = 'user@example.com';
+```
+
+2. If they need catalog/settings access, promote them to `admin`.
+3. If they only need billing access, keep them as `staff`.
+
+### `23503` Foreign Key Error When Adding Member
+
+Cause: the `shops` row does not exist yet.
+
+Fix: complete owner first sync, then add staff.
+
+### Email Query Inserts Zero Rows
+
+Cause: the email does not match any Supabase Auth user.
+
+Check exact email:
+
+```sql
+select id, email
+from auth.users
+order by created_at desc;
+```
+
+### Start Cloud From Scratch
+
+Run:
+
+1. `supabase/drop_storely_cloud_schema.sql`
+2. `supabase/storely_cloud_schema.sql`
+
+Then onboard the owner again from Storely using **Start Fresh**.
 
 ---
 
-### Error: `23503 — violates foreign key constraint "shop_members_shop_id_fkey"`
+## 11. Important Rules
 
-**Cause**: Trying to add a member before the shop row exists.
-
-**Fix**: Create the shop first:
-
-```sql
-INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
-ON CONFLICT (uuid) DO NOTHING;
-```
-
-Then retry adding the member.
-
----
-
-### Member INSERT returns "Success" but no row appears
-
-**Cause**: The email in the WHERE clause doesn't match any user exactly.
-
-**Fix**: Check what emails actually exist:
-
-```sql
-SELECT id, email FROM auth.users;
-```
-
-Copy the exact email from the result and use it in your INSERT.
-
----
-
-### Want to start completely fresh (nuclear option)
-
-If something is broken and you want to wipe everything and start over:
-
-**Step 1 — Drop everything:**
-
-```sql
--- Drop all policies
-DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Authenticated users can create shop" ON public.shops;
-DROP POLICY IF EXISTS "Members can sync shops" ON public.shops;
-DROP POLICY IF EXISTS "Members can view shops" ON public.shops;
-DROP POLICY IF EXISTS "Admins can update shops" ON public.shops;
-DROP POLICY IF EXISTS "Admins can delete shops" ON public.shops;
-DROP POLICY IF EXISTS "Members can view shop members" ON public.shop_members;
-DROP POLICY IF EXISTS "First owner can join empty shop" ON public.shop_members;
-DROP POLICY IF EXISTS "Authenticated users can join as staff" ON public.shop_members;
-DROP POLICY IF EXISTS "Owners and admins can manage shop members" ON public.shop_members;
-DROP POLICY IF EXISTS "Members can sync app_settings" ON public.app_settings;
-DROP POLICY IF EXISTS "Members can sync categories" ON public.categories;
-DROP POLICY IF EXISTS "Members can sync units" ON public.units;
-DROP POLICY IF EXISTS "Members can sync suppliers" ON public.suppliers;
-DROP POLICY IF EXISTS "Members can sync customers" ON public.customers;
-DROP POLICY IF EXISTS "Members can sync products" ON public.products;
-DROP POLICY IF EXISTS "Members can sync bills" ON public.bills;
-DROP POLICY IF EXISTS "Members can sync bill_items" ON public.bill_items;
-DROP POLICY IF EXISTS "Members can sync stock_movements" ON public.stock_movements;
-
--- Drop trigger and functions
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-DROP FUNCTION IF EXISTS public.handle_new_user();
-DROP FUNCTION IF EXISTS public.is_shop_member(text);
-DROP FUNCTION IF EXISTS public.is_shop_admin(text);
-DROP FUNCTION IF EXISTS public.get_shop_role(text);
-DROP FUNCTION IF EXISTS public.can_manage_shop_members(text);
-DROP FUNCTION IF EXISTS public.shop_has_no_members(text);
-
--- Drop all tables (order matters — children first)
-DROP TABLE IF EXISTS public.stock_movements CASCADE;
-DROP TABLE IF EXISTS public.bill_items CASCADE;
-DROP TABLE IF EXISTS public.bills CASCADE;
-DROP TABLE IF EXISTS public.products CASCADE;
-DROP TABLE IF EXISTS public.customers CASCADE;
-DROP TABLE IF EXISTS public.suppliers CASCADE;
-DROP TABLE IF EXISTS public.units CASCADE;
-DROP TABLE IF EXISTS public.categories CASCADE;
-DROP TABLE IF EXISTS public.app_settings CASCADE;
-DROP TABLE IF EXISTS public.shop_members CASCADE;
-DROP TABLE IF EXISTS public.shops CASCADE;
-DROP TABLE IF EXISTS public.profiles CASCADE;
-```
-
-**Step 2 — Recreate**: Paste and run `supabase/storely_cloud_schema.sql` again.
-
-**Step 3 — Sign in from the app** and sync. First user becomes owner automatically.
-
-> ⚠️ This deletes ALL cloud data (products, bills, etc.). Your local app data is safe — it stays on the device.
-
----
-
-### Quick reference: manually set up owner by email
-
-If the first owner row needs to be created manually:
-
-```sql
--- 1. Create shop:
-INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
-ON CONFLICT (uuid) DO NOTHING;
-
--- 2. Find your user ID:
-SELECT id, email FROM auth.users;
-
--- 3. Add as owner (use the exact email from step 2):
-INSERT INTO public.shop_members (shop_id, user_id, role)
-SELECT '<shop_uuid>', id, 'owner'
-FROM auth.users WHERE email = 'your-exact-email@example.com'
-ON CONFLICT (shop_id, user_id) DO UPDATE SET role = 'owner';
-
--- 4. Verify:
-SELECT * FROM public.shop_members;
-```
+- Do not use the `service_role` key in the app.
+- Staff cannot self-join an existing shop.
+- First owner is created by first successful sync from a completed local shop.
+- Join Existing Shop requires Supabase login.
+- Start Fresh does not require Supabase login.
+- If a device has local business data, Storely will not silently merge it into another cloud shop.
