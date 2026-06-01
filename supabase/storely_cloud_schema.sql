@@ -41,6 +41,29 @@ create table if not exists public.app_settings (
   primary key (shop_id, key)
 );
 
+create table if not exists public.bill_settings (
+  uuid text primary key,
+  shop_id text not null references public.shops(uuid) on delete cascade,
+  invoice_title text not null default 'TAX INVOICE',
+  footer_text text not null default 'Thank you for your business.',
+  show_shop_logo integer not null default 1,
+  shop_logo_base64 text,
+  show_digital_signature integer not null default 0,
+  digital_signature_base64 text,
+  show_shop_address integer not null default 1,
+  show_shop_phone integer not null default 1,
+  show_shop_email integer not null default 1,
+  show_shop_gstin integer not null default 1,
+  show_customer_phone integer not null default 1,
+  show_customer_address integer not null default 1,
+  show_payment_details integer not null default 1,
+  show_gst_breakdown integer not null default 1,
+  show_hsn_column integer not null default 1,
+  created_at text not null,
+  updated_at text not null,
+  deleted_at text
+);
+
 create table if not exists public.categories (
   uuid text primary key,
   shop_id text not null references public.shops(uuid) on delete cascade,
@@ -350,6 +373,7 @@ alter table public.profiles enable row level security;
 alter table public.shops enable row level security;
 alter table public.shop_members enable row level security;
 alter table public.app_settings enable row level security;
+alter table public.bill_settings enable row level security;
 alter table public.categories enable row level security;
 alter table public.units enable row level security;
 alter table public.suppliers enable row level security;
@@ -436,6 +460,16 @@ for insert with check (public.is_shop_admin(shop_id));
 create policy "Admins can update app_settings" on public.app_settings
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
 create policy "Admins can delete app_settings" on public.app_settings
+for delete using (public.is_shop_admin(shop_id));
+
+drop policy if exists "Members can sync bill_settings" on public.bill_settings;
+create policy "Members can read bill_settings" on public.bill_settings
+for select using (public.is_shop_member(shop_id));
+create policy "Admins can insert bill_settings" on public.bill_settings
+for insert with check (public.is_shop_admin(shop_id));
+create policy "Admins can update bill_settings" on public.bill_settings
+for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+create policy "Admins can delete bill_settings" on public.bill_settings
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync categories" on public.categories;
@@ -527,6 +561,11 @@ where product_code is not null and btrim(product_code) <> '' and deleted_at is n
 create unique index if not exists idx_products_shop_barcode_active
 on public.products(shop_id, lower(barcode))
 where barcode is not null and btrim(barcode) <> '' and deleted_at is null;
+create unique index if not exists idx_bill_settings_shop_active
+on public.bill_settings(shop_id)
+where deleted_at is null;
+create index if not exists idx_bill_settings_shop_updated
+on public.bill_settings(shop_id, updated_at);
 create index if not exists idx_invoice_series_shop_updated on public.invoice_series(shop_id, updated_at);
 create index if not exists idx_bills_shop_updated on public.bills(shop_id, updated_at);
 create index if not exists idx_bill_items_shop_updated on public.bill_items(shop_id, updated_at);

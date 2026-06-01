@@ -199,8 +199,14 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   Future<void> _shareBillPdf(Bill bill) async {
-    final shop = await DatabaseHelper.instance.getShopProfile();
-    final bytes = await BillPdfGenerator.generate(bill: bill, shop: shop);
+    final db = DatabaseHelper.instance;
+    final shop = await db.getShopProfile();
+    final settings = await db.getBillSettings();
+    final bytes = await BillPdfGenerator.generate(
+      bill: bill,
+      shop: shop,
+      settings: settings,
+    );
     await Printing.sharePdf(
       bytes: bytes,
       filename: BillPdfGenerator.filename(bill),
@@ -255,19 +261,13 @@ class _BillsScreenState extends State<BillsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Bills')),
       body: RefreshIndicator(
         color: AppColors.amber,
         onRefresh: _loadBills,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: AppScreenHeaderDelegate(
-                title: 'Bills',
-                topPadding: MediaQuery.paddingOf(context).top,
-              ),
-            ),
             if (_isLoading)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),

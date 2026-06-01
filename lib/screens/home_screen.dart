@@ -367,7 +367,7 @@ class _QuickActionsSection extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
               icon: Icons.grid_view_rounded,
-              label: 'QR Sheet',
+              label: 'Labels',
               color: AppColors.navy,
               filled: false,
               onTap: onQrSheet,

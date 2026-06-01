@@ -2,6 +2,7 @@ part of 'database_helper.dart';
 
 const storelyCloudTables = [
   'app_settings',
+  'bill_settings',
   'categories',
   'units',
   'suppliers',

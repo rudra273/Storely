@@ -12,6 +12,7 @@ part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
 part 'scan/bill_summary_widgets.dart';
 part 'scan/bill_draft.dart';
+part 'scan/bill_checkout_sheet.dart';
 
 enum BillingEntryMode { scan, manual }
 
@@ -134,6 +135,7 @@ class _ScanScreenState extends State<ScanScreen> {
       _allowNextScanAfter(_scanCooldown);
     } catch (_) {
       final product = await DatabaseHelper.instance.findProductForBilling(
+        productUuid: raw,
         barcode: raw,
         itemCode: raw,
         name: raw,
@@ -362,407 +364,23 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _openBillSheet() async {
     if (_items.isEmpty) return;
 
-    final customerController = TextEditingController();
-    final phoneController = TextEditingController(text: '+91 ');
-    final gstinController = TextEditingController();
-    final legalNameController = TextEditingController();
-    final tradeNameController = TextEditingController();
-    final addressController = TextEditingController();
-    final stateCodeController = TextEditingController();
-    final discountController = TextEditingController();
-    final paidAmountController = TextEditingController();
     final customers = await DatabaseHelper.instance.getAllCustomers();
-    if (!mounted) {
-      customerController.dispose();
-      phoneController.dispose();
-      gstinController.dispose();
-      legalNameController.dispose();
-      tradeNameController.dispose();
-      addressController.dispose();
-      stateCodeController.dispose();
-      discountController.dispose();
-      paidAmountController.dispose();
-      return;
-    }
-    var discountPercent = 0.0;
-    var billType = Bill.typeB2c;
-    var paymentStatus = Bill.statusUnpaid;
-    var paymentMethod = 'cash';
-    var hideCustomerSuggestions = false;
+    if (!mounted) return;
 
     try {
       final draft = await showModalBottomSheet<_BillDraft>(
         context: context,
         isScrollControlled: true,
+        useSafeArea: true,
         backgroundColor: Colors.white,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        builder: (sheetContext) {
-          final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
-          return StatefulBuilder(
-            builder: (ctx, setSheetState) {
-              final percent = discountPercent.clamp(0, 100).toDouble();
-              final discount = _subtotal * percent / 100;
-              final total = _subtotal - discount;
-              final parsedPaid = paymentStatus == Bill.statusPaid
-                  ? total
-                  : paymentStatus == Bill.statusPartial
-                  ? (double.tryParse(paidAmountController.text) ?? 0)
-                  : 0.0;
-              final paidAmount = parsedPaid.clamp(0, total).toDouble();
-              final customerMatches = hideCustomerSuggestions
-                  ? <Customer>[]
-                  : _matchingCustomers(
-                      customers,
-                      customerController.text,
-                      phoneController.text,
-                    );
-              return SingleChildScrollView(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            'Create Bill',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            onPressed: () => Navigator.pop(sheetContext),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: customerController,
-                        textCapitalization: TextCapitalization.words,
-                        onChanged: (_) => setSheetState(
-                          () => hideCustomerSuggestions = false,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Customer name',
-                          prefixIcon: Icon(Icons.person_outline_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: phoneController,
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                        ],
-                        onChanged: (_) => setSheetState(
-                          () => hideCustomerSuggestions = false,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Phone number (optional)',
-                          prefixIcon: Icon(Icons.phone_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: Bill.typeB2c,
-                            icon: Icon(Icons.person_outline_rounded),
-                            label: Text('B2C'),
-                          ),
-                          ButtonSegment(
-                            value: Bill.typeB2b,
-                            icon: Icon(Icons.business_outlined),
-                            label: Text('B2B'),
-                          ),
-                        ],
-                        selected: {billType},
-                        onSelectionChanged: (value) =>
-                            setSheetState(() => billType = value.first),
-                      ),
-                      if (billType == Bill.typeB2b) ...[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: gstinController,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: const InputDecoration(
-                            labelText: 'Customer GSTIN',
-                            prefixIcon: Icon(Icons.badge_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: legalNameController,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Legal business name',
-                            prefixIcon: Icon(Icons.business_center_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: tradeNameController,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Trade name (optional)',
-                            prefixIcon: Icon(Icons.storefront_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: addressController,
-                          minLines: 2,
-                          maxLines: 3,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: const InputDecoration(
-                            labelText: 'Business address',
-                            prefixIcon: Icon(Icons.location_on_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: stateCodeController,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(2),
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Place of supply state code',
-                            prefixIcon: Icon(Icons.map_outlined),
-                          ),
-                        ),
-                      ],
-                      if (customerMatches.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        _CustomerSuggestionList(
-                          customers: customerMatches,
-                          onSelected: (customer) {
-                            setSheetState(() {
-                              _setControllerText(
-                                customerController,
-                                customer.name,
-                              );
-                              _setControllerText(
-                                phoneController,
-                                _formatCustomerPhoneInput(customer.phone),
-                              );
-                              _setControllerText(
-                                gstinController,
-                                customer.gstin ?? '',
-                              );
-                              _setControllerText(
-                                legalNameController,
-                                customer.gstLegalName ?? '',
-                              );
-                              _setControllerText(
-                                tradeNameController,
-                                customer.gstTradeName ?? '',
-                              );
-                              _setControllerText(
-                                addressController,
-                                customer.address ?? '',
-                              );
-                              _setControllerText(
-                                stateCodeController,
-                                customer.placeOfSupplyStateCode ?? '',
-                              );
-                              if (customer.gstin != null) {
-                                billType = Bill.typeB2b;
-                              }
-                              hideCustomerSuggestions = true;
-                            });
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      _BillSummaryRow(
-                        label: 'Subtotal',
-                        value: '₹${_subtotal.toStringAsFixed(2)}',
-                      ),
-                      _BillSummaryRow(label: 'Items', value: '$_itemCount'),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: discountController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          TextInputFormatter.withFunction((oldValue, newValue) {
-                            final isValid = RegExp(
-                              r'^\d*\.?\d{0,2}$',
-                            ).hasMatch(newValue.text);
-                            return isValid ? newValue : oldValue;
-                          }),
-                        ],
-                        decoration: const InputDecoration(
-                          labelText: 'Discount percentage',
-                          suffixText: '%',
-                        ),
-                        onChanged: (value) {
-                          setSheetState(() {
-                            discountPercent = double.tryParse(value) ?? 0;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: Bill.statusPaid,
-                            icon: Icon(Icons.check_circle_outline),
-                            label: Text('Paid full'),
-                          ),
-                          ButtonSegment(
-                            value: Bill.statusPartial,
-                            icon: Icon(Icons.payments_outlined),
-                            label: Text('Partial'),
-                          ),
-                          ButtonSegment(
-                            value: Bill.statusUnpaid,
-                            icon: Icon(Icons.pending_actions_outlined),
-                            label: Text('Unpaid'),
-                          ),
-                        ],
-                        selected: {paymentStatus},
-                        onSelectionChanged: (value) => setSheetState(() {
-                          paymentStatus = value.first;
-                          if (paymentStatus == Bill.statusPaid) {
-                            _setControllerText(
-                              paidAmountController,
-                              total.toStringAsFixed(2),
-                            );
-                          } else if (paymentStatus == Bill.statusUnpaid) {
-                            _setControllerText(paidAmountController, '');
-                          }
-                        }),
-                      ),
-                      if (paymentStatus == Bill.statusPartial) ...[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: paidAmountController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [
-                            TextInputFormatter.withFunction((
-                              oldValue,
-                              newValue,
-                            ) {
-                              final isValid = RegExp(
-                                r'^\d*\.?\d{0,2}$',
-                              ).hasMatch(newValue.text);
-                              return isValid ? newValue : oldValue;
-                            }),
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Amount received',
-                            prefixText: '₹ ',
-                          ),
-                          onChanged: (_) => setSheetState(() {}),
-                        ),
-                      ],
-                      if (paymentStatus != Bill.statusUnpaid) ...[
-                        const SizedBox(height: 12),
-                        SegmentedButton<String>(
-                          segments: const [
-                            ButtonSegment(
-                              value: 'cash',
-                              icon: Icon(Icons.payments_outlined),
-                              label: Text('Cash'),
-                            ),
-                            ButtonSegment(
-                              value: 'online',
-                              icon: Icon(Icons.account_balance_wallet_outlined),
-                              label: Text('Online'),
-                            ),
-                          ],
-                          selected: {paymentMethod},
-                          onSelectionChanged: (value) =>
-                              setSheetState(() => paymentMethod = value.first),
-                        ),
-                      ],
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(AppSpacing.lg),
-                        decoration: BoxDecoration(
-                          color: AppColors.bg,
-                          borderRadius: AppRadius.mdRadius,
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Column(
-                          children: [
-                            _BillSummaryRow(
-                              label:
-                                  'Discount (${percent.toStringAsFixed(2)}%)',
-                              value: '- ₹${discount.toStringAsFixed(2)}',
-                            ),
-                            const Divider(height: 20),
-                            _BillSummaryRow(
-                              label: 'Grand Total',
-                              value: '₹${total.toStringAsFixed(2)}',
-                              isTotal: true,
-                            ),
-                            if (paidAmount > 0) ...[
-                              const Divider(height: 20),
-                              _BillSummaryRow(
-                                label: 'Received',
-                                value: '₹${paidAmount.toStringAsFixed(2)}',
-                              ),
-                              _BillSummaryRow(
-                                label: 'Balance',
-                                value:
-                                    '₹${(total - paidAmount).clamp(0, total).toStringAsFixed(2)}',
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            Navigator.pop(
-                              sheetContext,
-                              _BillDraft(
-                                customerName: customerController.text,
-                                customerPhone: phoneController.text,
-                                billType: billType,
-                                customerGstin: gstinController.text,
-                                customerGstLegalName: legalNameController.text,
-                                customerGstTradeName: tradeNameController.text,
-                                customerAddress: addressController.text,
-                                placeOfSupplyStateCode:
-                                    stateCodeController.text,
-                                discountPercent: percent,
-                                paidAmount: paidAmount,
-                                paymentMethod: paymentMethod,
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.receipt_long_rounded),
-                          label: const Text('Generate Bill'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.amber,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+        builder: (_) => _BillCheckoutSheet(
+          customers: customers,
+          subtotal: _subtotal,
+          itemCount: _itemCount,
+        ),
       );
       if (draft == null) return;
       final billId = await _completeBill(
@@ -797,16 +415,6 @@ class _ScanScreenState extends State<ScanScreen> {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(message)));
-    } finally {
-      customerController.dispose();
-      phoneController.dispose();
-      gstinController.dispose();
-      legalNameController.dispose();
-      tradeNameController.dispose();
-      addressController.dispose();
-      stateCodeController.dispose();
-      discountController.dispose();
-      paidAmountController.dispose();
     }
   }
 
@@ -905,47 +513,6 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
-
-  List<Customer> _matchingCustomers(
-    List<Customer> customers,
-    String nameQuery,
-    String phoneQuery,
-  ) {
-    final name = nameQuery.trim().toLowerCase();
-    final phone = phoneQuery.replaceAll(RegExp(r'[^0-9]'), '');
-    final hasNameQuery = name.length >= 2;
-    final hasPhoneQuery = phone.length >= 3 && phone != '91';
-    if (!hasNameQuery && !hasPhoneQuery) return [];
-
-    return customers
-        .where((customer) {
-          final customerName = customer.name.toLowerCase();
-          final customerPhone = customer.phone.replaceAll(
-            RegExp(r'[^0-9]'),
-            '',
-          );
-          return (hasNameQuery && customerName.contains(name)) ||
-              (hasPhoneQuery && customerPhone.contains(phone));
-        })
-        .take(5)
-        .toList();
-  }
-
-  String _formatCustomerPhoneInput(String phone) {
-    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length == 12 && digits.startsWith('91')) {
-      return '+91 ${digits.substring(2)}';
-    }
-    if (digits.length == 10) return '+91 $digits';
-    return phone;
-  }
-
-  void _setControllerText(TextEditingController controller, String value) {
-    controller.value = TextEditingValue(
-      text: value,
-      selection: TextSelection.collapsed(offset: value.length),
-    );
-  }
 
   Widget _buildModeSelector() {
     return Padding(

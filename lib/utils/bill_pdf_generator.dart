@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -7,13 +8,16 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/bill.dart';
+import '../models/bill_settings.dart';
 import '../models/shop_profile.dart';
 
 class BillPdfGenerator {
   static Future<Uint8List> generate({
     required Bill bill,
     required ShopProfile? shop,
+    BillSettings? settings,
   }) async {
+    final billSettings = settings ?? BillSettings();
     WidgetsFlutterBinding.ensureInitialized();
     final fontData = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
     final boldFontData = await rootBundle.load(
@@ -34,15 +38,19 @@ class BillPdfGenerator {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
         build: (context) => [
-          _header(bill, shop),
+          _header(bill, shop, billSettings),
           pw.SizedBox(height: 14),
-          _partyBlock(bill, shop),
+          _partyBlock(bill, shop, billSettings),
           pw.SizedBox(height: 18),
-          _itemsTable(bill, gstRegistered: gstRegistered),
+          _itemsTable(
+            bill,
+            gstRegistered: gstRegistered,
+            settings: billSettings,
+          ),
           pw.SizedBox(height: 14),
-          _totals(bill, gstRegistered: gstRegistered),
+          _totals(bill, gstRegistered: gstRegistered, settings: billSettings),
           pw.SizedBox(height: 20),
-          _footer(gstRegistered),
+          _footer(gstRegistered, billSettings),
         ],
       ),
     );
@@ -56,10 +64,25 @@ class BillPdfGenerator {
     return '$safe.pdf';
   }
 
-  static pw.Widget _header(Bill bill, ShopProfile? shop) {
+  static pw.Widget _header(
+    Bill bill,
+    ShopProfile? shop,
+    BillSettings settings,
+  ) {
+    final logo = settings.showShopLogo
+        ? _imageProvider(settings.shopLogoBase64)
+        : null;
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
+        if (logo != null) ...[
+          pw.Container(
+            width: 58,
+            height: 58,
+            margin: const pw.EdgeInsets.only(right: 12),
+            child: pw.Image(logo, fit: pw.BoxFit.contain),
+          ),
+        ],
         pw.Expanded(
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -71,10 +94,14 @@ class BillPdfGenerator {
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              if (shop?.address != null) _muted(shop!.address!),
-              if (shop?.phone != null) _muted('Phone: ${shop!.phone}'),
-              if (shop?.email != null) _muted('Email: ${shop!.email}'),
-              if (shop?.gstin != null) _muted('GSTIN: ${shop!.gstin}'),
+              if (settings.showShopAddress && shop?.address != null)
+                _muted(shop!.address!),
+              if (settings.showShopPhone && shop?.phone != null)
+                _muted('Phone: ${shop!.phone}'),
+              if (settings.showShopEmail && shop?.email != null)
+                _muted('Email: ${shop!.email}'),
+              if (settings.showShopGstin && shop?.gstin != null)
+                _muted('GSTIN: ${shop!.gstin}'),
             ],
           ),
         ),
@@ -88,7 +115,9 @@ class BillPdfGenerator {
             crossAxisAlignment: pw.CrossAxisAlignment.end,
             children: [
               pw.Text(
-                'TAX INVOICE',
+                settings.invoiceTitle.trim().isEmpty
+                    ? BillSettings.defaultInvoiceTitle
+                    : settings.invoiceTitle.trim().toUpperCase(),
                 style: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   fontSize: 14,
@@ -106,7 +135,11 @@ class BillPdfGenerator {
     );
   }
 
-  static pw.Widget _partyBlock(Bill bill, ShopProfile? shop) {
+  static pw.Widget _partyBlock(
+    Bill bill,
+    ShopProfile? shop,
+    BillSettings settings,
+  ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -120,60 +153,69 @@ class BillPdfGenerator {
                 'Legal Name: ${bill.customerGstLegalName}',
               if (bill.customerGstTradeName != null)
                 'Trade Name: ${bill.customerGstTradeName}',
-              if (bill.customerPhone != null) 'Phone: ${bill.customerPhone}',
-              if (bill.customerAddressSnapshot != null)
+              if (settings.showCustomerPhone && bill.customerPhone != null)
+                'Phone: ${bill.customerPhone}',
+              if (settings.showCustomerAddress &&
+                  bill.customerAddressSnapshot != null)
                 bill.customerAddressSnapshot!,
             ],
           ),
         ),
-        pw.SizedBox(width: 10),
-        pw.Expanded(
-          child: _infoBox(
-            title: 'Payment',
-            lines: [
-              'Status: ${_paymentStatusLabel(bill.paymentStatus)}',
-              if (bill.paidAmount > 0)
-                'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
-              if (bill.paidAmount > 0) 'Paid: ${_money(bill.paidAmount)}',
-              if (bill.balanceDue > 0) 'Balance: ${_money(bill.balanceDue)}',
-              if (shop?.gstRegistered == true) 'GST: Registered',
-              if (shop?.gstRegistered != true) 'GST: Not registered',
-            ],
+        if (settings.showPaymentDetails) ...[
+          pw.SizedBox(width: 10),
+          pw.Expanded(
+            child: _infoBox(
+              title: 'Payment',
+              lines: [
+                'Status: ${_paymentStatusLabel(bill.paymentStatus)}',
+                if (bill.paidAmount > 0)
+                  'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
+                if (bill.paidAmount > 0) 'Paid: ${_money(bill.paidAmount)}',
+                if (bill.balanceDue > 0) 'Balance: ${_money(bill.balanceDue)}',
+                if (shop?.gstRegistered == true) 'GST: Registered',
+                if (shop?.gstRegistered != true) 'GST: Not registered',
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
 
-  static pw.Widget _itemsTable(Bill bill, {required bool gstRegistered}) {
+  static pw.Widget _itemsTable(
+    Bill bill, {
+    required bool gstRegistered,
+    required BillSettings settings,
+  }) {
+    final showGst = gstRegistered && settings.showGstBreakdown;
+    final showHsn =
+        settings.showHsnColumn &&
+        (gstRegistered ||
+            bill.items.any((item) => item.hsnCodeSnapshot != null));
     final headers = [
       '#',
       'Item',
-      if (gstRegistered ||
-          bill.items.any((item) => item.hsnCodeSnapshot != null))
-        'HSN',
+      if (showHsn) 'HSN',
       'Rate',
       'Qty',
-      if (gstRegistered) 'Net Amount',
-      if (gstRegistered) 'GST',
+      if (showGst) 'Net Amount',
+      if (showGst) 'GST',
       'Amount',
     ];
 
     final data = bill.items.asMap().entries.map((entry) {
       final index = entry.key + 1;
       final item = entry.value;
-      final gst = gstRegistered ? item.totalGst : 0.0;
-      final taxable = gstRegistered ? item.totalTaxableValue : item.subtotal;
+      final gst = showGst ? item.totalGst : 0.0;
+      final taxable = showGst ? item.totalTaxableValue : item.subtotal;
       return [
         '$index',
         item.productName,
-        if (gstRegistered ||
-            bill.items.any((item) => item.hsnCodeSnapshot != null))
-          item.hsnCodeSnapshot ?? '-',
+        if (showHsn) item.hsnCodeSnapshot ?? '-',
         _money(item.sellingPriceSnapshot),
         item.quantityLabel,
-        if (gstRegistered) _money(taxable),
-        if (gstRegistered) _money(gst),
+        if (showGst) _money(taxable),
+        if (showGst) _money(gst),
         _money(item.subtotal),
       ];
     }).toList();
@@ -196,22 +238,25 @@ class BillPdfGenerator {
         1: const pw.FlexColumnWidth(2.4),
         2: const pw.FlexColumnWidth(0.9),
         3: const pw.FlexColumnWidth(0.9),
-        if (gstRegistered) 4: const pw.FlexColumnWidth(1),
-        if (gstRegistered) 5: const pw.FlexColumnWidth(0.9),
-        if (gstRegistered) 6: const pw.FlexColumnWidth(1),
-        if (!gstRegistered) 4: const pw.FlexColumnWidth(1),
+        if (showGst) 4: const pw.FlexColumnWidth(1),
+        if (showGst) 5: const pw.FlexColumnWidth(0.9),
+        if (showGst) 6: const pw.FlexColumnWidth(1),
+        if (!showGst) 4: const pw.FlexColumnWidth(1),
       },
       cellPadding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
     );
   }
 
-  static pw.Widget _totals(Bill bill, {required bool gstRegistered}) {
-    final gstTotal = gstRegistered
+  static pw.Widget _totals(
+    Bill bill, {
+    required bool gstRegistered,
+    required BillSettings settings,
+  }) {
+    final showGst = gstRegistered && settings.showGstBreakdown;
+    final gstTotal = showGst
         ? bill.cgstAmount + bill.sgstAmount + bill.igstAmount
         : 0.0;
-    final taxableTotal = gstRegistered
-        ? bill.taxableAmount
-        : bill.subtotalAmount;
+    final taxableTotal = showGst ? bill.taxableAmount : bill.subtotalAmount;
 
     return pw.Align(
       alignment: pw.Alignment.centerRight,
@@ -219,8 +264,8 @@ class BillPdfGenerator {
         width: 240,
         child: pw.Column(
           children: [
-            if (gstRegistered) _totalRow('Net Amount', taxableTotal),
-            if (gstRegistered) _totalRow('GST total', gstTotal),
+            if (showGst) _totalRow('Net Amount', taxableTotal),
+            if (showGst) _totalRow('GST total', gstTotal),
             _totalRow('Subtotal', bill.subtotalAmount),
             if (bill.discountAmount > 0)
               _totalRow(
@@ -229,31 +274,60 @@ class BillPdfGenerator {
               ),
             pw.Divider(),
             _totalRow('Grand total', bill.totalAmount, bold: true),
-            if (bill.paidAmount > 0) _totalRow('Paid', bill.paidAmount),
-            if (bill.balanceDue > 0)
-              _totalRow('Balance due', bill.balanceDue, bold: true),
+            if (settings.showPaymentDetails) ...[
+              if (bill.paidAmount > 0) _totalRow('Paid', bill.paidAmount),
+              if (bill.balanceDue > 0)
+                _totalRow('Balance due', bill.balanceDue, bold: true),
+            ],
           ],
         ),
       ),
     );
   }
 
-  static pw.Widget _footer(bool gstRegistered) {
+  static pw.Widget _footer(bool gstRegistered, BillSettings settings) {
+    final signature = settings.showDigitalSignature
+        ? _imageProvider(settings.digitalSignatureBase64)
+        : null;
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Divider(color: PdfColors.grey400),
-        pw.Text(
-          gstRegistered
-              ? 'GST shown above is calculated from item price snapshots at billing time.'
-              : 'This shop is not marked GST registered; GST is not shown as collected on this invoice.',
-          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
-        ),
-        pw.SizedBox(height: 8),
-        pw.Text(
-          'Thank you for your business.',
-          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
-        ),
+        if (settings.showGstBreakdown)
+          pw.Text(
+            gstRegistered
+                ? 'GST shown above is calculated from item price snapshots at billing time.'
+                : 'This shop is not marked GST registered; GST is not shown as collected on this invoice.',
+            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+          ),
+        if (settings.footerText.trim().isNotEmpty) ...[
+          pw.SizedBox(height: 8),
+          pw.Text(
+            settings.footerText.trim(),
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+          ),
+        ],
+        if (signature != null) ...[
+          pw.SizedBox(height: 18),
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Column(
+              children: [
+                pw.SizedBox(
+                  width: 120,
+                  height: 48,
+                  child: pw.Image(signature, fit: pw.BoxFit.contain),
+                ),
+                pw.Container(width: 120, height: 0.5, color: PdfColors.grey600),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'Authorised signature',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -330,5 +404,15 @@ class BillPdfGenerator {
       Bill.statusPartial => 'Partial',
       _ => 'Unpaid',
     };
+  }
+
+  static pw.MemoryImage? _imageProvider(String? base64Value) {
+    final value = base64Value?.trim();
+    if (value == null || value.isEmpty) return null;
+    try {
+      return pw.MemoryImage(base64Decode(value));
+    } catch (_) {
+      return null;
+    }
   }
 }

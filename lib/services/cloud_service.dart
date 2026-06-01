@@ -366,6 +366,7 @@ class CloudSyncEngine {
 
   static const _adminManagedTables = {
     'app_settings',
+    'bill_settings',
     'categories',
     'units',
     'suppliers',

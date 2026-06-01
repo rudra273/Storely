@@ -476,7 +476,7 @@ mixin DatabaseBills {
 
     final template =
         series['format_template']?.toString() ??
-        'SHOP-LOCAL-{DEVICE}-{YYYY}{MM}{DD}-{SEQ}';
+        'INV-{YYYY}{MM}{DD}-{SEQ}';
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
     final deviceId = series['device_id']?.toString() ?? 'local';
     final number = _formatInvoiceNumber(

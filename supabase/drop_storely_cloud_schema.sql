@@ -17,6 +17,7 @@ drop table if exists public.customers cascade;
 drop table if exists public.suppliers cascade;
 drop table if exists public.units cascade;
 drop table if exists public.categories cascade;
+drop table if exists public.bill_settings cascade;
 drop table if exists public.app_settings cascade;
 drop table if exists public.shop_members cascade;
 drop table if exists public.shops cascade;

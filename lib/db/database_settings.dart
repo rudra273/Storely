@@ -10,6 +10,7 @@ mixin DatabaseSettings {
   static const _showPurchasePriceGloballyKey = 'show_purchase_price_globally';
 
   Future<Database> get database;
+  Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
 
   Future<String?> getShopName() async {
     final profile = await getShopProfile();
@@ -267,6 +268,136 @@ mixin DatabaseSettings {
         txn,
         _showPurchasePriceGloballyKey,
         settings.showPurchasePriceGlobally ? '1' : '0',
+      );
+    });
+    notifyDatabaseChanged();
+  }
+
+  Future<BillSettings> getBillSettings() async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final rows = await db.query(
+      'bill_settings',
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shopId],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return BillSettings.fromMap(rows.single);
+    final now = DateTime.now().toUtc();
+    return BillSettings(shopId: shopId, createdAt: now, updatedAt: now);
+  }
+
+  Future<void> saveBillSettings(BillSettings settings) async {
+    await _requireAdminMutation();
+    final db = await database;
+    await db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
+      final now = _nowIso();
+      final existing = await txn.query(
+        'bill_settings',
+        columns: ['id', 'uuid', 'created_at'],
+        where: 'shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [shopId],
+        limit: 1,
+      );
+      final createdAt = existing.isEmpty
+          ? now
+          : existing.single['created_at']?.toString() ?? now;
+      final uuid = existing.isEmpty
+          ? (settings.uuid.isEmpty ? _newUuid() : settings.uuid)
+          : existing.single['uuid'] as String;
+      final map =
+          settings
+              .copyWith(
+                id: existing.isEmpty ? null : existing.single['id'] as int?,
+                uuid: uuid,
+                shopId: shopId,
+                createdAt: DateTime.parse(createdAt),
+                updatedAt: DateTime.parse(now),
+              )
+              .toMap()
+            ..remove('id');
+      await txn.insert(
+        'bill_settings',
+        map,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
+    notifyDatabaseChanged();
+  }
+
+  Future<InvoiceSeriesSettings> getDefaultInvoiceSeriesSettings() async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    var rows = await db.query(
+      'invoice_series',
+      where:
+          'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+      whereArgs: [shopId],
+      orderBy: 'id ASC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      await _seedDefaultInvoiceSeries(db);
+      rows = await db.query(
+        'invoice_series',
+        where:
+            'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+        whereArgs: [shopId],
+        orderBy: 'id ASC',
+        limit: 1,
+      );
+    }
+    if (rows.isEmpty) return const InvoiceSeriesSettings();
+    return InvoiceSeriesSettings.fromMap(rows.single);
+  }
+
+  Future<void> saveDefaultInvoiceSeriesSettings(
+    InvoiceSeriesSettings settings,
+  ) async {
+    await _requireAdminMutation();
+    final template = _normaliseName(settings.formatTemplate);
+    if (template == null || !template.contains('{SEQ}')) {
+      throw ArgumentError('Bill number pattern must include {SEQ}');
+    }
+    final db = await database;
+    await db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
+      var rows = await txn.query(
+        'invoice_series',
+        columns: ['id'],
+        where:
+            'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+        whereArgs: [shopId],
+        orderBy: 'id ASC',
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        await _seedDefaultInvoiceSeries(txn);
+        rows = await txn.query(
+          'invoice_series',
+          columns: ['id'],
+          where:
+              'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+          whereArgs: [shopId],
+          orderBy: 'id ASC',
+          limit: 1,
+        );
+      }
+      if (rows.isEmpty) {
+        throw StateError('No active invoice series is configured');
+      }
+      await txn.update(
+        'invoice_series',
+        {
+          'name': _normaliseName(settings.name) ?? 'Default',
+          'format_template': template,
+          'sequence_padding': settings.sequencePadding.clamp(1, 8),
+          'reset_period': settings.resetPeriod,
+          'updated_at': _nowIso(),
+        },
+        where: 'id = ?',
+        whereArgs: [rows.single['id']],
       );
     });
     notifyDatabaseChanged();

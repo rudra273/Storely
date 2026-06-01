@@ -4,14 +4,18 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/product.dart';
 
 class PdfGenerator {
-  /// Generates a PDF with QR code labels in a fixed-size grid on A4 pages.
+  static const codeTypeQr = 'qr';
+  static const codeTypeBarcode = 'barcode';
+
+  /// Generates a PDF with product QR/barcode labels in a fixed-size grid on A4 pages.
   /// Labels are always the same size regardless of product count.
   static Future<Uint8List> generate(
     List<Product> products, {
     int columns = 3,
     int rows = 8,
+    String codeType = codeTypeQr,
   }) async {
-    final pdf = pw.Document(title: 'Storely QR Codes', author: 'Storely');
+    final pdf = pw.Document(title: 'Storely Product Labels', author: 'Storely');
 
     final itemsPerPage = columns * rows;
     final totalPages = (products.length / itemsPerPage).ceil();
@@ -41,6 +45,7 @@ class PdfGenerator {
                 rows: rows,
                 cellWidth: cellWidth,
                 cellHeight: cellHeight,
+                codeType: codeType,
               ),
             );
           },
@@ -57,6 +62,7 @@ class PdfGenerator {
     required int rows,
     required double cellWidth,
     required double cellHeight,
+    required String codeType,
   }) {
     final List<pw.Widget> rowWidgets = [];
 
@@ -73,7 +79,12 @@ class PdfGenerator {
           child: pw.Row(
             children: [
               ...rowProducts.map(
-                (product) => _buildLabel(product, cellWidth, cellHeight),
+                (product) => _buildLabel(
+                  product,
+                  cellWidth,
+                  cellHeight,
+                  codeType: codeType,
+                ),
               ),
               // Fill remaining cells in this row with empty space
               ...List.generate(
@@ -92,10 +103,13 @@ class PdfGenerator {
   static pw.Widget _buildLabel(
     Product product,
     double cellWidth,
-    double cellHeight,
-  ) {
-    // QR code takes most of the cell, with space for the name above
-    final qrSize = cellHeight * 0.7;
+    double cellHeight, {
+    required String codeType,
+  }) {
+    final isBarcode = codeType == codeTypeBarcode;
+    final codeWidth = isBarcode ? cellWidth * 0.82 : cellHeight * 0.7;
+    final codeHeight = isBarcode ? cellHeight * 0.32 : cellHeight * 0.7;
+    final data = isBarcode ? _barcodeData(product) : product.toQrData();
 
     return pw.SizedBox(
       width: cellWidth,
@@ -105,7 +119,7 @@ class PdfGenerator {
         child: pw.Column(
           mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
-            // Product name above QR
+            // Product name above the scannable code.
             pw.Text(
               product.name,
               style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
@@ -114,19 +128,32 @@ class PdfGenerator {
               overflow: pw.TextOverflow.clip,
             ),
             pw.SizedBox(height: 3),
-            // QR Code (contains name + mrp + qty encoded inside)
             pw.SizedBox(
-              width: qrSize,
-              height: qrSize,
+              width: codeWidth,
+              height: codeHeight,
               child: pw.BarcodeWidget(
-                barcode: pw.Barcode.qrCode(),
-                data: product.toQrData(),
+                barcode: isBarcode ? pw.Barcode.code128() : pw.Barcode.qrCode(),
+                data: data,
               ),
             ),
+            if (isBarcode) ...[
+              pw.SizedBox(height: 2),
+              pw.Text(
+                data,
+                style: const pw.TextStyle(fontSize: 6),
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  static String _barcodeData(Product product) {
+    final value = product.barcode ?? product.productCode ?? product.uuid;
+    return value.trim().isEmpty ? product.name : value.trim();
   }
 
   /// Returns the number of A4 pages needed

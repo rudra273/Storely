@@ -1,6 +1,10 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../theme/app_theme.dart';
+import '../models/bill_settings.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
@@ -16,6 +20,7 @@ part 'store/cloud_setup_sheet.dart';
 part 'store/store_action_widgets.dart';
 part 'store/supplier_manager_sheet.dart';
 part 'store/pricing_settings_sheets.dart';
+part 'store/bill_settings_sheet.dart';
 part 'store/profile_sheets.dart';
 part 'store/store_dialogs.dart';
 part 'store/customer_sheets.dart';
@@ -38,6 +43,8 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _units = [];
   List<Customer> _customers = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
+  BillSettings _billSettings = BillSettings();
+  InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
   int _lowStockThreshold = 5;
   bool _isLoading = true;
 
@@ -67,6 +74,8 @@ class _StoreScreenState extends State<StoreScreen> {
     final units = await db.getUnits();
     final customers = await db.getAllCustomers();
     final pricingSettings = await db.getGlobalPricingSettings();
+    final billSettings = await db.getBillSettings();
+    final invoiceSeriesSettings = await db.getDefaultInvoiceSeriesSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
@@ -78,6 +87,8 @@ class _StoreScreenState extends State<StoreScreen> {
       _units = units;
       _customers = customers;
       _pricingSettings = pricingSettings;
+      _billSettings = billSettings;
+      _invoiceSeriesSettings = invoiceSeriesSettings;
       _lowStockThreshold = lowStockThreshold;
       _isLoading = false;
     });
@@ -277,6 +288,25 @@ class _StoreScreenState extends State<StoreScreen> {
     await _runStoreAction(() async {
       await DatabaseHelper.instance.saveGlobalPricingSettings(result);
       await DatabaseHelper.instance.refreshAllProductSellingPrices();
+    });
+  }
+
+  Future<void> _showBillSettings() async {
+    final result = await showModalBottomSheet<_BillSettingsResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillSettingsSheet(
+        settings: _billSettings,
+        invoiceSeries: _invoiceSeriesSettings,
+      ),
+    );
+    if (result == null) return;
+    await _runStoreAction(() async {
+      await DatabaseHelper.instance.saveBillSettings(result.settings);
+      await DatabaseHelper.instance.saveDefaultInvoiceSeriesSettings(
+        result.invoiceSeries,
+      );
     });
   }
 
@@ -551,6 +581,13 @@ class _StoreScreenState extends State<StoreScreen> {
                         'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
                     icon: Icons.calculate_outlined,
                     onTap: _showGlobalPricingSettings,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Bill Settings',
+                    subtitle: _invoiceSeriesSettings.formatTemplate,
+                    icon: Icons.receipt_long_outlined,
+                    onTap: _showBillSettings,
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(

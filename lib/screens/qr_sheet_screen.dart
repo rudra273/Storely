@@ -15,6 +15,7 @@ class QrSheetScreen extends StatefulWidget {
 class _QrSheetScreenState extends State<QrSheetScreen> {
   int _columns = 3;
   int _rows = 8;
+  String _codeType = PdfGenerator.codeTypeQr;
 
   int get _itemsPerPage => _columns * _rows;
   int get _pageCount => PdfGenerator.pageCount(
@@ -28,7 +29,7 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('QR Code Sheet')),
+      appBar: AppBar(title: const Text('Product Label Sheet')),
       body: Column(
         children: [
           // ── Layout configuration card ──
@@ -82,6 +83,24 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 14),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: PdfGenerator.codeTypeQr,
+                      icon: Icon(Icons.qr_code_2_rounded),
+                      label: Text('QR codes'),
+                    ),
+                    ButtonSegment(
+                      value: PdfGenerator.codeTypeBarcode,
+                      icon: Icon(Icons.view_week_outlined),
+                      label: Text('Barcodes'),
+                    ),
+                  ],
+                  selected: {_codeType},
+                  onSelectionChanged: (value) =>
+                      setState(() => _codeType = value.first),
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -150,18 +169,21 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
           // ── PDF Preview ──
           Expanded(
             child: PdfPreview(
-              key: ValueKey('${_columns}_$_rows'),
+              key: ValueKey('${_columns}_${_rows}_$_codeType'),
               build: (format) => PdfGenerator.generate(
                 widget.products,
                 columns: _columns,
                 rows: _rows,
+                codeType: _codeType,
               ),
               allowPrinting: false,
               allowSharing: true,
               canChangePageFormat: false,
               canChangeOrientation: false,
               canDebug: false,
-              pdfFileName: 'storely_qr_codes.pdf',
+              pdfFileName: _codeType == PdfGenerator.codeTypeBarcode
+                  ? 'storely_barcodes.pdf'
+                  : 'storely_qr_codes.pdf',
               loadingWidget: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -169,7 +191,9 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
                     CircularProgressIndicator(color: colorScheme.primary),
                     const SizedBox(height: 16),
                     Text(
-                      'Generating QR codes...',
+                      _codeType == PdfGenerator.codeTypeBarcode
+                          ? 'Generating barcodes...'
+                          : 'Generating QR codes...',
                       style: TextStyle(
                         color: colorScheme.onSurfaceVariant,
                         fontSize: 14,

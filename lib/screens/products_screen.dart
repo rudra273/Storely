@@ -253,41 +253,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
         .toList();
   }
 
-  int _countImportMatches(List<Product> products) {
-    var count = 0;
-    final byCode = {
-      for (final product in _allProducts)
-        if (product.itemCode != null && product.itemCode!.trim().isNotEmpty)
-          product.itemCode!.trim().toLowerCase(): product,
-    };
-    final byBarcode = {
-      for (final product in _allProducts)
-        if (product.barcode != null && product.barcode!.trim().isNotEmpty)
-          product.barcode!.trim().toLowerCase(): product,
-    };
-    final byName = {
-      for (final product in _allProducts)
-        product.name.trim().toLowerCase(): product,
-    };
-
-    for (final product in products) {
-      final code = product.itemCode?.trim().toLowerCase();
-      if (code != null && code.isNotEmpty && byCode.containsKey(code)) {
-        count++;
-        continue;
-      }
-      final barcode = product.barcode?.trim().toLowerCase();
-      if (barcode != null &&
-          barcode.isNotEmpty &&
-          byBarcode.containsKey(barcode)) {
-        count++;
-        continue;
-      }
-      if (byName.containsKey(product.name.trim().toLowerCase())) count++;
-    }
-    return count;
-  }
-
   Future<void> _showBulkCategoryPicker() async {
     final selected = await _showBulkOptionPicker(
       title: 'Set Category',
@@ -558,12 +523,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     }
   }
 
-  Future<void> _importCsv() async {
-    final products = await _pickAndParseImport();
-    if (products == null || !mounted) return;
-    _showImportDialog(products);
-  }
-
   void _showImportError(Object error) {
     if (!mounted) return;
     final message = error.toString().replaceFirst('Exception: ', '');
@@ -580,33 +539,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Future<void> _runImportAction(
-    BuildContext sheetContext,
-    Future<String> Function() action,
-  ) async {
-    Navigator.pop(sheetContext);
-    try {
-      final message = await action();
-      await _loadProducts();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
-    } catch (e) {
-      _showImportError(e);
-    }
-  }
-
-  Product _productWithImportPricing(Product product, bool useDirectPrice) {
-    return product.copyWith(
-      sellingPrice: product.mrp,
-      directPriceToggle: useDirectPrice,
-      clearManualPrice: !useDirectPrice,
-      manualPrice: useDirectPrice ? product.mrp : null,
-      source: ProductSource.imported,
     );
   }
 
@@ -875,299 +807,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  void _showImportDialog(List<Product> products) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        var useDirectPrice = false;
-        DateTime? purchaseDate;
-        var possibleDuplicate = false;
-        var duplicateDateMismatch = false;
-        var existingMatchCount = _countImportMatches(products);
-        var duplicateChecked = false;
-        List<Product> importProducts() => products
-            .map(
-              (product) => _productWithImportPricing(product, useDirectPrice),
-            )
-            .toList();
-
-        Future<void> refreshDuplicateFlag(StateSetter setSheet) async {
-          final matches = _countImportMatches(importProducts());
-          final duplicate = await DatabaseHelper.instance
-              .previewImportDuplicate(
-                importProducts(),
-                purchaseDate: purchaseDate,
-              );
-          if (ctx.mounted) {
-            setSheet(() {
-              existingMatchCount = matches;
-              possibleDuplicate = duplicate.possibleDuplicate;
-              duplicateDateMismatch = duplicate.duplicateOnDifferentDate;
-            });
-          }
-        }
-
-        return StatefulBuilder(
-          builder: (ctx, setSheet) {
-            if (!duplicateChecked) {
-              duplicateChecked = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (ctx.mounted) refreshDuplicateFlag(setSheet);
-              });
-            }
-            return SafeArea(
-              top: false,
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
-                ),
-                margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Handle
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: AppColors.creamDark,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      // Icon + Title
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.amber.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.upload_file_rounded,
-                          color: AppColors.amber,
-                          size: 36,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Import ${products.length} Products',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Choose how to import the data',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      InkWell(
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            initialDate: purchaseDate ?? DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now().add(
-                              const Duration(days: 365),
-                            ),
-                          );
-                          if (picked == null || !ctx.mounted) return;
-                          setSheet(() => purchaseDate = picked);
-                          await refreshDuplicateFlag(setSheet);
-                        },
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                          decoration: BoxDecoration(
-                            color: AppColors.cream,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.event_outlined),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Purchase Date',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      purchaseDate == null
-                                          ? 'Required before import'
-                                          : _formatFullDate(purchaseDate!),
-                                      style: TextStyle(
-                                        color: purchaseDate == null
-                                            ? AppColors.error
-                                            : AppColors.textMuted,
-                                        fontSize: 12,
-                                        fontWeight: purchaseDate == null
-                                            ? FontWeight.w700
-                                            : FontWeight.w400,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(Icons.edit_calendar_rounded),
-                            ],
-                          ),
-                        ),
-                      ),
-                      if (possibleDuplicate || duplicateDateMismatch) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppColors.error.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: AppColors.error.withValues(alpha: 0.25),
-                            ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(
-                                Icons.warning_amber_rounded,
-                                color: AppColors.error,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  possibleDuplicate
-                                      ? 'This looks like a duplicate purchase batch. Same date, same products, quantities, prices, and suppliers were imported before.'
-                                      : 'Check the purchase date. These rows look like a duplicate batch already imported on a different date.',
-                                  style: const TextStyle(
-                                    color: AppColors.error,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      _DirectPriceControl(
-                        directPrice: useDirectPrice,
-                        onChanged: (value) async {
-                          setSheet(() => useDirectPrice = value);
-                          await refreshDuplicateFlag(setSheet);
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      _ImportPreviewTable(products: importProducts()),
-                      const SizedBox(height: 20),
-                      if (existingMatchCount > 0) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () => _runImportAction(ctx, () async {
-                              if (purchaseDate == null) {
-                                throw Exception(
-                                  'Please choose a purchase date before importing.',
-                                );
-                              }
-                              final count = await DatabaseHelper.instance
-                                  .replaceAllProducts(
-                                    importProducts(),
-                                    purchaseDate: purchaseDate!,
-                                  );
-                              return '✓ Replaced $count imported products';
-                            }),
-                            icon: const Icon(Icons.swap_horiz_rounded),
-                            label: const Text(
-                              'Replace',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.error,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: () => _runImportAction(ctx, () async {
-                            if (purchaseDate == null) {
-                              throw Exception(
-                                'Please choose a purchase date before importing.',
-                              );
-                            }
-                            final result = await DatabaseHelper.instance
-                                .mergeProducts(
-                                  importProducts(),
-                                  purchaseDate: purchaseDate!,
-                                );
-                            final warning =
-                                result.possibleDuplicate ||
-                                    result.duplicateOnDifferentDate
-                                ? ' Possible duplicate batch was appended.'
-                                : '';
-                            return '✓ Added ${result.added}, updated ${result.updated}.$warning';
-                          }),
-                          icon: Icon(
-                            existingMatchCount == 0
-                                ? Icons.add_rounded
-                                : Icons.merge_rounded,
-                          ),
-                          label: Text(
-                            existingMatchCount == 0 ? 'Add' : 'Update Stock',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.navy,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   // ── New Purchase (step 1: date + supplier) ──
   Future<void> _showNewPurchaseFlow() async {
     var purchaseDate = DateTime.now();
@@ -1345,7 +984,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return DatabaseHelper.instance.commitProductPurchaseBatch(
       commits,
       purchaseDate: purchaseDate,
-      source: ProductSource.mobile,
     );
   }
 
@@ -2526,6 +2164,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 tooltip: 'Clear selection',
               ),
             ] else ...[
+              if (_allProducts.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Center(
+                    child: StatusPill(
+                      label: '${_allProducts.length}',
+                      variant: PillVariant.info,
+                    ),
+                  ),
+                ),
               IconButton(
                 onPressed: () {
                   setState(() {
@@ -2538,18 +2186,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
               IconButton(
                 onPressed: _openQrSheet,
                 icon: const Icon(Icons.qr_code_2),
-                tooltip: 'QR Sheet',
+                tooltip: 'Product labels',
               ),
-              if (_allProducts.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Center(
-                    child: StatusPill(
-                      label: '${_allProducts.length}',
-                      variant: PillVariant.info,
-                    ),
-                  ),
-                ),
+              const SizedBox(width: 8),
             ],
           ],
         ),
@@ -2563,14 +2202,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
           children: _selectionMode
               ? []
               : [
-                  FloatingActionButton.small(
-                    heroTag: 'import',
-                    onPressed: _importCsv,
-                    backgroundColor: AppColors.amber,
-                    foregroundColor: Colors.white,
-                    child: const Icon(Icons.upload_file_rounded),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
                   FloatingActionButton(
                     heroTag: 'add',
                     onPressed: _showNewPurchaseFlow,
@@ -2606,15 +2237,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
             Text('No products yet', style: AppText.title),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Add manually or import from CSV',
+              'Create a purchase, then add or import products',
               style: AppText.caption,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.xl),
-            OutlinedButton.icon(
-              onPressed: _importCsv,
-              icon: const Icon(Icons.upload_file_rounded),
-              label: const Text('Import CSV'),
+            FilledButton.icon(
+              onPressed: _showNewPurchaseFlow,
+              icon: const Icon(Icons.add_shopping_cart_rounded),
+              label: const Text('New Purchase'),
             ),
           ],
         ),

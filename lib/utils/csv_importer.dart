@@ -8,6 +8,19 @@ import 'package:xml/xml.dart';
 import '../models/product.dart';
 
 class CsvImporter {
+  static const requiredColumns = ['product_name', 'quantity', 'purchase_price'];
+  static const optionalColumns = [
+    'product_code',
+    'barcode',
+    'category',
+    'selling_price',
+    'unit',
+  ];
+
+  static String get columnGuide =>
+      'Required columns: ${requiredColumns.join(', ')}\n'
+      'Optional columns: ${optionalColumns.join(', ')}';
+
   /// Parses a CSV or Excel file and returns a list of Products.
   static Future<List<Product>> parseFile(
     String filePath, {
@@ -52,12 +65,17 @@ class CsvImporter {
       throw Exception('File must have a header row and at least one data row');
     }
 
-    final header = _findHeader(rows);
+    final header = _readHeader(rows);
     final mapping = header.mapping;
 
-    if (mapping['name'] == null) {
+    final missing = requiredColumns
+        .where((column) => mapping[column] == null)
+        .toList();
+    if (missing.isNotEmpty) {
       throw Exception(
-        'Could not find a "Name" column. Found headers: ${header.row.join(", ")}',
+        'Missing required column(s): ${missing.join(', ')}\n'
+        '$columnGuide\n'
+        'Found headers: ${header.row.join(", ")}',
       );
     }
 
@@ -68,7 +86,7 @@ class CsvImporter {
       if (_isBlankRow(row)) continue;
 
       final rowNumber = i + 1;
-      final name = _getString(row, mapping['name']);
+      final name = _getString(row, mapping['product_name']);
       if (name == null || name.isEmpty) {
         errors.add('Row $rowNumber: Product name is required');
         continue;
@@ -81,14 +99,14 @@ class CsvImporter {
         rowNumber,
         errors,
       );
-      final purchasePrice = _getMoney(
+      final purchasePrice = _getRequiredMoney(
         row,
         mapping['purchase_price'],
         'Purchase price',
         rowNumber,
         errors,
       );
-      final quantity = _getQuantity(
+      final quantity = _getRequiredQuantity(
         row,
         mapping['quantity'],
         rowNumber,
@@ -102,12 +120,11 @@ class CsvImporter {
           name: name,
           category: _getString(row, mapping['category']),
           sellingPrice: sellingPrice ?? 0,
-          purchasePrice: purchasePrice,
-          directPriceToggle: mapping['purchase_price'] == null,
-          manualPrice: sellingPrice ?? 0,
+          purchasePrice: purchasePrice ?? 0,
+          directPriceToggle: sellingPrice != null,
+          manualPrice: sellingPrice,
           quantity: quantity ?? 0,
           unit: _getString(row, mapping['unit']),
-          supplier: _getString(row, mapping['supplier']),
           source: ProductSource.imported,
         ),
       );
@@ -124,38 +141,17 @@ class CsvImporter {
     return products;
   }
 
-  static _HeaderMatch _findHeader(List<List<dynamic>> rows) {
-    final rowsToCheck = rows.length < 10 ? rows.length : 10;
-    _HeaderMatch? best;
-
-    for (int i = 0; i < rowsToCheck; i++) {
-      final headers = rows[i]
-          .map((h) => h.toString().trim().toLowerCase())
-          .toList();
-      final mapping = _mapColumns(headers);
-      final score = mapping.values.whereType<int>().length;
-
-      if (best == null || score > best.score) {
-        best = _HeaderMatch(
-          index: i,
-          row: rows[i],
-          mapping: mapping,
-          score: score,
-        );
-      }
-
-      if (mapping['name'] != null && score >= 2) return best;
+  static _HeaderMatch _readHeader(List<List<dynamic>> rows) {
+    for (var i = 0; i < rows.length; i++) {
+      if (_isBlankRow(rows[i])) continue;
+      final headers = rows[i].map((value) => _normaliseHeader(value)).toList();
+      return _HeaderMatch(
+        index: i,
+        row: rows[i],
+        mapping: _mapColumns(headers),
+      );
     }
-
-    return best ??
-        _HeaderMatch(
-          index: 0,
-          row: rows.first,
-          mapping: _mapColumns(
-            rows.first.map((h) => h.toString().trim().toLowerCase()).toList(),
-          ),
-          score: 0,
-        );
+    throw Exception('File is empty');
   }
 
   /// Reads CSV content into rows.
@@ -441,119 +437,29 @@ class CsvImporter {
     }
   }
 
-  /// Maps header names to our field names using fuzzy matching.
+  /// Maps exact standard header names to our field names.
   static Map<String, int?> _mapColumns(List<String> headers) {
     final mapping = <String, int?>{
       'product_code': null,
       'barcode': null,
-      'name': null,
+      'product_name': null,
       'category': null,
       'selling_price': null,
       'purchase_price': null,
       'quantity': null,
       'unit': null,
-      'supplier': null,
     };
 
     for (int i = 0; i < headers.length; i++) {
-      final h = headers[i];
-      if (_matches(h, [
-        'item id',
-        'item_id',
-        'itemid',
-        'item code',
-        'item_code',
-        'itemcode',
-        'code',
-        'sku',
-        'product id',
-        'product_id',
-        'product code',
-        'product_code',
-      ])) {
-        mapping['product_code'] = i;
-      } else if (_matches(h, [
-        'barcode',
-        'bar code',
-        'bar_code',
-        'ean',
-        'ean code',
-        'ean_code',
-        'upc',
-        'gtin',
-        'scan code',
-        'scan_code',
-      ])) {
-        mapping['barcode'] = i;
-      } else if (_matches(h, [
-        'name',
-        'item name',
-        'item_name',
-        'product',
-        'product name',
-        'product_name',
-        'description',
-      ])) {
-        mapping['name'] = i;
-      } else if (_matches(h, ['category', 'cat', 'group', 'type', 'class'])) {
-        mapping['category'] = i;
-      } else if (_matches(h, [
-        'purchase price',
-        'purchase_price',
-        'buying price',
-        'buying_price',
-        'cost price',
-        'cost_price',
-      ])) {
-        mapping['purchase_price'] = i;
-      } else if (_matches(h, [
-        'price',
-        'mrp',
-        'rate',
-        'unit price',
-        'unit_price',
-        'cost',
-        'selling price',
-        'selling_price',
-        'amount',
-      ])) {
-        mapping['selling_price'] = i;
-      } else if (_matches(h, [
-        'quantity',
-        'qty',
-        'stock',
-        'count',
-        'units',
-        'available',
-      ])) {
-        mapping['quantity'] = i;
-      } else if (_matches(h, [
-        'unit',
-        'uom',
-        'measure',
-        'measurement',
-        'unit of measure',
-        'unit_of_measure',
-      ])) {
-        mapping['unit'] = i;
-      } else if (_matches(h, [
-        'supplier',
-        'vendor',
-        'manufacturer',
-        'brand',
-        'source',
-      ])) {
-        mapping['supplier'] = i;
-      }
+      final header = headers[i];
+      if (mapping.containsKey(header)) mapping[header] = i;
     }
 
     return mapping;
   }
 
-  static bool _matches(String header, List<String> keywords) {
-    final clean = header.replaceAll(RegExp(r'[^a-z0-9 _]'), '').trim();
-    return keywords.any((k) => clean == k || clean.contains(k));
-  }
+  static String _normaliseHeader(Object value) =>
+      value.toString().trim().toLowerCase();
 
   static String? _getString(List row, int? index) {
     if (index == null || index >= row.length) return null;
@@ -579,6 +485,20 @@ class CsvImporter {
     return value;
   }
 
+  static double? _getRequiredMoney(
+    List row,
+    int? index,
+    String label,
+    int rowNumber,
+    List<String> errors,
+  ) {
+    final value = _getMoney(row, index, label, rowNumber, errors);
+    if (value == null && !_hasCellValue(row, index)) {
+      errors.add('Row $rowNumber: $label is required');
+    }
+    return value;
+  }
+
   static double? _getQuantity(
     List row,
     int? index,
@@ -588,6 +508,19 @@ class CsvImporter {
     final value = _getDouble(row, index, 'Quantity', rowNumber, errors);
     if (value != null && value < 0) {
       errors.add('Row $rowNumber: Quantity cannot be negative');
+    }
+    return value;
+  }
+
+  static double? _getRequiredQuantity(
+    List row,
+    int? index,
+    int rowNumber,
+    List<String> errors,
+  ) {
+    final value = _getQuantity(row, index, rowNumber, errors);
+    if (value == null && !_hasCellValue(row, index)) {
+      errors.add('Row $rowNumber: Quantity is required');
     }
     return value;
   }
@@ -611,18 +544,21 @@ class CsvImporter {
     }
     return value;
   }
+
+  static bool _hasCellValue(List row, int? index) {
+    if (index == null || index >= row.length) return false;
+    return row[index].toString().trim().isNotEmpty;
+  }
 }
 
 class _HeaderMatch {
   final int index;
   final List<dynamic> row;
   final Map<String, int?> mapping;
-  final int score;
 
   const _HeaderMatch({
     required this.index,
     required this.row,
     required this.mapping,
-    required this.score,
   });
 }

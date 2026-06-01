@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 18,
+      version: 19,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -36,6 +36,7 @@ mixin DatabaseSchema {
   Future<void> _createCleanSchema(DatabaseExecutor executor) async {
     await _createShopTables(executor);
     await _createSettingsTable(executor);
+    await _createBillSettingsTable(executor);
     await _createReferenceTables(executor);
     await _createProductTable(executor);
     await _createCustomerTables(executor);
@@ -76,6 +77,47 @@ mixin DatabaseSchema {
         deleted_at TEXT,
         PRIMARY KEY (shop_id, key)
       )
+    ''');
+  }
+
+  Future<void> _createBillSettingsTable(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS bill_settings(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        shop_id TEXT NOT NULL,
+        invoice_title TEXT NOT NULL DEFAULT 'TAX INVOICE',
+        footer_text TEXT NOT NULL DEFAULT 'Thank you for your business.',
+        show_shop_logo INTEGER NOT NULL DEFAULT 1,
+        shop_logo_base64 TEXT,
+        show_digital_signature INTEGER NOT NULL DEFAULT 0,
+        digital_signature_base64 TEXT,
+        show_shop_address INTEGER NOT NULL DEFAULT 1,
+        show_shop_phone INTEGER NOT NULL DEFAULT 1,
+        show_shop_email INTEGER NOT NULL DEFAULT 1,
+        show_shop_gstin INTEGER NOT NULL DEFAULT 1,
+        show_customer_phone INTEGER NOT NULL DEFAULT 1,
+        show_customer_address INTEGER NOT NULL DEFAULT 1,
+        show_payment_details INTEGER NOT NULL DEFAULT 1,
+        show_gst_breakdown INTEGER NOT NULL DEFAULT 1,
+        show_hsn_column INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bill_settings_uuid
+      ON bill_settings(uuid)
+    ''');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_bill_settings_shop
+      ON bill_settings(shop_id)
+      WHERE deleted_at IS NULL
+    ''');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_bill_settings_shop_updated
+      ON bill_settings(shop_id, updated_at)
     ''');
   }
 
@@ -531,8 +573,8 @@ mixin DatabaseSchema {
     await executor.insert('invoice_series', {
       'uuid': _newUuid(),
       'shop_id': shopId,
-      'name': 'Default Local',
-      'format_template': 'SHOP-LOCAL-{DEVICE}-{YYYY}{MM}{DD}-{SEQ}',
+      'name': 'Default',
+      'format_template': 'INV-{YYYY}{MM}{DD}-{SEQ}',
       'sequence_padding': 4,
       'reset_period': 'daily',
       'allocation_mode': 'local_device',

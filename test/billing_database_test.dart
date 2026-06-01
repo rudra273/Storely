@@ -91,7 +91,8 @@ void main() {
         expect(savedItem.costSnapshot, 105);
         expect(savedItem.profitSnapshot, 52.5);
         expect(savedItem.wasDirectPrice, isFalse);
-        expect(updatedProduct!.quantity, 7);
+        expect(updatedProduct!.sellingPrice, 157.5);
+        expect(updatedProduct.quantity, 7);
         expect(customerRows, hasLength(1));
         expect(customerRows.single['id'], bill.customerId);
         expect(customerRows.single['name'], 'Anita Store');

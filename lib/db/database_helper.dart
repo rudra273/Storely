@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/bill.dart';
+import '../models/bill_settings.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
@@ -143,6 +144,7 @@ Future<void> _replaceShopId(
   final now = _nowIso();
   for (final table in [
     'app_settings',
+    'bill_settings',
     'categories',
     'units',
     'suppliers',

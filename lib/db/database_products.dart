@@ -167,7 +167,6 @@ mixin DatabaseProducts {
   Future<int> commitProductPurchaseBatch(
     List<ProductPurchaseCommit> commits, {
     required DateTime purchaseDate,
-    String source = ProductSource.mobile,
   }) async {
     await _requireAdminMutation();
     if (commits.isEmpty) return 0;
@@ -191,7 +190,7 @@ mixin DatabaseProducts {
             restockProduct,
             quantityAdded: commit.quantityAdded,
             purchaseDate: purchaseDate,
-            source: source,
+            source: commit.product.source,
           );
           if (count == 0) {
             throw StateError('Product "${target.name}" no longer exists');
@@ -893,7 +892,11 @@ mixin DatabaseProducts {
     final unitId = product.unit == null
         ? product.unitId
         : await _ensureUnit(executor, product.unit!);
-    return product.copyWith(
+    final globalPricing = await _getGlobalPricingSettingsFromExecutor(executor);
+    final categoryPricing = product.category == null
+        ? null
+        : await _getCategoryPricing(executor, product.category!);
+    final pricedProduct = product.copyWith(
       uuid: product.uuid.isEmpty ? _newUuid() : product.uuid,
       shopId: product.shopId.isEmpty || product.shopId == _legacyShopId
           ? shopId
@@ -904,6 +907,12 @@ mixin DatabaseProducts {
       createdAt: product.createdAt,
       updatedAt: now,
     );
+    final breakdown = _resolveProductPrice(
+      pricedProduct,
+      globalPricing,
+      categoryPricing,
+    );
+    return pricedProduct.copyWith(sellingPrice: breakdown.sellingPrice);
   }
 
   Future<void> _insertStockMovement(
@@ -1093,6 +1102,30 @@ Future<CategoryPricingSettings?> _getCategoryPricing(
     limit: 1,
   );
   return rows.isEmpty ? null : CategoryPricingSettings.fromMap(rows.first);
+}
+
+Future<GlobalPricingSettings> _getGlobalPricingSettingsFromExecutor(
+  DatabaseExecutor executor,
+) async {
+  final shopId = await _activeShopId(executor);
+  final rows = await executor.query(
+    'app_settings',
+    where: 'shop_id = ? AND deleted_at IS NULL',
+    whereArgs: [shopId],
+  );
+  final values = {
+    for (final row in rows) row['key'] as String: row['value']?.toString(),
+  };
+  return GlobalPricingSettings(
+    defaultGstPercent:
+        double.tryParse(values['default_gst_percent'] ?? '') ?? 18,
+    defaultOverheadCost:
+        double.tryParse(values['default_overhead_cost'] ?? '') ?? 0,
+    defaultProfitMarginPercent:
+        double.tryParse(values['default_profit_margin_percent'] ?? '') ?? 0,
+    gstRegistered: values['gst_registered'] == '1',
+    showPurchasePriceGlobally: values['show_purchase_price_globally'] == '1',
+  );
 }
 
 PriceBreakdown _resolveProductPrice(
