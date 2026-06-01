@@ -122,7 +122,9 @@ Staff members can:
 
 ## 8. Managing Roles
 
-All role management is done via the **Supabase SQL Editor**.
+All role management is done via the **Supabase SQL Editor**. Use the shop UUID
+shown in the app/cloud `shops.uuid`; Storely no longer uses a shared
+`local-shop` cloud id.
 
 ### Check current members:
 
@@ -134,7 +136,7 @@ SELECT
   sm.created_at
 FROM public.shop_members sm
 JOIN auth.users u ON u.id = sm.user_id
-WHERE sm.shop_id = 'local-shop';
+WHERE sm.shop_id = '<shop_uuid>';
 ```
 
 ### Promote a staff member to admin:
@@ -142,7 +144,7 @@ WHERE sm.shop_id = 'local-shop';
 ```sql
 UPDATE public.shop_members
 SET role = 'admin'
-WHERE shop_id = 'local-shop'
+WHERE shop_id = '<shop_uuid>'
   AND user_id = (SELECT id FROM auth.users WHERE email = 'staff@example.com');
 ```
 
@@ -151,7 +153,7 @@ WHERE shop_id = 'local-shop'
 ```sql
 UPDATE public.shop_members
 SET role = 'staff'
-WHERE shop_id = 'local-shop'
+WHERE shop_id = '<shop_uuid>'
   AND user_id = (SELECT id FROM auth.users WHERE email = 'admin@example.com');
 ```
 
@@ -159,7 +161,7 @@ WHERE shop_id = 'local-shop'
 
 ```sql
 DELETE FROM public.shop_members
-WHERE shop_id = 'local-shop'
+WHERE shop_id = '<shop_uuid>'
   AND user_id = (SELECT id FROM auth.users WHERE email = 'remove-me@example.com');
 ```
 
@@ -169,13 +171,13 @@ WHERE shop_id = 'local-shop'
 -- Demote current owner to admin:
 UPDATE public.shop_members
 SET role = 'admin'
-WHERE shop_id = 'local-shop'
+WHERE shop_id = '<shop_uuid>'
   AND user_id = (SELECT id FROM auth.users WHERE email = 'old-owner@example.com');
 
 -- Promote new owner:
 UPDATE public.shop_members
 SET role = 'owner'
-WHERE shop_id = 'local-shop'
+WHERE shop_id = '<shop_uuid>'
   AND user_id = (SELECT id FROM auth.users WHERE email = 'new-owner@example.com');
 ```
 
@@ -189,18 +191,18 @@ WHERE shop_id = 'local-shop'
 
 **Fix**:
 1. Check if the user is a member: run the "Check current members" query above
-2. If they're not a member, they need to sign in from the app and sync — auto-join will add them as staff
-3. If auto-join fails, manually add them:
+2. If they're not a member, an owner/admin must add them. Storely does not allow automatic staff self-join.
+3. Manually add them:
 
 ```sql
 -- Create the shop if it doesn't exist:
 INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('local-shop', 'My Shop', now()::text, now()::text)
+VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
 ON CONFLICT (uuid) DO NOTHING;
 
 -- Add the user as staff (or 'owner'/'admin'):
 INSERT INTO public.shop_members (shop_id, user_id, role)
-SELECT 'local-shop', id, 'staff'
+SELECT '<shop_uuid>', id, 'staff'
 FROM auth.users WHERE email = 'user@example.com'
 ON CONFLICT (shop_id, user_id) DO NOTHING;
 ```
@@ -215,7 +217,7 @@ ON CONFLICT (shop_id, user_id) DO NOTHING;
 
 ```sql
 INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('local-shop', 'My Shop', now()::text, now()::text)
+VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
 ON CONFLICT (uuid) DO NOTHING;
 ```
 
@@ -300,12 +302,12 @@ DROP TABLE IF EXISTS public.profiles CASCADE;
 
 ### Quick reference: manually set up owner by email
 
-If the auto-join didn't work for the first user:
+If the first owner row needs to be created manually:
 
 ```sql
 -- 1. Create shop:
 INSERT INTO public.shops (uuid, name, created_at, updated_at)
-VALUES ('local-shop', 'My Shop', now()::text, now()::text)
+VALUES ('<shop_uuid>', 'My Shop', now()::text, now()::text)
 ON CONFLICT (uuid) DO NOTHING;
 
 -- 2. Find your user ID:
@@ -313,7 +315,7 @@ SELECT id, email FROM auth.users;
 
 -- 3. Add as owner (use the exact email from step 2):
 INSERT INTO public.shop_members (shop_id, user_id, role)
-SELECT 'local-shop', id, 'owner'
+SELECT '<shop_uuid>', id, 'owner'
 FROM auth.users WHERE email = 'your-exact-email@example.com'
 ON CONFLICT (shop_id, user_id) DO UPDATE SET role = 'owner';
 

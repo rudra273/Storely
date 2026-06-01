@@ -201,7 +201,7 @@ class _SupplierProfileSheetState extends State<_SupplierProfileSheet> {
       SupplierProfile(
         id: current?.id,
         uuid: current?.uuid,
-        shopId: current?.shopId ?? 'local-shop',
+        shopId: current?.shopId ?? '',
         name: _nameCtrl.text.trim(),
         phone: _cleanOptional(_phoneCtrl.text),
         email: _cleanOptional(_emailCtrl.text),

@@ -3,20 +3,32 @@ part of 'database_helper.dart';
 mixin DatabaseBills {
   Future<Database> get database;
   Future<void> syncCustomersFromBills(DatabaseExecutor executor);
+  Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
+  Future<void> _syncProductQuantityCache(
+    DatabaseExecutor executor,
+    int productId,
+  );
 
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
     return db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
       final billUuid = bill.uuid.isEmpty ? _newUuid() : bill.uuid;
       final billNumber = bill.billNumber.isEmpty
-          ? await _nextBillNumber(txn, bill.createdAt)
-          : bill.billNumber;
+          ? await _allocateBillNumber(txn, bill.createdAt, shopId: shopId)
+          : _BillNumberAllocation(
+              number: bill.billNumber,
+              seriesUuid: bill.invoiceSeriesUuid,
+            );
       final customerInfo = await _upsertCustomerForBill(txn, bill);
       final billMap = {
         ...bill.toMap(),
         'uuid': billUuid,
-        'shop_id': bill.shopId.isEmpty ? _defaultShopId : bill.shopId,
-        'bill_number': billNumber,
+        'shop_id': bill.shopId.isEmpty || bill.shopId == _legacyShopId
+            ? shopId
+            : bill.shopId,
+        'bill_number': billNumber.number,
+        'invoice_series_uuid': billNumber.seriesUuid,
         'customer_id': customerInfo?.id,
         'customer_uuid': customerInfo?.uuid,
         'updated_at': _nowIso(),
@@ -26,7 +38,9 @@ mixin DatabaseBills {
         final itemMap = {
           ...item.toMap(billId, billUuid: billUuid),
           'uuid': item.uuid.isEmpty ? _newUuid() : item.uuid,
-          'shop_id': item.shopId.isEmpty ? _defaultShopId : item.shopId,
+          'shop_id': item.shopId.isEmpty || item.shopId == _legacyShopId
+              ? shopId
+              : item.shopId,
           'bill_uuid': billUuid,
           'created_at': bill.createdAt.toIso8601String(),
           'updated_at': _nowIso(),
@@ -43,7 +57,9 @@ mixin DatabaseBills {
       if (bill.paidAmount > 0) {
         await txn.insert('bill_payments', {
           'uuid': _newUuid(),
-          'shop_id': bill.shopId.isEmpty ? _defaultShopId : bill.shopId,
+          'shop_id': bill.shopId.isEmpty || bill.shopId == _legacyShopId
+              ? shopId
+              : bill.shopId,
           'bill_uuid': billUuid,
           'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
           'payment_method': bill.paymentMethod,
@@ -96,6 +112,7 @@ mixin DatabaseBills {
     final now = _nowIso();
 
     await db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
       if (phone != null) {
         final duplicate = await txn.query(
           'customers',
@@ -104,8 +121,8 @@ mixin DatabaseBills {
               ? 'deleted_at IS NULL AND shop_id = ? AND phone = ?'
               : 'deleted_at IS NULL AND shop_id = ? AND phone = ? AND id != ?',
           whereArgs: customer.id == null
-              ? [_defaultShopId, phone]
-              : [_defaultShopId, phone, customer.id],
+              ? [shopId, phone]
+              : [shopId, phone, customer.id],
           limit: 1,
         );
         if (duplicate.isNotEmpty) {
@@ -117,8 +134,9 @@ mixin DatabaseBills {
           customer
               .copyWith(
                 uuid: customer.uuid.isEmpty ? _newUuid() : customer.uuid,
-                shopId: customer.shopId.isEmpty
-                    ? _defaultShopId
+                shopId:
+                    customer.shopId.isEmpty || customer.shopId == _legacyShopId
+                    ? shopId
                     : customer.shopId,
                 name: name,
                 phone: phone ?? '',
@@ -161,6 +179,7 @@ mixin DatabaseBills {
   }
 
   Future<int> deleteBill(int id) async {
+    await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
       final rows = await txn.query(
@@ -191,10 +210,11 @@ mixin DatabaseBills {
             movementType: StockMovementType.voidSale,
             quantityDelta: item.quantity,
             sourceType: 'bill_void',
-            sourceId: id,
-            sourceUuid: billUuid,
+            sourceDocumentType: 'bill',
+            sourceDocumentId: id,
+            sourceDocumentUuid: billUuid,
           );
-          await _adjustProductQuantity(txn, item.productId!, item.quantity);
+          await _syncProductQuantityCache(txn, item.productId!);
         }
       }
       await txn.update(
@@ -237,7 +257,7 @@ mixin DatabaseBills {
     return db.transaction((txn) async {
       final rows = await txn.query(
         'bills',
-        columns: ['uuid', 'shop_id', 'total_amount'],
+        columns: ['uuid', 'shop_id', 'total_amount', 'balance_due'],
         where: 'id = ? AND deleted_at IS NULL',
         whereArgs: [id],
         limit: 1,
@@ -245,8 +265,9 @@ mixin DatabaseBills {
       if (rows.isEmpty) return 0;
       final bill = rows.single;
       final billUuid = bill['uuid'] as String;
-      final shopId = bill['shop_id'] as String? ?? _defaultShopId;
+      final shopId = bill['shop_id'] as String? ?? await _activeShopId(txn);
       final total = (bill['total_amount'] as num).toDouble();
+      final balance = (bill['balance_due'] as num?)?.toDouble() ?? total;
       final now = _nowIso();
       if (!isPaid) {
         await txn.update(
@@ -255,12 +276,12 @@ mixin DatabaseBills {
           where: 'bill_uuid = ? AND deleted_at IS NULL',
           whereArgs: [billUuid],
         );
-      } else {
+      } else if (balance > 0.005) {
         await txn.insert('bill_payments', {
           'uuid': _newUuid(),
           'shop_id': shopId,
           'bill_uuid': billUuid,
-          'amount': total,
+          'amount': balance,
           'payment_method': paymentMethod ?? 'cash',
           'received_at': now,
           'created_at': now,
@@ -299,7 +320,8 @@ mixin DatabaseBills {
       final now = _nowIso();
       await txn.insert('bill_payments', {
         'uuid': _newUuid(),
-        'shop_id': rows.single['shop_id'] as String? ?? _defaultShopId,
+        'shop_id':
+            rows.single['shop_id'] as String? ?? await _activeShopId(txn),
         'bill_uuid': rows.single['uuid'] as String,
         'amount': amount,
         'payment_method': paymentMethod,
@@ -320,6 +342,7 @@ mixin DatabaseBills {
   }
 
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
+    await _requireAdminMutation();
     final db = await database;
     final count = await db.update(
       'bills',
@@ -347,6 +370,23 @@ mixin DatabaseBills {
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final r = await db.rawQuery(
       'SELECT COALESCE(SUM(total_amount),0) as s FROM bills WHERE deleted_at IS NULL AND created_at LIKE ?',
+      ['$today%'],
+    );
+    return (r.first['s'] as num).toDouble();
+  }
+
+  Future<double> getTodayCollected() async {
+    final db = await database;
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final r = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(p.amount), 0) AS s
+      FROM bill_payments p
+      JOIN bills b ON b.uuid = p.bill_uuid
+      WHERE p.deleted_at IS NULL
+        AND b.deleted_at IS NULL
+        AND p.received_at LIKE ?
+      ''',
       ['$today%'],
     );
     return (r.first['s'] as num).toDouble();
@@ -384,22 +424,72 @@ mixin DatabaseBills {
     return bills;
   }
 
-  Future<String> _nextBillNumber(
+  Future<_BillNumberAllocation> _allocateBillNumber(
     DatabaseExecutor executor,
-    DateTime createdAt,
-  ) async {
-    final date =
-        '${createdAt.year.toString().padLeft(4, '0')}'
-        '${createdAt.month.toString().padLeft(2, '0')}'
-        '${createdAt.day.toString().padLeft(2, '0')}';
-    const deviceId = 'local';
-    final prefix = 'SHOP-LOCAL-$deviceId-$date';
-    final rows = await executor.rawQuery(
-      'SELECT COUNT(*) + 1 AS next_seq FROM bills WHERE device_id IS NULL AND bill_number LIKE ?',
-      ['$prefix-%'],
+    DateTime createdAt, {
+    required String shopId,
+  }) async {
+    var rows = await executor.query(
+      'invoice_series',
+      where:
+          'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+      whereArgs: [shopId],
+      orderBy: 'id ASC',
+      limit: 1,
     );
-    final seq = (rows.first['next_seq'] as num?)?.toInt() ?? 1;
-    return '$prefix-${seq.toString().padLeft(4, '0')}';
+    if (rows.isEmpty) {
+      await _seedDefaultInvoiceSeries(executor);
+      rows = await executor.query(
+        'invoice_series',
+        where:
+            'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+        whereArgs: [shopId],
+        orderBy: 'id ASC',
+        limit: 1,
+      );
+    }
+    if (rows.isEmpty) {
+      throw StateError('No active invoice series is configured');
+    }
+
+    final series = rows.single;
+    final resetKey = _invoiceResetKey(
+      createdAt,
+      series['reset_period']?.toString(),
+    );
+    final storedKey = series['last_sequence_key']?.toString();
+    final sequence = storedKey == resetKey
+        ? (series['next_sequence'] as num?)?.toInt() ?? 1
+        : 1;
+    final nextSequence = sequence + 1;
+    final now = _nowIso();
+    await executor.update(
+      'invoice_series',
+      {
+        'next_sequence': nextSequence,
+        'last_sequence_key': resetKey,
+        'updated_at': now,
+      },
+      where: 'id = ?',
+      whereArgs: [series['id']],
+    );
+
+    final template =
+        series['format_template']?.toString() ??
+        'SHOP-LOCAL-{DEVICE}-{YYYY}{MM}{DD}-{SEQ}';
+    final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
+    final deviceId = series['device_id']?.toString() ?? 'local';
+    final number = _formatInvoiceNumber(
+      template: template,
+      createdAt: createdAt,
+      sequence: sequence,
+      padding: padding,
+      deviceId: deviceId,
+    );
+    return _BillNumberAllocation(
+      number: number,
+      seriesUuid: series['uuid']?.toString(),
+    );
   }
 
   Future<void> _updateBillPaymentSummary(
@@ -498,11 +588,12 @@ mixin DatabaseBills {
       movementType: StockMovementType.sale,
       quantityDelta: -item.quantity,
       sourceType: 'bill',
-      sourceId: billId,
-      sourceUuid: billUuid,
+      sourceDocumentType: 'bill',
+      sourceDocumentId: billId,
+      sourceDocumentUuid: billUuid,
       createdAt: createdAt,
     );
-    await _adjustProductQuantity(executor, item.productId!, -item.quantity);
+    await _syncProductQuantityCache(executor, item.productId!);
   }
 
   Future<void> _insertBillStockMovement(
@@ -512,40 +603,27 @@ mixin DatabaseBills {
     required String movementType,
     required double quantityDelta,
     String? sourceType,
-    int? sourceId,
-    String? sourceUuid,
+    String? sourceDocumentType,
+    int? sourceDocumentId,
+    String? sourceDocumentUuid,
     DateTime? createdAt,
   }) async {
     final now = DateTime.now().toUtc();
+    final shopId = await _activeShopId(executor);
     await executor.insert('stock_movements', {
       'uuid': _newUuid(),
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'product_id': productId,
       'product_uuid': productUuid,
       'movement_type': movementType,
       'quantity_delta': quantityDelta,
       'source_type': sourceType,
-      'source_id': sourceId,
-      'source_uuid': sourceUuid,
+      'source_document_type': sourceDocumentType,
+      'source_document_id': sourceDocumentId,
+      'source_document_uuid': sourceDocumentUuid,
       'created_at': (createdAt ?? now).toIso8601String(),
       'updated_at': now.toIso8601String(),
     });
-  }
-
-  Future<void> _adjustProductQuantity(
-    DatabaseExecutor executor,
-    int productId,
-    double delta,
-  ) async {
-    await executor.rawUpdate(
-      '''
-      UPDATE products
-      SET quantity_cache = quantity_cache + ?,
-          updated_at = ?
-      WHERE id = ?
-      ''',
-      [delta, _nowIso(), productId],
-    );
   }
 
   Future<_CustomerRef?> _upsertCustomerForBill(
@@ -580,6 +658,52 @@ String _formatDbQuantity(double value) {
             .replaceFirst(RegExp(r'\.$'), '');
 }
 
+String _invoiceResetKey(DateTime createdAt, String? resetPeriod) {
+  final year = createdAt.year.toString().padLeft(4, '0');
+  final month = createdAt.month.toString().padLeft(2, '0');
+  final day = createdAt.day.toString().padLeft(2, '0');
+  switch (resetPeriod) {
+    case 'never':
+      return 'all';
+    case 'monthly':
+      return '$year$month';
+    case 'financial_year':
+      final startYear = createdAt.month >= 4
+          ? createdAt.year
+          : createdAt.year - 1;
+      return 'FY$startYear-${(startYear + 1).toString().substring(2)}';
+    case 'daily':
+    default:
+      return '$year$month$day';
+  }
+}
+
+String _formatInvoiceNumber({
+  required String template,
+  required DateTime createdAt,
+  required int sequence,
+  required int padding,
+  required String deviceId,
+}) {
+  final year = createdAt.year.toString().padLeft(4, '0');
+  final month = createdAt.month.toString().padLeft(2, '0');
+  final day = createdAt.day.toString().padLeft(2, '0');
+  return template
+      .replaceAll('{DEVICE}', deviceId)
+      .replaceAll('{YYYY}', year)
+      .replaceAll('{YY}', year.substring(2))
+      .replaceAll('{MM}', month)
+      .replaceAll('{DD}', day)
+      .replaceAll('{SEQ}', sequence.toString().padLeft(padding, '0'));
+}
+
+class _BillNumberAllocation {
+  final String number;
+  final String? seriesUuid;
+
+  const _BillNumberAllocation({required this.number, required this.seriesUuid});
+}
+
 class _CustomerRef {
   final int id;
   final String uuid;
@@ -600,11 +724,12 @@ Future<_CustomerRef> _upsertCustomerLedger(
   required int billCountDelta,
   required String purchaseAt,
 }) async {
+  final shopId = await _activeShopId(executor);
   final existing = await executor.query(
     'customers',
     columns: ['id', 'uuid', 'name'],
     where: 'shop_id = ? AND phone = ? AND deleted_at IS NULL',
-    whereArgs: [_defaultShopId, phone],
+    whereArgs: [shopId, phone],
     limit: 1,
   );
   final now = _nowIso();
@@ -612,7 +737,7 @@ Future<_CustomerRef> _upsertCustomerLedger(
     final uuid = _newUuid();
     final id = await executor.insert('customers', {
       'uuid': uuid,
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'name': name,
       'phone': phone,
       'gstin': gstin,

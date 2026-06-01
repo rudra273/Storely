@@ -6,7 +6,8 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 16,
+      version: 18,
+      onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -18,12 +19,11 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
   }
 
+  Future<void> _configureDB(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
+  }
+
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 15) {
-      await _dropLegacySchema(db);
-      await _createCleanSchema(db);
-      return;
-    }
     await _ensureSchema(db);
   }
 
@@ -31,30 +31,6 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
     await _backfillV16Billing(db);
-  }
-
-  Future<void> _dropLegacySchema(DatabaseExecutor executor) async {
-    for (final table in [
-      'bill_items',
-      'bill_payments',
-      'bills',
-      'invoice_series',
-      'stock_movements',
-      'product_purchase_entries',
-      'products',
-      'customers',
-      'suppliers',
-      'supplier_options',
-      'categories',
-      'category_options',
-      'units',
-      'unit_options',
-      'cloud_sync_state',
-      'app_settings',
-      'shops',
-    ]) {
-      await executor.execute('DROP TABLE IF EXISTS $table');
-    }
   }
 
   Future<void> _createCleanSchema(DatabaseExecutor executor) async {
@@ -68,6 +44,7 @@ mixin DatabaseSchema {
     await _createPaymentTables(executor);
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
+    await _activeShopId(executor);
     await _seedPresetUnits(executor);
     await _seedDefaultInvoiceSeries(executor);
   }
@@ -91,10 +68,10 @@ mixin DatabaseSchema {
 
   Future<void> _createSettingsTable(DatabaseExecutor executor) async {
     await executor.execute('''
-      CREATE TABLE IF NOT EXISTS app_settings(
-        key TEXT NOT NULL,
-        shop_id TEXT NOT NULL DEFAULT 'local-shop',
-        value TEXT,
+	      CREATE TABLE IF NOT EXISTS app_settings(
+	        key TEXT NOT NULL,
+	        shop_id TEXT NOT NULL,
+	        value TEXT,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
         PRIMARY KEY (shop_id, key)
@@ -232,12 +209,14 @@ mixin DatabaseSchema {
       ON products(shop_id, updated_at)
     ''');
     await executor.execute('''
-      CREATE INDEX IF NOT EXISTS idx_products_shop_product_code
-      ON products(shop_id, product_code)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_product_code
+      ON products(shop_id, LOWER(product_code))
+      WHERE product_code IS NOT NULL AND TRIM(product_code) != '' AND deleted_at IS NULL
     ''');
     await executor.execute('''
-      CREATE INDEX IF NOT EXISTS idx_products_shop_barcode
-      ON products(shop_id, barcode)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_barcode
+      ON products(shop_id, LOWER(barcode))
+      WHERE barcode IS NOT NULL AND TRIM(barcode) != '' AND deleted_at IS NULL
     ''');
     await executor.execute('''
       CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)
@@ -475,16 +454,21 @@ mixin DatabaseSchema {
         movement_type TEXT NOT NULL,
         quantity_delta REAL NOT NULL,
         unit_cost REAL,
-        source_type TEXT,
-        source_id INTEGER,
-        source_uuid TEXT,
-        import_batch_key TEXT,
-        notes TEXT,
+	        source_type TEXT,
+	        supplier_id INTEGER,
+	        supplier_uuid TEXT,
+	        source_document_type TEXT,
+	        source_document_id INTEGER,
+	        source_document_uuid TEXT,
+	        import_batch_key TEXT,
+	        import_row_number INTEGER,
+	        notes TEXT,
         device_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
-        FOREIGN KEY (product_id) REFERENCES products(id)
+	        FOREIGN KEY (product_id) REFERENCES products(id),
+	        FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
       )
     ''');
     await executor.execute('''
@@ -496,9 +480,9 @@ mixin DatabaseSchema {
       ON stock_movements(product_id, created_at)
     ''');
     await executor.execute('''
-      CREATE INDEX IF NOT EXISTS idx_stock_movements_source
-      ON stock_movements(source_type, source_id)
-    ''');
+	      CREATE INDEX IF NOT EXISTS idx_stock_movements_source
+	      ON stock_movements(source_document_type, source_document_uuid)
+	    ''');
     await executor.execute('''
       CREATE INDEX IF NOT EXISTS idx_stock_movements_shop_updated
       ON stock_movements(shop_id, updated_at)
@@ -521,10 +505,11 @@ mixin DatabaseSchema {
 
   Future<void> _seedPresetUnits(DatabaseExecutor executor) async {
     final now = _nowIso();
+    final shopId = await _activeShopId(executor);
     for (final unit in Product.presetUnits) {
       await executor.insert('units', {
         'uuid': _newUuid(),
-        'shop_id': _defaultShopId,
+        'shop_id': shopId,
         'name': unit,
         'created_at': now,
         'updated_at': now,
@@ -533,18 +518,19 @@ mixin DatabaseSchema {
   }
 
   Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor) async {
+    final shopId = await _activeShopId(executor);
     final existing = await executor.query(
       'invoice_series',
       columns: ['id'],
       where: 'shop_id = ? AND deleted_at IS NULL',
-      whereArgs: [_defaultShopId],
+      whereArgs: [shopId],
       limit: 1,
     );
     if (existing.isNotEmpty) return;
     final now = _nowIso();
     await executor.insert('invoice_series', {
       'uuid': _newUuid(),
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'name': 'Default Local',
       'format_template': 'SHOP-LOCAL-{DEVICE}-{YYYY}{MM}{DD}-{SEQ}',
       'sequence_padding': 4,
@@ -653,7 +639,7 @@ mixin DatabaseSchema {
     for (final bill in paidBills) {
       await executor.insert('bill_payments', {
         'uuid': _newUuid(),
-        'shop_id': bill['shop_id'] ?? _defaultShopId,
+        'shop_id': bill['shop_id'] ?? await _activeShopId(executor),
         'bill_uuid': bill['uuid'],
         'amount': bill['total_amount'],
         'payment_method': bill['payment_method'] ?? 'cash',
@@ -780,7 +766,7 @@ mixin DatabaseSchema {
           await executor.insert('customers', {
             ...data,
             'uuid': _newUuid(),
-            'shop_id': _defaultShopId,
+            'shop_id': await _activeShopId(executor),
             'created_at': now,
           });
       final customerUuid =

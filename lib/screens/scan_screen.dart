@@ -99,19 +99,33 @@ class _ScanScreenState extends State<ScanScreen> {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
       final id = (data['id'] as num?)?.toInt();
+      final uuid = data['uuid'] as String?;
       final code = data['code'] as String?;
       final barcode = data['barcode'] as String?;
-      final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
-      final unit = _cleanOptionalText(data['unit'] as String?);
       final product = await DatabaseHelper.instance.findProductForBilling(
         id: id,
+        productUuid: uuid,
         itemCode: code,
         barcode: barcode,
         name: name,
       );
-      final scannedItem = product == null
-          ? BillItem(productName: name, mrp: mrp, unit: unit)
-          : await DatabaseHelper.instance.buildBillItemForProduct(product);
+      if (product == null) {
+        if (!mounted) return;
+        setState(() => _showAddedStatus = false);
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Product not found for this QR code'),
+              duration: _invalidScanCooldown,
+            ),
+          );
+        _allowNextScanAfter(_invalidScanCooldown);
+        return;
+      }
+      final scannedItem = await DatabaseHelper.instance.buildBillItemForProduct(
+        product,
+      );
       if (!mounted) return;
 
       _addBillItem(scannedItem);
@@ -239,31 +253,22 @@ class _ScanScreenState extends State<ScanScreen> {
     final percent = discountPercent.clamp(0, 100).toDouble();
     final discount = subtotal * percent / 100;
     final total = subtotal - discount;
+    final shop = await DatabaseHelper.instance.getShopProfile();
+    final gstRegistered = shop?.gstRegistered ?? false;
+    final shopStateCode = _stateCodeFromGstin(shop?.gstin);
+    final supplyStateCode = _cleanOptionalText(placeOfSupplyStateCode);
+    final interState =
+        gstRegistered &&
+        shopStateCode != null &&
+        supplyStateCode != null &&
+        shopStateCode != supplyStateCode;
     final itemCopies = _items
         .map(
-          (item) => BillItem(
-            uuid: item.uuid,
-            shopId: item.shopId,
-            productId: item.productId,
-            productUuid: item.productUuid,
-            productName: item.productName,
-            hsnCodeSnapshot: item.hsnCodeSnapshot,
-            hsnTypeSnapshot: item.hsnTypeSnapshot,
-            mrp: item.mrp,
-            unit: item.unit,
-            purchasePriceSnapshot: item.purchasePriceSnapshot,
-            sellingPriceSnapshot: item.sellingPriceSnapshot,
-            costSnapshot: item.costSnapshot,
-            profitSnapshot: item.profitSnapshot,
-            commissionSnapshot: item.commissionSnapshot,
-            gstSnapshot: item.gstSnapshot,
-            gstPercentSnapshot: item.gstPercentSnapshot,
-            taxableValueSnapshot: item.taxableValueSnapshot,
-            cgstAmountSnapshot: item.cgstAmountSnapshot,
-            sgstAmountSnapshot: item.sgstAmountSnapshot,
-            igstAmountSnapshot: item.igstAmountSnapshot,
-            wasDirectPrice: item.wasDirectPrice,
-            quantity: item.quantity,
+          (item) => _taxAdjustedItemCopy(
+            item,
+            discountPercent: percent,
+            gstRegistered: gstRegistered,
+            interState: interState,
           ),
         )
         .toList();
@@ -306,6 +311,52 @@ class _ScanScreenState extends State<ScanScreen> {
     } finally {
       if (mounted) setState(() => _isSavingBill = false);
     }
+  }
+
+  BillItem _taxAdjustedItemCopy(
+    BillItem item, {
+    required double discountPercent,
+    required bool gstRegistered,
+    required bool interState,
+  }) {
+    final quantity = item.quantity;
+    final gstPercent = item.gstPercentSnapshot ?? 0.0;
+    final discountFactor = (1 - discountPercent / 100).clamp(0.0, 1.0);
+    final discountedUnitGross = item.sellingPriceSnapshot * discountFactor;
+    final taxableUnit = gstRegistered && gstPercent > 0
+        ? discountedUnitGross / (1 + gstPercent / 100)
+        : discountedUnitGross;
+    final gstUnit = gstRegistered
+        ? (discountedUnitGross - taxableUnit).clamp(0.0, double.infinity)
+        : 0.0;
+    final cgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
+    final sgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
+    final igstUnit = gstRegistered && interState ? gstUnit : 0.0;
+
+    return BillItem(
+      uuid: item.uuid,
+      shopId: item.shopId,
+      productId: item.productId,
+      productUuid: item.productUuid,
+      productName: item.productName,
+      hsnCodeSnapshot: item.hsnCodeSnapshot,
+      hsnTypeSnapshot: item.hsnTypeSnapshot,
+      mrp: item.mrp,
+      unit: item.unit,
+      purchasePriceSnapshot: item.purchasePriceSnapshot,
+      sellingPriceSnapshot: item.sellingPriceSnapshot,
+      costSnapshot: item.costSnapshot,
+      profitSnapshot: item.profitSnapshot,
+      commissionSnapshot: item.commissionSnapshot,
+      gstSnapshot: _roundMoney(gstUnit),
+      gstPercentSnapshot: item.gstPercentSnapshot,
+      taxableValueSnapshot: _roundMoney(taxableUnit),
+      cgstAmountSnapshot: _roundMoney(cgstUnit),
+      sgstAmountSnapshot: _roundMoney(sgstUnit),
+      igstAmountSnapshot: _roundMoney(igstUnit),
+      wasDirectPrice: item.wasDirectPrice,
+      quantity: quantity,
+    );
   }
 
   Future<void> _openBillSheet() async {
@@ -845,6 +896,15 @@ class _ScanScreenState extends State<ScanScreen> {
     if (trimmed == null || trimmed.isEmpty || trimmed == '+91') return null;
     return trimmed;
   }
+
+  String? _stateCodeFromGstin(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.length < 2) return null;
+    final code = trimmed.substring(0, 2);
+    return RegExp(r'^\d{2}$').hasMatch(code) ? code : null;
+  }
+
+  double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 
   List<Customer> _matchingCustomers(
     List<Customer> customers,

@@ -43,7 +43,9 @@ class KpiSectionHeader extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Center(child: Text(emoji, style: const TextStyle(fontSize: 20))),
+            child: Center(
+              child: Text(emoji, style: const TextStyle(fontSize: 20)),
+            ),
           ),
           const SizedBox(width: 12),
           Text(
@@ -92,14 +94,14 @@ class _PanelTitle extends StatelessWidget {
   const _PanelTitle(this.text);
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: AppColors.navy,
-          letterSpacing: 0.2,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w700,
+      color: AppColors.navy,
+      letterSpacing: 0.2,
+    ),
+  );
 }
 
 // ── Empty State ──────────────────────────────────────────────────────────────
@@ -118,8 +120,11 @@ class KpiEmpty extends StatelessWidget {
           Center(
             child: Column(
               children: [
-                Icon(Icons.bar_chart_rounded,
-                    size: 36, color: AppColors.textMuted.withValues(alpha: 0.3)),
+                Icon(
+                  Icons.bar_chart_rounded,
+                  size: 36,
+                  color: AppColors.textMuted.withValues(alpha: 0.3),
+                ),
                 const SizedBox(height: 8),
                 const Text(
                   'No data available',
@@ -240,8 +245,7 @@ class KpiHorizBarList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return KpiEmpty(title: title);
-    final maxVal =
-        items.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
+    final maxVal = items.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
     final color = barColor ?? AppColors.amber;
     return KpiPanel(
       child: Column(
@@ -250,8 +254,9 @@ class KpiHorizBarList extends StatelessWidget {
           _PanelTitle(title),
           const SizedBox(height: 14),
           ...items.map((item) {
-            final fraction =
-                maxVal <= 0 ? 0.0 : (item.value / maxVal).clamp(0.0, 1.0);
+            final fraction = maxVal <= 0
+                ? 0.0
+                : (item.value / maxVal).clamp(0.0, 1.0);
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Column(
@@ -413,8 +418,7 @@ class KpiBarChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return KpiEmpty(title: title);
-    final maxVal =
-        data.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
+    final maxVal = data.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
     final color = barColor ?? AppColors.navy;
     return KpiPanel(
       child: Column(
@@ -433,16 +437,15 @@ class KpiBarChart extends StatelessWidget {
                   touchTooltipData: BarTouchTooltipData(
                     getTooltipColor: (_) =>
                         AppColors.navy.withValues(alpha: 0.9),
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem(
-                      isRupee
-                          ? fmtRupee(rod.toY)
-                          : fmtNum(rod.toY),
-                      const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) =>
+                        BarTooltipItem(
+                          isRupee ? fmtRupee(rod.toY) : fmtNum(rod.toY),
+                          const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                   ),
                 ),
                 titlesData: FlTitlesData(
@@ -465,8 +468,9 @@ class KpiBarChart extends StatelessWidget {
                           return const SizedBox();
                         }
                         final lbl = data[i].label;
-                        final short =
-                            lbl.length > 5 ? lbl.substring(0, 5) : lbl;
+                        final short = lbl.length > 5
+                            ? lbl.substring(0, 5)
+                            : lbl;
                         return Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
@@ -484,10 +488,8 @@ class KpiBarChart extends StatelessWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) => const FlLine(
-                    color: AppColors.creamDark,
-                    strokeWidth: 1,
-                  ),
+                  getDrawingHorizontalLine: (_) =>
+                      const FlLine(color: AppColors.creamDark, strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 barGroups: data.asMap().entries.map((e) {
@@ -530,8 +532,7 @@ class KpiLineChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return KpiEmpty(title: title);
-    final maxVal =
-        data.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
+    final maxVal = data.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
     return KpiPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -550,24 +551,24 @@ class KpiLineChart extends StatelessWidget {
                     getTooltipColor: (_) =>
                         AppColors.navy.withValues(alpha: 0.9),
                     getTooltipItems: (spots) => spots
-                        .map((s) => LineTooltipItem(
-                              isRupee ? fmtRupee(s.y) : fmtNum(s.y),
-                              const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ))
+                        .map(
+                          (s) => LineTooltipItem(
+                            isRupee ? fmtRupee(s.y) : fmtNum(s.y),
+                            const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        )
                         .toList(),
                   ),
                 ),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) => const FlLine(
-                    color: AppColors.creamDark,
-                    strokeWidth: 1,
-                  ),
+                  getDrawingHorizontalLine: (_) =>
+                      const FlLine(color: AppColors.creamDark, strokeWidth: 1),
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: const AxisTitles(
@@ -583,16 +584,19 @@ class KpiLineChart extends StatelessWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 24,
-                      interval:
-                          (data.length / 5.0).ceilToDouble().clamp(1, 999),
+                      interval: (data.length / 5.0).ceilToDouble().clamp(
+                        1,
+                        999,
+                      ),
                       getTitlesWidget: (val, _) {
                         final i = val.toInt();
                         if (i < 0 || i >= data.length) {
                           return const SizedBox();
                         }
                         final lbl = data[i].label;
-                        final short =
-                            lbl.length > 5 ? lbl.substring(lbl.length - 5) : lbl;
+                        final short = lbl.length > 5
+                            ? lbl.substring(lbl.length - 5)
+                            : lbl;
                         return Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
@@ -620,12 +624,13 @@ class KpiLineChart extends StatelessWidget {
                     barWidth: 3,
                     dotData: FlDotData(
                       show: data.length <= 12,
-                      getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
-                        radius: 3,
-                        color: AppColors.amber,
-                        strokeColor: Colors.white,
-                        strokeWidth: 2,
-                      ),
+                      getDotPainter: (spot, percent, bar, index) =>
+                          FlDotCirclePainter(
+                            radius: 3,
+                            color: AppColors.amber,
+                            strokeColor: Colors.white,
+                            strokeWidth: 2,
+                          ),
                     ),
                     belowBarData: BarAreaData(
                       show: true,
@@ -664,14 +669,14 @@ class KpiGaugeCard extends StatelessWidget {
       c = value >= 70
           ? AppColors.success
           : value >= 40
-              ? AppColors.amber
-              : AppColors.error;
+          ? AppColors.amber
+          : AppColors.error;
     } else {
       c = value <= 5
           ? AppColors.success
           : value <= 15
-              ? AppColors.amber
-              : AppColors.error;
+          ? AppColors.amber
+          : AppColors.error;
     }
     return KpiPanel(
       child: Column(
@@ -775,11 +780,14 @@ class KpiDataTableCard extends StatelessWidget {
               Expanded(child: _PanelTitle(title)),
               if (badgeCount != null)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: (badgeColor ?? AppColors.error)
-                        .withValues(alpha: 0.12),
+                    color: (badgeColor ?? AppColors.error).withValues(
+                      alpha: 0.12,
+                    ),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -806,9 +814,7 @@ class KpiDataTableCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
                 color: AppColors.textMuted,
               ),
-              columns: columns
-                  .map((c) => DataColumn(label: Text(c)))
-                  .toList(),
+              columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
               rows: rows.map((r) {
                 return DataRow(
                   cells: r.asMap().entries.map((e) {

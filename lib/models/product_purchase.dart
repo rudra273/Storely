@@ -6,6 +6,7 @@ class StockMovementType {
   static const adjustment = 'adjustment';
   static const returnIn = 'return';
   static const voidSale = 'void';
+  static const stocktake = 'stocktake';
 }
 
 class StockMovement {
@@ -18,9 +19,13 @@ class StockMovement {
   final double quantityDelta;
   final double? unitCost;
   final String? sourceType;
-  final int? sourceId;
-  final String? sourceUuid;
+  final int? supplierId;
+  final String? supplierUuid;
+  final String? sourceDocumentType;
+  final int? sourceDocumentId;
+  final String? sourceDocumentUuid;
   final String? importBatchKey;
+  final int? importRowNumber;
   final String? notes;
   final String? deviceId;
   final DateTime createdAt;
@@ -37,9 +42,13 @@ class StockMovement {
     required this.quantityDelta,
     this.unitCost,
     this.sourceType,
-    this.sourceId,
-    this.sourceUuid,
+    this.supplierId,
+    this.supplierUuid,
+    this.sourceDocumentType,
+    this.sourceDocumentId,
+    this.sourceDocumentUuid,
     this.importBatchKey,
+    this.importRowNumber,
     this.notes,
     this.deviceId,
     required this.createdAt,
@@ -59,9 +68,13 @@ class StockMovement {
       quantityDelta: (map['quantity_delta'] as num).toDouble(),
       unitCost: (map['unit_cost'] as num?)?.toDouble(),
       sourceType: map['source_type'] as String?,
-      sourceId: map['source_id'] as int?,
-      sourceUuid: map['source_uuid'] as String?,
+      supplierId: map['supplier_id'] as int?,
+      supplierUuid: map['supplier_uuid'] as String?,
+      sourceDocumentType: map['source_document_type'] as String?,
+      sourceDocumentId: map['source_document_id'] as int?,
+      sourceDocumentUuid: map['source_document_uuid'] as String?,
       importBatchKey: map['import_batch_key'] as String?,
+      importRowNumber: map['import_row_number'] as int?,
       notes: map['notes'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,

@@ -16,6 +16,7 @@ const storelyCloudTables = [
 
 mixin DatabaseSync {
   Future<Database> get database;
+  Future<void> rebuildAllProductQuantityCaches(DatabaseExecutor executor);
 
   Future<String?> getCloudSyncState(String key) async {
     final db = await database;
@@ -43,10 +44,24 @@ mixin DatabaseSync {
     String? updatedAfter,
   }) async {
     final db = await database;
+    final shopId = await _activeShopId(db);
+    final whereParts = <String>[];
+    final whereArgs = <Object?>[];
+    if (table == 'shops') {
+      whereParts.add('uuid = ?');
+      whereArgs.add(shopId);
+    } else if (table != 'profiles' && table != 'cloud_sync_state') {
+      whereParts.add('shop_id = ?');
+      whereArgs.add(shopId);
+    }
+    if (updatedAfter != null) {
+      whereParts.add('updated_at > ?');
+      whereArgs.add(updatedAfter);
+    }
     final rows = await db.query(
       table,
-      where: updatedAfter == null ? null : 'updated_at > ?',
-      whereArgs: updatedAfter == null ? null : [updatedAfter],
+      where: whereParts.isEmpty ? null : whereParts.join(' AND '),
+      whereArgs: whereArgs.isEmpty ? null : whereArgs,
       orderBy: 'updated_at ASC',
     );
     final mapped = <Map<String, dynamic>>[];
@@ -54,6 +69,31 @@ mixin DatabaseSync {
       mapped.add(await _toCloudMap(db, table, row));
     }
     return mapped;
+  }
+
+  Future<bool> hasLocalBusinessDataForCloud() async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    for (final table in [
+      'categories',
+      'suppliers',
+      'customers',
+      'products',
+      'bills',
+      'bill_items',
+      'bill_payments',
+      'stock_movements',
+    ]) {
+      final rows = await db.query(
+        table,
+        columns: ['rowid'],
+        where: 'shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [shopId],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return true;
+    }
+    return false;
   }
 
   Future<void> cloudImportRows(
@@ -73,6 +113,9 @@ mixin DatabaseSync {
         final uuid = localMap['uuid']?.toString();
         if (uuid == null || uuid.isEmpty) continue;
         await _upsertUuidRow(txn, table, uuid, localMap);
+      }
+      if (table == 'stock_movements') {
+        await rebuildAllProductQuantityCaches(txn);
       }
     });
   }
@@ -116,7 +159,15 @@ mixin DatabaseSync {
       case 'stock_movements':
         map
           ..remove('product_id')
-          ..remove('source_id');
+          ..remove('supplier_id')
+          ..remove('source_document_id')
+          ..['supplier_uuid'] =
+              map['supplier_uuid'] ??
+              await _uuidForId(
+                executor,
+                'suppliers',
+                row['supplier_id'] as int?,
+              );
         break;
     }
     return map;
@@ -181,11 +232,12 @@ mixin DatabaseSync {
         if (productId == null) return null;
         map
           ..['product_id'] = productId
-          ..['source_id'] = await _idForUuid(
+          ..['supplier_id'] = await _idForUuid(
             executor,
-            _sourceTable(row['source_type']?.toString()),
-            row['source_uuid']?.toString(),
-          );
+            'suppliers',
+            row['supplier_uuid']?.toString(),
+          )
+          ..remove('source_document_id');
         break;
     }
     return map;
@@ -305,17 +357,4 @@ Future<int?> _idForUuid(
     limit: 1,
   );
   return rows.isEmpty ? null : rows.single['id'] as int?;
-}
-
-String? _sourceTable(String? sourceType) {
-  switch (sourceType) {
-    case 'bill':
-    case 'bill_void':
-      return 'bills';
-    case 'manual':
-    case 'import':
-      return 'suppliers';
-    default:
-      return null;
-  }
 }

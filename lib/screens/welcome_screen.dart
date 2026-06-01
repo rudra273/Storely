@@ -46,7 +46,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.xxl, AppSpacing.xxl, AppSpacing.xxl, AppSpacing.xxl),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xxl,
+            AppSpacing.xxl,
+            AppSpacing.xxl,
+            AppSpacing.xxl,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

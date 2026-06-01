@@ -239,7 +239,7 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
       Customer(
         id: current?.id,
         uuid: current?.uuid ?? '',
-        shopId: current?.shopId ?? 'local-shop',
+        shopId: current?.shopId ?? '',
         name: _nameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
         email: _cleanOptional(_emailCtrl.text),

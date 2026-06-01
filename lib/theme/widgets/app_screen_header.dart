@@ -26,7 +26,11 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => topPadding + (subtitle != null ? 64 : 48);
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
     final range = maxExtent - minExtent;
     final collapsed = range == 0 ? 1.0 : (shrinkOffset / range).clamp(0.0, 1.0);
     final expanded = 1.0 - collapsed;
@@ -97,7 +101,10 @@ PreferredSizeWidget navyAppBar({
   bool showBack = true,
 }) {
   return AppBar(
-    title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
+    title: Text(
+      title,
+      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
+    ),
     backgroundColor: AppColors.navy,
     foregroundColor: Colors.white,
     elevation: 0,

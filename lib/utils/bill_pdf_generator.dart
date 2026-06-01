@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -11,10 +13,19 @@ class BillPdfGenerator {
   static Future<Uint8List> generate({
     required Bill bill,
     required ShopProfile? shop,
-  }) {
+  }) async {
+    WidgetsFlutterBinding.ensureInitialized();
+    final fontData = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
+    final boldFontData = await rootBundle.load(
+      'assets/fonts/NotoSans-Bold.ttf',
+    );
     final pdf = pw.Document(
       title: _billTitle(bill),
       author: shop?.name ?? 'Storely',
+      theme: pw.ThemeData.withFont(
+        base: pw.Font.ttf(fontData),
+        bold: pw.Font.ttf(boldFontData),
+      ),
     );
     final gstRegistered = shop?.gstRegistered ?? false;
 
@@ -152,9 +163,7 @@ class BillPdfGenerator {
       final index = entry.key + 1;
       final item = entry.value;
       final gst = gstRegistered ? item.totalGst : 0.0;
-      final taxable = (item.subtotal - gst)
-          .clamp(0, double.infinity)
-          .toDouble();
+      final taxable = gstRegistered ? item.totalTaxableValue : item.subtotal;
       return [
         '$index',
         item.productName,
@@ -198,11 +207,11 @@ class BillPdfGenerator {
 
   static pw.Widget _totals(Bill bill, {required bool gstRegistered}) {
     final gstTotal = gstRegistered
-        ? bill.items.fold(0.0, (sum, item) => sum + item.totalGst)
+        ? bill.cgstAmount + bill.sgstAmount + bill.igstAmount
         : 0.0;
-    final taxableTotal = (bill.subtotalAmount - gstTotal)
-        .clamp(0, double.infinity)
-        .toDouble();
+    final taxableTotal = gstRegistered
+        ? bill.taxableAmount
+        : bill.subtotalAmount;
 
     return pw.Align(
       alignment: pw.Alignment.centerRight,

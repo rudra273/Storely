@@ -38,10 +38,20 @@ class CompactListRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(title, style: AppText.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(
+                      title,
+                      style: AppText.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
-                      Text(subtitle!, style: AppText.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(
+                        subtitle!,
+                        style: AppText.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ],
                 ),

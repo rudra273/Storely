@@ -44,7 +44,7 @@ class Bill {
   Bill({
     this.id,
     String? uuid,
-    this.shopId = 'local-shop',
+    this.shopId = '',
     String? billNumber,
     this.invoiceSeriesUuid,
     this.billType = typeB2c,
@@ -147,7 +147,7 @@ class Bill {
     return Bill(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
-      shopId: map['shop_id'] as String? ?? 'local-shop',
+      shopId: map['shop_id'] as String? ?? '',
       billNumber: map['bill_number'] as String? ?? '',
       invoiceSeriesUuid: map['invoice_series_uuid'] as String?,
       billType: map['bill_type'] as String? ?? typeB2c,
@@ -258,7 +258,7 @@ class BillItem {
   BillItem({
     this.id,
     String? uuid,
-    this.shopId = 'local-shop',
+    this.shopId = '',
     this.billId,
     this.billUuid,
     this.productId,
@@ -338,7 +338,7 @@ class BillItem {
     return BillItem(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
-      shopId: map['shop_id'] as String? ?? 'local-shop',
+      shopId: map['shop_id'] as String? ?? '',
       billId: map['bill_id'] as int?,
       billUuid: map['bill_uuid'] as String?,
       productId: map['product_id'] as int?,
@@ -400,7 +400,7 @@ class InvoiceSeries {
   const InvoiceSeries({
     this.id,
     this.uuid = '',
-    this.shopId = 'local-shop',
+    this.shopId = '',
     required this.name,
     required this.formatTemplate,
     this.sequencePadding = 4,
@@ -420,7 +420,7 @@ class InvoiceSeries {
   factory InvoiceSeries.fromMap(Map<String, dynamic> map) => InvoiceSeries(
     id: map['id'] as int?,
     uuid: map['uuid'] as String? ?? '',
-    shopId: map['shop_id'] as String? ?? 'local-shop',
+    shopId: map['shop_id'] as String? ?? '',
     name: map['name'] as String,
     formatTemplate: map['format_template'] as String,
     sequencePadding: map['sequence_padding'] as int? ?? 4,
@@ -480,7 +480,7 @@ class BillPayment {
   BillPayment({
     this.id,
     this.uuid = '',
-    this.shopId = 'local-shop',
+    this.shopId = '',
     required this.billUuid,
     required this.amount,
     this.paymentMethod = 'cash',
@@ -500,7 +500,7 @@ class BillPayment {
     return BillPayment(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
-      shopId: map['shop_id'] as String? ?? 'local-shop',
+      shopId: map['shop_id'] as String? ?? '',
       billUuid: map['bill_uuid'] as String,
       amount: (map['amount'] as num).toDouble(),
       paymentMethod: map['payment_method'] as String? ?? 'cash',

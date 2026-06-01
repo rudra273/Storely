@@ -26,10 +26,7 @@ class StatusPill extends StatelessWidget {
     final (bg, fg) = _colors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: AppRadius.smRadius,
-      ),
+      decoration: BoxDecoration(color: bg, borderRadius: AppRadius.smRadius),
       child: Text(
         label,
         style: TextStyle(
@@ -43,12 +40,33 @@ class StatusPill extends StatelessWidget {
   }
 
   (Color bg, Color fg) get _colors => switch (variant) {
-    PillVariant.out => (AppColors.error.withValues(alpha: 0.1), AppColors.error),
-    PillVariant.low => (AppColors.amber.withValues(alpha: 0.12), AppColors.amber),
-    PillVariant.paid => (AppColors.success.withValues(alpha: 0.1), AppColors.success),
-    PillVariant.unpaid => (AppColors.error.withValues(alpha: 0.1), AppColors.error),
-    PillVariant.success => (AppColors.success.withValues(alpha: 0.1), AppColors.success),
-    PillVariant.warning => (AppColors.amber.withValues(alpha: 0.12), AppColors.amber),
-    PillVariant.info => (AppColors.navy.withValues(alpha: 0.08), AppColors.navy),
+    PillVariant.out => (
+      AppColors.error.withValues(alpha: 0.1),
+      AppColors.error,
+    ),
+    PillVariant.low => (
+      AppColors.amber.withValues(alpha: 0.12),
+      AppColors.amber,
+    ),
+    PillVariant.paid => (
+      AppColors.success.withValues(alpha: 0.1),
+      AppColors.success,
+    ),
+    PillVariant.unpaid => (
+      AppColors.error.withValues(alpha: 0.1),
+      AppColors.error,
+    ),
+    PillVariant.success => (
+      AppColors.success.withValues(alpha: 0.1),
+      AppColors.success,
+    ),
+    PillVariant.warning => (
+      AppColors.amber.withValues(alpha: 0.12),
+      AppColors.amber,
+    ),
+    PillVariant.info => (
+      AppColors.navy.withValues(alpha: 0.08),
+      AppColors.navy,
+    ),
   };
 }

@@ -4,6 +4,8 @@ import 'package:storely/models/shop_profile.dart';
 import 'package:storely/utils/bill_pdf_generator.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('generates printable bill PDF bytes', () async {
     final bill = Bill(
       billNumber: 'SHOP-LOCAL-local-20260426-0001',

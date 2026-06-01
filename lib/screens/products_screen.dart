@@ -1514,7 +1514,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       final draft = Product(
         id: product?.id,
         uuid: product?.uuid,
-        shopId: product?.shopId ?? 'local-shop',
+        shopId: product?.shopId ?? '',
         productCode: productCodeCtrl.text,
         barcode: barcodeCtrl.text,
         name: nameCtrl.text.trim().isEmpty ? 'Product' : nameCtrl.text.trim(),
@@ -1728,7 +1728,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   final p = Product(
                     id: product?.id,
                     uuid: product?.uuid,
-                    shopId: product?.shopId ?? 'local-shop',
+                    shopId: product?.shopId ?? '',
                     productCode: _optionalControllerText(productCodeCtrl),
                     barcode: _optionalControllerText(barcodeCtrl),
                     hsnCode: _optionalControllerText(hsnCtrl),

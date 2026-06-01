@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _productCount = 0;
   int _todayBillCount = 0;
   double _todaySales = 0;
+  double _todayCollected = 0;
   String? _shopName;
 
   @override
@@ -49,12 +50,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final shopName = await db.getShopName();
     final lowStockThreshold = await db.getLowStockThreshold();
     final todaySales = await db.getTodaySales();
+    final todayCollected = await db.getTodayCollected();
     final todayBillCount = await db.getTodayBillCount();
     final unpaidBills = await db.getUnpaidBills(limit: 3);
     if (!mounted) return;
     setState(() {
       _productCount = products.length;
       _todaySales = todaySales;
+      _todayCollected = todayCollected;
       _todayBillCount = todayBillCount;
       _unpaidBills = unpaidBills;
       _shopName = shopName;
@@ -102,7 +105,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _SalesHero(sales: _todaySales, billCount: _todayBillCount),
+                    _SalesHero(
+                      sales: _todaySales,
+                      collected: _todayCollected,
+                      billCount: _todayBillCount,
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     _StatsRow(
                       productCount: _productCount,
@@ -172,9 +179,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _SalesHero extends StatelessWidget {
   final double sales;
+  final double collected;
   final int billCount;
 
-  const _SalesHero({required this.sales, required this.billCount});
+  const _SalesHero({
+    required this.sales,
+    required this.collected,
+    required this.billCount,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +202,7 @@ class _SalesHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "TODAY'S SALES",
+                  "TODAY'S BOOKED SALES",
                   style: AppText.label.copyWith(
                     color: Colors.white60,
                     letterSpacing: 1.0,
@@ -208,7 +220,7 @@ class _SalesHero extends StatelessWidget {
                 Text(
                   billCount == 0
                       ? 'No bills yet today'
-                      : '$billCount bill${billCount != 1 ? 's' : ''} created',
+                      : '₹${collected.toStringAsFixed(2)} collected, $billCount bill${billCount != 1 ? 's' : ''} created',
                   style: AppText.caption.copyWith(color: Colors.white60),
                 ),
               ],

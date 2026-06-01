@@ -110,7 +110,7 @@ void main() {
     });
 
     test(
-      'duplicate rows in one import are summed by product identity',
+      'duplicate rows in one import retain row-level purchase movements',
       () async {
         final result = await db.mergeProducts([
           Product(
@@ -135,8 +135,9 @@ void main() {
         expect(result.added, 1);
         expect(products.single.quantity, 15);
         expect(products.single.purchasePrice, 310);
-        expect(rows, hasLength(1));
-        expect(rows.single['quantity_delta'], 15);
+        expect(rows, hasLength(2));
+        expect(rows.map((row) => row['quantity_delta']), [10, 5]);
+        expect(rows.map((row) => row['import_row_number']), [1, 2]);
       },
     );
 
@@ -307,7 +308,7 @@ void main() {
     });
 
     test(
-      'replace import resets old purchase history for replaced product',
+      'replace import keeps purchase history and records a stocktake delta',
       () async {
         await db.insertProduct(
           Product(name: 'Replace Me', mrp: 50, purchasePrice: 40, quantity: 10),
@@ -320,11 +321,15 @@ void main() {
         final products = await db.getAllProducts();
         final summaries = await db.getProductPurchaseSummaries();
         final rows = await _purchaseRows();
+        final stockRows = await _stockRows();
 
         expect(products.single.quantity, 3);
-        expect(summaries[products.single.id]!.totalPurchased, 3);
+        expect(summaries[products.single.id]!.totalPurchased, 10);
         expect(rows, hasLength(1));
-        expect(rows.single['quantity_delta'], 3);
+        expect(rows.single['quantity_delta'], 10);
+        expect(stockRows, hasLength(2));
+        expect(stockRows.last['movement_type'], 'stocktake');
+        expect(stockRows.last['quantity_delta'], -7);
       },
     );
 

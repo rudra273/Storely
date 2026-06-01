@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'db/database_helper.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
@@ -109,7 +109,10 @@ class StorelyApp extends StatelessWidget {
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.md,
             ),
-            textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
@@ -121,13 +124,19 @@ class StorelyApp extends StatelessWidget {
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.md,
             ),
-            textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: AppColors.amber,
-            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
@@ -179,22 +188,23 @@ class _AppGateState extends State<AppGate> {
   }
 
   Future<void> _checkFirstLaunch() async {
-    final prefs = await SharedPreferences.getInstance();
-    final isFirst = prefs.getBool('is_first_launch') ?? true;
+    final profile = await DatabaseHelper.instance.getShopProfile();
+    final name = profile?.name.trim();
+    final needsSetup = name == null || name.isEmpty || name == 'My Shop';
     if (mounted) {
       setState(() {
-        _isFirstLaunch = isFirst;
+        _isFirstLaunch = needsSetup;
         _isLoading = false;
       });
     }
   }
 
   Future<void> _completeWelcome() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_first_launch', false);
+    final profile = await DatabaseHelper.instance.getShopProfile();
+    final name = profile?.name.trim();
     if (mounted) {
       setState(() {
-        _isFirstLaunch = false;
+        _isFirstLaunch = name == null || name.isEmpty || name == 'My Shop';
       });
     }
   }

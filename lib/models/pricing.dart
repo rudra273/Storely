@@ -137,6 +137,8 @@ class PriceBreakdown {
   final double landedCost;
   final double totalCost;
   final double profitAmount;
+  final double inputTaxAmount;
+  final double outputGstAmount;
   final double gstAmount;
   final double preGstSellingPrice;
   final double sellingPrice;
@@ -156,6 +158,8 @@ class PriceBreakdown {
     required this.landedCost,
     required this.totalCost,
     required this.profitAmount,
+    required this.inputTaxAmount,
+    required this.outputGstAmount,
     required this.gstAmount,
     required this.preGstSellingPrice,
     required this.sellingPrice,
@@ -203,13 +207,13 @@ class PricingCalculator {
               ? rawSellingPrice / (1 + gstPercent / 100)
               : rawSellingPrice
         : formulaPreGstSellingPrice;
-    final gstAmount = useProductDirect
+    final outputGstAmount = useProductDirect
         ? gstRegistered
               ? rawSellingPrice - preGstSellingPrice
-              : purchaseGst
+              : 0.0
         : gstRegistered
         ? formulaSellGst
-        : purchaseGst;
+        : 0.0;
     final profitAmount = preGstSellingPrice - totalCost;
     final resolvedMargin = totalCost == 0
         ? 0.0
@@ -228,7 +232,9 @@ class PricingCalculator {
       landedCost: landedCost,
       totalCost: totalCost,
       profitAmount: profitAmount,
-      gstAmount: gstAmount,
+      inputTaxAmount: purchaseGst,
+      outputGstAmount: outputGstAmount,
+      gstAmount: outputGstAmount,
       preGstSellingPrice: preGstSellingPrice,
       sellingPrice: rawSellingPrice,
       yourNet: profitAmount,

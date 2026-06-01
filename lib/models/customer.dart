@@ -26,7 +26,7 @@ class Customer {
   const Customer({
     this.id,
     this.uuid = '',
-    this.shopId = 'local-shop',
+    this.shopId = '',
     required this.name,
     required this.phone,
     this.email,
@@ -53,7 +53,7 @@ class Customer {
     return Customer(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
-      shopId: map['shop_id'] as String? ?? 'local-shop',
+      shopId: map['shop_id'] as String? ?? '',
       name: map['name'] as String,
       phone: map['phone'] as String? ?? '',
       email: map['email'] as String?,

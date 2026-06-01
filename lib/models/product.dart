@@ -51,7 +51,7 @@ class Product {
   Product({
     this.id,
     String? uuid,
-    this.shopId = 'local-shop',
+    this.shopId = '',
     String? itemCode,
     String? productCode,
     String? barcode,
@@ -145,7 +145,7 @@ class Product {
   factory Product.fromMap(Map<String, dynamic> map) => Product(
     id: map['id'] as int?,
     uuid: map['uuid'] as String? ?? '',
-    shopId: map['shop_id'] as String? ?? 'local-shop',
+    shopId: map['shop_id'] as String? ?? '',
     productCode: map['product_code'] as String? ?? map['item_code'] as String?,
     barcode: map['barcode'] as String?,
     name: map['name'] as String,

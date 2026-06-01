@@ -1,227 +1,71 @@
-# Storely Screen Modularization Plan
 
-## Goal
+**P0 Blockers**
+- Destructive DB upgrade: old app data is dropped for `oldVersion < 15` in [database_schema.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_schema.dart:21).  
+  Real fix: write real migrations, backup before upgrade, and never auto-drop production tables.
 
-Make the app easier to scale for production by splitting oversized screen files into focused screens, widgets, dialogs, and helpers without changing the current UI colors, layout style, text hierarchy, navigation behavior, or business functionality.
+- Cloud shop identity is hard-coded as `local-shop` in [database_helper.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_helper.dart:22) and [cloud_service.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/services/cloud_service.dart:98).  
+  Real fix: generate a real shop UUID per business, migrate local data, and use that UUID everywhere.
 
-Current health check:
-- `flutter analyze` passes with no issues.
-- Largest files:
-  - `lib/screens/products_screen.dart`: ~5030 lines
-  - `lib/screens/store_screen.dart`: ~2552 lines
-  - `lib/screens/scan_screen.dart`: ~1523 lines
-  - `lib/screens/bills_screen.dart`: ~1125 lines
-- Existing tests are present under `test/`.
+- Cloud membership can auto-join existing shop as staff in [cloud_service.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/services/cloud_service.dart:452). With `local-shop`, this is dangerous.  
+  Real fix: invitation/approval flow, server-side RLS, no automatic staff membership.
 
-Existing product backlog note:
-- Make QR code/barcode generation optional when creating printable code sheets.
+- Cloud sync is last-write-wins row sync, not domain-safe sync in [database_sync.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_sync.dart:194).  
+  Real fix: server timestamps/versioning, dependency-aware batches, conflict rules per table, and reconciliation after sync.
 
-Implementation status:
-- Completed modular extraction for Products, Store, Scan, and Bills screens.
-- Used Dart `part` files so existing private classes/helpers could move without changing behavior.
-- Verified with `flutter analyze`, `flutter test`, and `flutter build apk --release`.
+- First cloud sync can discard local rows when joining an existing cloud shop because it pulls first, then only pushes local rows newer than sync start in [cloud_service.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/services/cloud_service.dart:364).  
+  Real fix: explicit user choice: replace local, merge local, or backup and pull cloud.
 
-## Rules For The Refactor
+- Invoice numbering uses `COUNT(*) + 1` instead of `invoice_series.next_sequence` in [database_bills.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_bills.dart:387).  
+  Real fix: transactional sequence allocation from `invoice_series`, immutable numbers, device/server allocation rules.
 
-1. Keep all user-facing UI visually identical unless a bug fix absolutely requires a tiny structural change.
-2. Move code first; do not redesign.
-3. Preserve current navigation and refresh behavior from `main.dart`.
-4. Keep database APIs unchanged unless a real bug is found.
-5. Keep theme usage through existing `AppColors`, `AppText`, `AppSpacing`, `AppRadius`, `AppCard`, and related theme widgets.
-6. After each phase run:
-   - `dart format lib test`
-   - `flutter analyze`
-   - `flutter test`
-7. Commit-ready rule: every phase should leave the app compiling and runnable.
+- GST/tax math is not production-grade. Discount is not allocated into line taxable/GST totals in [scan_screen.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/screens/scan_screen.dart:271), and IGST is never used even though place of supply exists in [database_products.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_products.dart:501).  
+  Real fix: line-level tax engine: taxable value after discount, CGST/SGST vs IGST, rounding rules, immutable snapshots.
 
-## Proposed Folder Structure
+**P1 High**
+- Foreign keys are declared but likely not enforced because `openDatabase` has no `onConfigure` with `PRAGMA foreign_keys = ON` in [database_schema.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_schema.dart:7).  
+  Real fix: enable FK enforcement and fix any failing delete/import paths.
 
-```text
-lib/
-  screens/
-    products/
-      products_screen.dart
-      add_edit_product_sheet.dart
-      new_purchase_screen.dart
-      import_products_sheet.dart
-      product_filters_sheet.dart
-      stock_history_sheet.dart
-      product_bulk_actions.dart
-      product_cards.dart
-      product_editor_widgets.dart
-      product_import_widgets.dart
-      product_models.dart
-      product_formatters.dart
-    store/
-      store_screen.dart
-      shop_profile_sheet.dart
-      supplier_profile_sheet.dart
-      supplier_manager_sheet.dart
-      customer_table_sheet.dart
-      customer_profile_sheet.dart
-      pricing_settings_sheets.dart
-      cloud_setup_sheet.dart
-      store_dialogs.dart
-      store_panels.dart
-    billing/
-      bills_screen.dart
-      bill_actions.dart
-      bill_cards.dart
-      bill_dialogs.dart
-    scan/
-      scan_screen.dart
-      billing_cart_widgets.dart
-      billing_customer_sheet.dart
-      product_picker_widgets.dart
-```
+- Product barcode/code uniqueness is only app-layer; DB indexes are non-unique in [database_schema.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_schema.dart:235).  
+  Real fix: partial unique indexes for active products after duplicate cleanup.
 
-Compatibility option:
-- Keep temporary forwarding files like `lib/screens/products_screen.dart` that export `products/products_screen.dart` if changing imports all at once becomes risky.
+- Inventory source of truth is split between `quantity_cache` and `stock_movements` in [database_schema.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_schema.dart:215).  
+  Real fix: movement ledger as truth, rebuild cache from ledger, reconciliation after import/sync/void.
 
-## Phase 1: Products Screen Split
+- Replace import is still an audit workaround: it soft-deletes old purchase movements in [database_products.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_products.dart:549).  
+  Real fix: stocktake/replacement movement type and import batch table. Do not erase purchase history.
 
-Target: reduce `products_screen.dart` from ~5030 lines to a focused route/controller file of roughly 500-900 lines.
+- Stock movement `source_type/source_id` is overloaded for suppliers in [database_sync.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_sync.dart:310).  
+  Real fix: separate `supplier_uuid`, `source_document_uuid`, and `import_batch_uuid`.
 
-Move first:
-1. Private models and format helpers:
-   - `_ProductSortMode`
-   - `_PurchaseDraft`
-   - `_formatShortDate`
-   - `_formatFullDate`
-   - `_formatQuantityInput`
-   - `_optionalControllerText`
-   - `_normaliseOptionName`
-2. Pure UI widgets:
-   - product card/source/info chips
-   - bulk selection bar/action chips
-   - filter/sort buttons and active filter chips
-   - import preview table/rows
-   - product editor UI parts such as header, sections, mode pills, price controls, pricing table, dropdowns
-3. Sheets:
-   - filters sheet
-   - import preview sheet
-   - stock history sheet
-   - add/edit product sheet
-4. Full page:
-   - move `_NewPurchaseScreen` into `new_purchase_screen.dart`.
+- Import parser silently skips bad rows in [csv_importer.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/utils/csv_importer.dart:89) and strips negative signs in [csv_importer.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/utils/csv_importer.dart:536).  
+  Real fix: validate all rows, show row-level errors, reject negative/invalid quantities/prices explicitly.
 
-Important behavior to preserve:
-- Search, sort, category/supplier/date filters.
-- Bulk select, select all visible, bulk category/supplier update, bulk delete.
-- QR sheet navigation.
-- CSV import, duplicate purchase warning, replace/add/update stock behavior.
-- New purchase flow: purchase date/supplier first, then separate staging page.
-- Add/edit product validation, duplicate-name handling, restock matching, direct price vs formula price, category/global pricing inheritance.
-- Stock movement history.
+- Duplicate import row handling sums quantity but keeps only one row’s price/supplier in [database_products.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_products.dart:700).  
+  Real fix: preserve each import row as a purchase line/movement.
 
-Possible improvement that matches the request:
-- The current add/edit product editor is a bottom sheet. It can be moved into a separate file immediately.
-- After that works, decide whether to convert it from bottom sheet to a dedicated `AddEditProductScreen`. This is more visible behavior, so do it only after the no-UI-change extraction is stable.
+- Marking a partially paid bill as paid inserts a full total payment, causing overpayment in [database_bills.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_bills.dart:259).  
+  Real fix: insert only remaining balance or replace payment state intentionally.
 
-## Phase 2: Store Screen Split
+- Unknown QR JSON becomes a bill item with arbitrary name/price in [scan_screen.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/screens/scan_screen.dart:112).  
+  Real fix: signed QR or DB lookup by UUID/code only; explicit permission-gated non-stock manual item flow.
 
-Target: reduce `store_screen.dart` from ~2552 lines to a focused route/controller file of roughly 400-700 lines.
+- Staff permissions are mostly UI-level. Product/store mutations are still callable without service-layer role checks, for example product delete in [products_screen.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/screens/products_screen.dart:2489).  
+  Real fix: central permission guard in database/service layer plus server RLS.
 
-Move first:
-1. Store display widgets:
-   - section labels
-   - shop panel
-   - action rows
-   - store panels/icon widgets
-2. Cloud sync:
-   - `_CloudSyncPanel`
-   - `_CloudSetupSheet`
-   - configured summary/status message widgets
-3. Store configuration sheets:
-   - shop profile sheet
-   - supplier profile sheet
-   - supplier manager sheet
-   - global pricing sheet
-   - category pricing sheet
-4. Customer management:
-   - customer table sheet
-   - customer profile sheet
-5. Reusable dialogs:
-   - name dialog
-   - number dialog
-   - delete confirmation helper
-   - money field
+**P2 Important**
+- KPI “revenue by payment method” includes unpaid bills in [database_kpi.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_kpi.dart:41).  
+  Real fix: separate sales booked, cash collected, revenue, receivables.
 
-Important behavior to preserve:
-- Store profile editing with GST setting.
-- Category add/edit/delete.
-- Supplier add/edit/delete, including supplier profiles.
-- Pricing defaults and category pricing overrides.
-- Unit management inside pricing defaults.
-- Low-stock threshold.
-- Customer table and customer profile editing.
-- Cloud setup, sync, sign-in/sign-up/sign-out/disable.
-- Privacy/About/Analytics navigation.
+- Today sales also sums unpaid bills in [database_bills.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_bills.dart:345).  
+  Real fix: show “sales” vs “collected” separately.
 
-## Phase 3: Scan And Billing Cleanup
+- Non-GST registered pricing still stores `gstAmount` as purchase GST in [pricing.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/models/pricing.dart:206), and KPI calls it collected GST in [database_kpi.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/db/database_kpi.dart:250).  
+  Real fix: split input tax/cost from output GST collected.
 
-These are smaller than product/store, but still large enough to benefit from separation.
+- App onboarding is controlled by `SharedPreferences` only in [main.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/main.dart:181).  
+  Real fix: gate by real shop/profile/data readiness.
 
-Scan screen split:
-- Keep scan route state and billing operations in `scan_screen.dart`.
-- Move cart rows, totals/footer, manual product picker, customer/payment sheet, and mode-specific widgets into `lib/screens/scan/`.
+- PDF generation uses default PDF fonts in [bill_pdf_generator.dart](/Users/rudrapratapmohanty/Desktop/projects/Storely/lib/utils/bill_pdf_generator.dart:15). Rupee/local text can render badly.  
+  Real fix: bundle Noto Sans or another Unicode font and use it in all PDFs.
 
-Bills screen split:
-- Keep bill loading/search/refresh state in `bills_screen.dart`.
-- Move bill card/list widgets, payment dialog, WhatsApp/PDF action helpers, and formatting helpers into `lib/screens/billing/`.
-
-Important behavior to preserve:
-- Scanner cooldown behavior.
-- Manual billing flow.
-- Customer/GST details on bill creation.
-- Stock deduction and bill persistence.
-- Bill search, delete, payment recording, WhatsApp share, PDF share.
-
-## Phase 4: Verification Checklist
-
-Automated:
-1. `dart format lib test`
-2. `flutter analyze`
-3. `flutter test`
-
-Manual smoke test:
-1. Fresh app launch and bottom navigation.
-2. Products:
-   - add product
-   - edit product
-   - restock existing product
-   - import CSV
-   - filter/search/sort
-   - bulk select and update
-   - stock history
-   - QR sheet open
-3. Billing:
-   - scan/manual add item
-   - create bill
-   - record payment
-   - share bill/PDF
-4. Store:
-   - edit shop profile
-   - category/supplier/customer CRUD
-   - pricing defaults/category pricing
-   - low-stock threshold
-   - cloud setup panel opens
-5. Production check:
-   - `flutter build apk --release`
-
-## Suggested Order Of Work
-
-1. Product widgets/helpers extraction only. No behavior changes.
-2. Product sheets extraction. No behavior changes.
-3. New purchase page extraction. No behavior changes.
-4. Store widgets/helpers extraction.
-5. Store sheets extraction.
-6. Scan and bills cleanup.
-7. Optional: convert add/edit product from bottom sheet to full page if desired after the safe extraction is complete.
-
-## Risk Notes
-
-- The product add/edit sheet has many local variables and closures. Move it carefully as a callable function/widget with explicit inputs and callbacks instead of changing its logic during extraction.
-- Private Dart names cannot be imported across files. During splitting, classes/functions that move must lose the leading `_` only when they are used by another file.
-- Avoid circular imports by putting shared product models/formatters in small helper files.
-- Run analyzer after each small move; it will catch missing imports, private-name access, and callback type mismatches quickly.
+My senior-dev call: do not ship production with cloud sync enabled until P0 is fixed. If this is local-only beta, you can defer some cloud items, but invoice numbering, migration safety, tax calculation, and inventory ledger consistency still need real fixes before serious users touch it.
