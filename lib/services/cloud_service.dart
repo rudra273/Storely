@@ -199,7 +199,11 @@ class CloudService with WidgetsBindingObserver {
     state.value = const CloudState(message: 'Cloud sync disabled');
   }
 
-  Future<void> signIn(String email, String password) async {
+  Future<void> signIn(
+    String email,
+    String password, {
+    bool syncAfterAuth = true,
+  }) async {
     final activeClient = _requireClient();
     final response = await activeClient.auth.signInWithPassword(
       email: email.trim(),
@@ -210,10 +214,14 @@ class CloudService with WidgetsBindingObserver {
       message: 'Signed in',
       clearError: true,
     );
-    unawaited(syncNow(reason: 'Signed in'));
+    if (syncAfterAuth) unawaited(syncNow(reason: 'Signed in'));
   }
 
-  Future<void> signUp(String email, String password) async {
+  Future<void> signUp(
+    String email,
+    String password, {
+    bool syncAfterAuth = true,
+  }) async {
     final activeClient = _requireClient();
     final response = await activeClient.auth.signUp(
       email: email.trim(),
@@ -226,9 +234,21 @@ class CloudService with WidgetsBindingObserver {
           : 'Account created',
       clearError: true,
     );
-    if (response.session != null) {
+    if (syncAfterAuth && response.session != null) {
       unawaited(syncNow(reason: 'Signed up'));
     }
+  }
+
+  Future<bool> currentUserHasShopMembership() async {
+    final activeClient = _requireClient();
+    final user = activeClient.auth.currentUser;
+    if (user == null) return false;
+    final rows = await activeClient
+        .from('shop_members')
+        .select('shop_id')
+        .eq('user_id', user.id)
+        .limit(1);
+    return (rows as List).isNotEmpty;
   }
 
   Future<void> signOut() async {
@@ -370,7 +390,10 @@ class CloudSyncEngine {
       CloudService._lastSyncStateKey,
     );
 
-    final createdCloudShop = await _ensureCloudAccess(shopId);
+    final createdCloudShop = await _ensureCloudAccess(
+      shopId,
+      canCreateOwnerShop: await _localShopSetupIsComplete(),
+    );
     final canPushAdminTables = createdCloudShop || await _isShopAdmin(shopId);
     final pullFirst = lastSync == null && !createdCloudShop;
     if (pullFirst && await database.hasLocalBusinessDataForCloud()) {
@@ -441,7 +464,10 @@ class CloudSyncEngine {
   ///   - User is already a member (no action needed)
   ///   - User just joined an existing shop as staff (cloud is source of truth,
   ///     pull first to avoid overwriting real data with fresh defaults)
-  Future<bool> _ensureCloudAccess(String shopId) async {
+  Future<bool> _ensureCloudAccess(
+    String shopId, {
+    required bool canCreateOwnerShop,
+  }) async {
     final user = client.auth.currentUser;
     if (user == null) return false;
 
@@ -453,6 +479,12 @@ class CloudSyncEngine {
         .eq('user_id', user.id)
         .limit(1);
     if ((memberships as List).isNotEmpty) return false;
+
+    if (!canCreateOwnerShop) {
+      throw StateError(
+        'No cloud shop membership found. Ask an owner/admin to add this account, or start fresh by creating a shop first.',
+      );
+    }
 
     // User is NOT a member yet. Get local shop data.
     final shops = await database.cloudExportRows('shops');
@@ -510,6 +542,12 @@ class CloudSyncEngine {
     if ((rows as List).isEmpty) return null;
     final value = rows.first['shop_id']?.toString();
     return value == null || value.isEmpty ? null : value;
+  }
+
+  Future<bool> _localShopSetupIsComplete() async {
+    final profile = await database.getShopProfile();
+    final name = profile?.name.trim();
+    return name != null && name.isNotEmpty && name != 'My Shop';
   }
 
   /// Push shop data only if the current user is admin/owner.
