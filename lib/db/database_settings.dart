@@ -15,11 +15,12 @@ mixin DatabaseSettings {
     final profile = await getShopProfile();
     if (profile != null) return profile.name;
     final db = await database;
+    final shopId = await _activeShopId(db);
     final rows = await db.query(
       'app_settings',
       columns: ['value'],
       where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
-      whereArgs: [_defaultShopId, _shopNameKey],
+      whereArgs: [shopId, _shopNameKey],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -29,6 +30,7 @@ mixin DatabaseSettings {
   }
 
   Future<void> saveShopName(String name) async {
+    await _requireAdminMutation();
     final current = await getShopProfile();
     if (current != null) {
       await saveShopProfile(
@@ -48,13 +50,14 @@ mixin DatabaseSettings {
       return;
     }
     final db = await database;
+    final shopId = await _activeShopId(db);
     final value = _normaliseName(name);
     if (value == null) {
       throw ArgumentError('Shop name is required');
     }
     await db.insert('app_settings', {
       'key': _shopNameKey,
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'value': value,
       'updated_at': _nowIso(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -63,10 +66,11 @@ mixin DatabaseSettings {
   Future<ShopProfile?> getShopProfile() async {
     final db = await database;
     final pricing = await getGlobalPricingSettings();
+    final shopId = await _activeShopId(db);
     final rows = await db.query(
       'shops',
       where: 'deleted_at IS NULL AND uuid = ?',
-      whereArgs: [_defaultShopId],
+      whereArgs: [shopId],
       limit: 1,
     );
     if (rows.isNotEmpty) {
@@ -82,22 +86,24 @@ mixin DatabaseSettings {
   }
 
   Future<void> saveShopProfile(ShopProfile profile) async {
+    await _requireAdminMutation();
     final db = await database;
     final name = _normaliseName(profile.name);
     if (name == null) throw ArgumentError('Shop name is required');
 
     await db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
       final now = _nowIso();
       final existing = await txn.query(
         'shops',
         columns: ['id', 'uuid', 'created_at'],
         where: 'uuid = ?',
-        whereArgs: [_defaultShopId],
+        whereArgs: [shopId],
         limit: 1,
       );
       final map = profile.toMap()
         ..remove('id')
-        ..['uuid'] = _defaultShopId
+        ..['uuid'] = shopId
         ..['name'] = name
         ..['updated_at'] = now;
       if (existing.isEmpty) {
@@ -127,7 +133,7 @@ mixin DatabaseSettings {
       'app_settings',
       columns: ['value'],
       where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
-      whereArgs: [_defaultShopId, _shopNameKey],
+      whereArgs: [await _activeShopId(executor), _shopNameKey],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -138,11 +144,12 @@ mixin DatabaseSettings {
 
   Future<int> getLowStockThreshold() async {
     final db = await database;
+    final shopId = await _activeShopId(db);
     final rows = await db.query(
       'app_settings',
       columns: ['value'],
       where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
-      whereArgs: [_defaultShopId, _lowStockThresholdKey],
+      whereArgs: [shopId, _lowStockThresholdKey],
       limit: 1,
     );
     if (rows.isEmpty) return 5;
@@ -151,13 +158,15 @@ mixin DatabaseSettings {
   }
 
   Future<void> saveLowStockThreshold(int value) async {
+    await _requireAdminMutation();
     if (value < 0) {
       throw ArgumentError('Minimum stock cannot be negative');
     }
     final db = await database;
+    final shopId = await _activeShopId(db);
     await db.insert('app_settings', {
       'key': _lowStockThresholdKey,
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'value': value.toString(),
       'updated_at': _nowIso(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -187,12 +196,14 @@ mixin DatabaseSettings {
   }
 
   Future<void> addUnitOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     await _ensureUnit(db, name);
     notifyDatabaseChanged();
   }
 
   Future<void> deleteUnitOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     final value = _normaliseName(name);
     if (value == null) return;
@@ -207,10 +218,11 @@ mixin DatabaseSettings {
 
   Future<GlobalPricingSettings> getGlobalPricingSettings() async {
     final db = await database;
+    final shopId = await _activeShopId(db);
     final rows = await db.query(
       'app_settings',
       where: 'shop_id = ? AND deleted_at IS NULL',
-      whereArgs: [_defaultShopId],
+      whereArgs: [shopId],
     );
     final values = {
       for (final row in rows) row['key'] as String: row['value']?.toString(),
@@ -228,6 +240,7 @@ mixin DatabaseSettings {
   }
 
   Future<void> saveGlobalPricingSettings(GlobalPricingSettings settings) async {
+    await _requireAdminMutation();
     final db = await database;
     await db.transaction((txn) async {
       await _saveSetting(
@@ -267,7 +280,7 @@ Future<void> _saveSetting(
 ) async {
   await executor.insert('app_settings', {
     'key': key,
-    'shop_id': _defaultShopId,
+    'shop_id': await _activeShopId(executor),
     'value': value,
     'updated_at': _nowIso(),
   }, conflictAlgorithm: ConflictAlgorithm.replace);

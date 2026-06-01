@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'db/database_helper.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
@@ -8,6 +8,9 @@ import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/cloud_service.dart';
+import 'theme/app_theme.dart';
+
+export 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,19 +24,6 @@ Future<void> main() async {
   runApp(const StorelyApp());
 }
 
-// ── App Colors ──
-class AppColors {
-  static const navy = Color(0xFF1B2838);
-  static const navyLight = Color(0xFF243447);
-  static const amber = Color(0xFFF5A623);
-  static const cream = Color(0xFFF8F4ED);
-  static const creamDark = Color(0xFFF0EBE3);
-  static const textDark = Color(0xFF1B2838);
-  static const textMuted = Color(0xFF7A8599);
-  static const success = Color(0xFF22C55E);
-  static const error = Color(0xFFEF4444);
-}
-
 class StorelyApp extends StatelessWidget {
   const StorelyApp({super.key});
 
@@ -45,7 +35,8 @@ class StorelyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
-        scaffoldBackgroundColor: AppColors.cream,
+        scaffoldBackgroundColor: AppColors.bg,
+        textTheme: AppText.textTheme,
         colorScheme: const ColorScheme(
           brightness: Brightness.light,
           primary: AppColors.navy,
@@ -62,29 +53,116 @@ class StorelyApp extends StatelessWidget {
           onTertiaryContainer: Color(0xFF0D5549),
           error: AppColors.error,
           onError: Colors.white,
-          surface: Colors.white,
-          onSurface: AppColors.textDark,
-          onSurfaceVariant: AppColors.textMuted,
-          outline: Color(0xFFD1C9BC),
-          outlineVariant: Color(0xFFE8E2D9),
+          surface: AppColors.surface,
+          onSurface: AppColors.ink,
+          onSurfaceVariant: AppColors.inkMuted,
+          outline: AppColors.borderStrong,
+          outlineVariant: AppColors.border,
         ),
         appBarTheme: const AppBarTheme(
           centerTitle: false,
           backgroundColor: AppColors.navy,
           foregroundColor: Colors.white,
+          elevation: 0,
           scrolledUnderElevation: 0,
+          titleTextStyle: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 20,
+            color: Colors.white,
+          ),
         ),
         cardTheme: CardThemeData(
           elevation: 0,
-          color: Colors.white,
+          color: AppColors.surface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: AppRadius.mdRadius,
+            side: const BorderSide(color: AppColors.border),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: AppColors.cream,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+          fillColor: AppColors.surface,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: AppRadius.mdRadius,
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: AppRadius.mdRadius,
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: AppRadius.mdRadius,
+            borderSide: const BorderSide(color: AppColors.navy, width: 1.5),
+          ),
+          hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 14),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.navy,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.navy,
+            side: const BorderSide(color: AppColors.borderStrong),
+            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.amber,
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: AppColors.navy,
+          foregroundColor: Colors.white,
+          elevation: 4,
+        ),
+        dividerTheme: const DividerThemeData(
+          color: AppColors.border,
+          thickness: 1,
+          space: 1,
+        ),
+        chipTheme: ChipThemeData(
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.smRadius),
+          side: BorderSide.none,
+        ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.navy,
+          contentTextStyle: const TextStyle(color: Colors.white),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
+        ),
+        dialogTheme: DialogThemeData(
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
+          backgroundColor: AppColors.surface,
+          titleTextStyle: AppText.title,
         ),
       ),
       home: const AppGate(),
@@ -110,36 +188,37 @@ class _AppGateState extends State<AppGate> {
   }
 
   Future<void> _checkFirstLaunch() async {
-    final prefs = await SharedPreferences.getInstance();
-    final isFirst = prefs.getBool('is_first_launch') ?? true;
+    final profile = await DatabaseHelper.instance.getShopProfile();
+    final name = profile?.name.trim();
+    final needsSetup = name == null || name.isEmpty || name == 'My Shop';
     if (mounted) {
       setState(() {
-        _isFirstLaunch = isFirst;
+        _isFirstLaunch = needsSetup;
         _isLoading = false;
       });
     }
   }
 
   Future<void> _completeWelcome() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_first_launch', false);
+    final profile = await DatabaseHelper.instance.getShopProfile();
+    final name = profile?.name.trim();
     if (mounted) {
       setState(() {
-        _isFirstLaunch = false;
+        _isFirstLaunch = name == null || name.isEmpty || name == 'My Shop';
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(backgroundColor: AppColors.cream);
+    if (_isLoading) return const Scaffold(backgroundColor: AppColors.bg);
     return _isFirstLaunch
         ? WelcomeScreen(onComplete: _completeWelcome)
         : const AppShell();
   }
 }
 
-// ── App Shell with Bottom Nav ──
+// ── App Shell with Bottom Nav ── (DO NOT CHANGE)
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
   @override
@@ -200,7 +279,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-// ── Custom Bottom Nav Bar ──
+// ── Custom Bottom Nav Bar (DO NOT CHANGE) ──
 class _BottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTabTap;
@@ -217,13 +296,7 @@ class _BottomNavBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
+        boxShadow: AppShadows.navBar,
       ),
       child: SafeArea(
         child: Padding(
@@ -245,7 +318,6 @@ class _BottomNavBar extends StatelessWidget {
                 isActive: currentIndex == 1,
                 onTap: () => onTabTap(1),
               ),
-              // Center Scan Button
               GestureDetector(
                 onTap: onScanTap,
                 child: Container(
@@ -318,7 +390,7 @@ class _NavItem extends StatelessWidget {
           children: [
             Icon(
               isActive ? activeIcon : icon,
-              color: isActive ? AppColors.navy : AppColors.textMuted,
+              color: isActive ? AppColors.navy : AppColors.inkMuted,
               size: 24,
             ),
             const SizedBox(height: 4),
@@ -327,7 +399,7 @@ class _NavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? AppColors.navy : AppColors.textMuted,
+                color: isActive ? AppColors.navy : AppColors.inkMuted,
               ),
             ),
           ],

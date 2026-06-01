@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/product.dart';
+import 'package:storely/models/product_purchase.dart';
 
 void main() {
   late DatabaseHelper db;
@@ -108,6 +109,38 @@ void main() {
       expect(second.possibleDuplicate, isTrue);
     });
 
+    test(
+      'duplicate rows in one import retain row-level purchase movements',
+      () async {
+        final result = await db.mergeProducts([
+          Product(
+            itemCode: 'SKU-1',
+            name: 'Cement Bag',
+            mrp: 350,
+            purchasePrice: 300,
+            quantity: 10,
+          ),
+          Product(
+            itemCode: 'SKU-1',
+            name: 'Cement Bag',
+            mrp: 360,
+            purchasePrice: 310,
+            quantity: 5,
+          ),
+        ], purchaseDate: DateTime(2026, 4, 25));
+
+        final products = await db.getAllProducts();
+        final rows = await _purchaseRows();
+
+        expect(result.added, 1);
+        expect(products.single.quantity, 15);
+        expect(products.single.purchasePrice, 310);
+        expect(rows, hasLength(2));
+        expect(rows.map((row) => row['quantity_delta']), [10, 5]);
+        expect(rows.map((row) => row['import_row_number']), [1, 2]);
+      },
+    );
+
     test('purchase date filter returns products bought on that date', () async {
       final firstDate = DateTime(2026, 4, 20);
       final secondDate = DateTime(2026, 4, 25);
@@ -128,6 +161,126 @@ void main() {
 
       expect(firstDateIds, {byName['Item A'], byName['Item B']});
       expect(secondDateIds, {byName['Item B']});
+    });
+
+    test(
+      'purchase batch uses selected purchase date for new products',
+      () async {
+        final purchaseDate = DateTime(2026, 4, 20);
+
+        final count = await db.commitProductPurchaseBatch([
+          ProductPurchaseCommit(
+            product: Product(
+              name: 'Batch Item',
+              mrp: 25,
+              purchasePrice: 20,
+              quantity: 6,
+              createdAt: DateTime(2026, 5, 1),
+            ),
+            quantityAdded: 6,
+          ),
+        ], purchaseDate: purchaseDate);
+
+        final products = await db.getAllProducts();
+        final summaries = await db.getProductPurchaseSummaries();
+        final purchasedIds = await db.getProductIdsPurchasedOn(purchaseDate);
+
+        expect(count, 1);
+        expect(products, hasLength(1));
+        expect(purchasedIds, {products.single.id});
+        expect(summaries[products.single.id]!.lastPurchaseDate, purchaseDate);
+      },
+    );
+
+    test('purchase batch rolls back all products if one write fails', () async {
+      final purchaseDate = DateTime(2026, 4, 20);
+      final fixedUuid = 'fixed-product-uuid';
+
+      expect(
+        () => db.commitProductPurchaseBatch([
+          ProductPurchaseCommit(
+            product: Product(
+              uuid: fixedUuid,
+              name: 'First Item',
+              mrp: 25,
+              purchasePrice: 20,
+              quantity: 6,
+            ),
+            quantityAdded: 6,
+          ),
+          ProductPurchaseCommit(
+            product: Product(
+              uuid: fixedUuid,
+              name: 'Second Item',
+              mrp: 30,
+              purchasePrice: 22,
+              quantity: 4,
+            ),
+            quantityAdded: 4,
+          ),
+        ], purchaseDate: purchaseDate),
+        throwsA(isA<DatabaseException>()),
+      );
+
+      expect(await db.getAllProducts(), isEmpty);
+      expect(await _stockRows(), isEmpty);
+    });
+
+    test('manual quantity edit records adjustment movement', () async {
+      final productId = await db.insertProduct(
+        Product(name: 'Adjust Me', mrp: 100, purchasePrice: 80, quantity: 10),
+      );
+      final product = await db.getProductById(productId);
+
+      await db.updateProduct(product!.copyWith(quantity: 7));
+
+      final updated = await db.getProductById(productId);
+      final rows = await _stockRows();
+      final adjustmentRows = rows
+          .where((row) => row['movement_type'] == StockMovementType.adjustment)
+          .toList();
+
+      expect(updated!.quantity, 7);
+      expect(adjustmentRows, hasLength(1));
+      expect(adjustmentRows.single['quantity_delta'], -3);
+    });
+
+    test('duplicate product code and barcode are rejected', () async {
+      await db.insertProduct(
+        Product(
+          name: 'Original',
+          itemCode: 'SKU-1',
+          barcode: 'BAR-1',
+          mrp: 100,
+          purchasePrice: 80,
+          quantity: 1,
+        ),
+      );
+
+      expect(
+        () => db.insertProduct(
+          Product(
+            name: 'Duplicate Code',
+            itemCode: 'SKU-1',
+            mrp: 100,
+            purchasePrice: 80,
+            quantity: 1,
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        () => db.insertProduct(
+          Product(
+            name: 'Duplicate Barcode',
+            barcode: 'BAR-1',
+            mrp: 100,
+            purchasePrice: 80,
+            quantity: 1,
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
     });
 
     test('replace import only replaces imported identities', () async {
@@ -152,6 +305,51 @@ void main() {
       expect(byName['Replace Me']!.quantity, 3);
       expect(byName['Replace Me']!.purchasePrice, 45);
       expect(byName['New Item']!.quantity, 2);
+    });
+
+    test(
+      'replace import keeps purchase history and records a stocktake delta',
+      () async {
+        await db.insertProduct(
+          Product(name: 'Replace Me', mrp: 50, purchasePrice: 40, quantity: 10),
+        );
+
+        await db.replaceAllProducts([
+          Product(name: 'Replace Me', mrp: 60, purchasePrice: 45, quantity: 3),
+        ], purchaseDate: DateTime(2026, 4, 25));
+
+        final products = await db.getAllProducts();
+        final summaries = await db.getProductPurchaseSummaries();
+        final rows = await _purchaseRows();
+        final stockRows = await _stockRows();
+
+        expect(products.single.quantity, 3);
+        expect(summaries[products.single.id]!.totalPurchased, 10);
+        expect(rows, hasLength(1));
+        expect(rows.single['quantity_delta'], 10);
+        expect(stockRows, hasLength(2));
+        expect(stockRows.last['movement_type'], 'stocktake');
+        expect(stockRows.last['quantity_delta'], -7);
+      },
+    );
+
+    test('purchase movements retain supplier for analytics', () async {
+      await db.mergeProducts([
+        Product(
+          name: 'Supplier Item',
+          mrp: 100,
+          purchasePrice: 80,
+          quantity: 4,
+          supplier: 'Acme',
+        ),
+      ], purchaseDate: DateTime(2026, 4, 25));
+
+      final rows = await db.kpiTopSuppliers();
+
+      expect(rows, hasLength(1));
+      expect(rows.single['name'], 'Acme');
+      expect(rows.single['units_received'], 4);
+      expect(rows.single['value_received'], 320);
     });
 
     test('cloud import compares parsed timestamps instead of text', () async {
@@ -191,4 +389,9 @@ Future<List<Map<String, Object?>>> _purchaseRows() async {
     whereArgs: ['purchase'],
     orderBy: 'id ASC',
   );
+}
+
+Future<List<Map<String, Object?>>> _stockRows() async {
+  final database = await DatabaseHelper.instance.database;
+  return database.query('stock_movements', orderBy: 'id ASC');
 }

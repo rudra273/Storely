@@ -95,7 +95,6 @@ class CloudService with WidgetsBindingObserver {
   static const _urlKey = 'storely_cloud_url';
   static const _anonKeyKey = 'storely_cloud_anon_key';
   static const _lastSyncStateKey = 'last_successful_cloud_sync_at';
-  static const _storelyShopId = 'local-shop';
 
   final state = ValueNotifier<CloudState>(const CloudState());
   final _connectivity = Connectivity();
@@ -109,6 +108,13 @@ class CloudService with WidgetsBindingObserver {
   SupabaseClient? get client => _clientReady ? Supabase.instance.client : null;
 
   Future<void> initialize() async {
+    DatabaseHelper.instance.assertAdminMutation = () async {
+      if (!state.value.isAdmin) {
+        throw StateError(
+          'Only a shop owner/admin can change catalog or store settings.',
+        );
+      }
+    };
     final prefs = await SharedPreferences.getInstance();
     final url = prefs.getString(_urlKey)?.trim();
     final anonKey = prefs.getString(_anonKeyKey)?.trim();
@@ -289,7 +295,7 @@ class CloudService with WidgetsBindingObserver {
       final rows = await activeClient
           .from('shop_members')
           .select('role')
-          .eq('shop_id', _storelyShopId)
+          .eq('shop_id', await DatabaseHelper.instance.currentShopId())
           .eq('user_id', user.id)
           .limit(1);
       if ((rows as List).isEmpty) return null;
@@ -338,19 +344,46 @@ class CloudSyncEngine {
 
   CloudSyncEngine({required this.client, required this.database});
 
+  static const _adminManagedTables = {
+    'app_settings',
+    'categories',
+    'units',
+    'suppliers',
+    'products',
+    'invoice_series',
+  };
+
   Future<DateTime> sync() async {
     final syncStartedAt = DateTime.now().toUtc();
+    var shopId = await database.currentShopId();
+    final memberShopId = await _firstMembershipShopId();
+    if (memberShopId != null && memberShopId != shopId) {
+      if (await database.hasLocalBusinessDataForCloud()) {
+        throw StateError(
+          'This user belongs to a different cloud shop, but this device already has local business data. Export or clear local data before joining that shop.',
+        );
+      }
+      await database.adoptCloudShopId(memberShopId);
+      shopId = memberShopId;
+    }
     final lastSync = await database.getCloudSyncState(
       CloudService._lastSyncStateKey,
     );
 
-    final createdCloudShop = await _ensureCloudAccess();
+    final createdCloudShop = await _ensureCloudAccess(shopId);
+    final canPushAdminTables = createdCloudShop || await _isShopAdmin(shopId);
     final pullFirst = lastSync == null && !createdCloudShop;
+    if (pullFirst && await database.hasLocalBusinessDataForCloud()) {
+      throw StateError(
+        'This device already has local business data. Set up cloud on a fresh device or add a merge/import flow before first sync.',
+      );
+    }
 
     // Pull shop data (all members can read).
     try {
       final shopRows = await _pullTable(
         'shops',
+        shopId: shopId,
         updatedAfter: pullFirst ? null : lastSync,
       );
       await database.cloudImportRows('shops', shopRows);
@@ -359,23 +392,35 @@ class CloudSyncEngine {
     }
 
     // Push shop data only if user is admin/owner.
-    await _pushShopIfAdmin();
+    await _pushShopIfAdmin(shopId);
 
     if (pullFirst) {
       for (final table in storelyCloudTables) {
-        final rows = await _pullTable(table);
+        final rows = await _pullTable(table, shopId: shopId);
         await database.cloudImportRows(table, rows);
       }
       for (final table in storelyCloudTables) {
-        await _pushTable(table, updatedAfter: syncStartedAt.toIso8601String());
+        await _pushTable(
+          table,
+          updatedAfter: syncStartedAt.toIso8601String(),
+          canPushAdminTables: canPushAdminTables,
+        );
       }
     } else {
       for (final table in storelyCloudTables) {
-        final rows = await _pullTable(table, updatedAfter: lastSync);
+        final rows = await _pullTable(
+          table,
+          shopId: shopId,
+          updatedAfter: lastSync,
+        );
         await database.cloudImportRows(table, rows);
       }
       for (final table in storelyCloudTables) {
-        await _pushTable(table, updatedAfter: lastSync);
+        await _pushTable(
+          table,
+          updatedAfter: lastSync,
+          canPushAdminTables: canPushAdminTables,
+        );
       }
     }
 
@@ -396,7 +441,7 @@ class CloudSyncEngine {
   ///   - User is already a member (no action needed)
   ///   - User just joined an existing shop as staff (cloud is source of truth,
   ///     pull first to avoid overwriting real data with fresh defaults)
-  Future<bool> _ensureCloudAccess() async {
+  Future<bool> _ensureCloudAccess(String shopId) async {
     final user = client.auth.currentUser;
     if (user == null) return false;
 
@@ -404,7 +449,7 @@ class CloudSyncEngine {
     final memberships = await client
         .from('shop_members')
         .select('role')
-        .eq('shop_id', CloudService._storelyShopId)
+        .eq('shop_id', shopId)
         .eq('user_id', user.id)
         .limit(1);
     if ((memberships as List).isNotEmpty) return false;
@@ -413,8 +458,8 @@ class CloudSyncEngine {
     final shops = await database.cloudExportRows('shops');
     if (shops.isEmpty) return false;
     final shop = shops.first;
-    final shopId = shop['uuid']?.toString();
-    if (shopId == null || shopId.isEmpty) return false;
+    final exportedShopId = shop['uuid']?.toString();
+    if (exportedShopId == null || exportedShopId.isEmpty) return false;
 
     // Use the SECURITY DEFINER function to check if the shop has no members.
     // This bypasses RLS so non-members can see the truth.
@@ -422,7 +467,7 @@ class CloudSyncEngine {
     try {
       final result = await client.rpc(
         'shop_has_no_members',
-        params: {'target_shop_id': shopId},
+        params: {'target_shop_id': exportedShopId},
       );
       isEmpty = result == true;
     } catch (_) {
@@ -449,33 +494,38 @@ class CloudSyncEngine {
       }
     }
 
-    // Shop already has members — join as staff.
-    // Return false so the sync engine pulls first (cloud is source of truth).
-    await client.from('shop_members').insert({
-      'shop_id': shopId,
-      'user_id': user.id,
-      'role': 'staff',
-    });
-    return false;
+    throw StateError(
+      'This cloud shop already has members. Ask an owner/admin to add this user before syncing.',
+    );
+  }
+
+  Future<String?> _firstMembershipShopId() async {
+    final user = client.auth.currentUser;
+    if (user == null) return null;
+    final rows = await client
+        .from('shop_members')
+        .select('shop_id')
+        .eq('user_id', user.id)
+        .limit(1);
+    if ((rows as List).isEmpty) return null;
+    final value = rows.first['shop_id']?.toString();
+    return value == null || value.isEmpty ? null : value;
   }
 
   /// Push shop data only if the current user is admin/owner.
-  Future<void> _pushShopIfAdmin() async {
-    try {
-      final result = await client.rpc(
-        'is_shop_admin',
-        params: {'target_shop_id': CloudService._storelyShopId},
-      );
-      if (result != true) return; // Staff — skip shop push.
-    } catch (_) {
-      return; // Can't determine role — skip to be safe.
-    }
+  Future<void> _pushShopIfAdmin(String shopId) async {
+    if (!await _isShopAdmin(shopId)) return; // Staff — skip shop push.
     final rows = await database.cloudExportRows('shops');
     if (rows.isEmpty) return;
     await client.from('shops').upsert(rows, onConflict: 'uuid');
   }
 
-  Future<void> _pushTable(String table, {String? updatedAfter}) async {
+  Future<void> _pushTable(
+    String table, {
+    String? updatedAfter,
+    required bool canPushAdminTables,
+  }) async {
+    if (_adminManagedTables.contains(table) && !canPushAdminTables) return;
     var rows = await database.cloudExportRows(
       table,
       updatedAfter: updatedAfter,
@@ -488,6 +538,18 @@ class CloudSyncEngine {
           rows,
           onConflict: table == 'app_settings' ? 'shop_id,key' : 'uuid',
         );
+  }
+
+  Future<bool> _isShopAdmin(String shopId) async {
+    try {
+      final result = await client.rpc(
+        'is_shop_admin',
+        params: {'target_shop_id': shopId},
+      );
+      return result == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<List<Map<String, dynamic>>> _onlyRowsNewerThanCloud(
@@ -561,9 +623,15 @@ class CloudSyncEngine {
 
   Future<List<Map<String, dynamic>>> _pullTable(
     String table, {
+    required String shopId,
     String? updatedAfter,
   }) async {
     dynamic query = client.from(table).select();
+    if (table == 'shops') {
+      query = query.eq('uuid', shopId);
+    } else if (table != 'profiles') {
+      query = query.eq('shop_id', shopId);
+    }
     if (updatedAfter != null) {
       query = query.gt('updated_at', updatedAfter);
     }

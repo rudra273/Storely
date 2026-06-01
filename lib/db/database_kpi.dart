@@ -43,12 +43,13 @@ mixin DatabaseKpi {
     String? to,
   }) async {
     final db = await database;
-    final where = _dateWhere('b.created_at', from, to);
+    final where = _dateWhere('p.received_at', from, to);
     return db.rawQuery('''
-      SELECT COALESCE(b.payment_method, 'cash') AS method,
-             COALESCE(SUM(b.total_amount), 0) AS total
-      FROM bills b
-      WHERE b.deleted_at IS NULL $where
+      SELECT COALESCE(p.payment_method, 'cash') AS method,
+             COALESCE(SUM(p.amount), 0) AS total
+      FROM bill_payments p
+      JOIN bills b ON b.uuid = p.bill_uuid
+      WHERE p.deleted_at IS NULL AND b.deleted_at IS NULL $where
       GROUP BY method ORDER BY total DESC
     ''');
   }
@@ -251,9 +252,13 @@ mixin DatabaseKpi {
     final db = await database;
     final where = _dateWhere('bi.created_at', from, to);
     final r = await db.rawQuery('''
-      SELECT ROUND(COALESCE(SUM(bi.gst_snapshot * bi.quantity), 0), 2) AS v
+      SELECT ROUND(COALESCE(SUM(
+        (bi.cgst_amount_snapshot + bi.sgst_amount_snapshot + bi.igst_amount_snapshot)
+        * bi.quantity
+      ), 0), 2) AS v
       FROM bill_items bi
-      WHERE bi.deleted_at IS NULL $where
+      JOIN bills b ON b.id = bi.bill_id
+      WHERE bi.deleted_at IS NULL AND b.deleted_at IS NULL AND b.is_paid = 1 $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -286,14 +291,17 @@ mixin DatabaseKpi {
     double threshold = 5,
   }) async {
     final db = await database;
-    return db.rawQuery('''
+    return db.rawQuery(
+      '''
       SELECT name, quantity_cache AS quantity
       FROM products
       WHERE deleted_at IS NULL
         AND quantity_cache > 0
         AND quantity_cache <= ?
       ORDER BY quantity_cache ASC
-    ''', [threshold]);
+    ''',
+      [threshold],
+    );
   }
 
   Future<double> kpiInventoryTurnoverRate({String? from, String? to}) async {
@@ -321,7 +329,8 @@ mixin DatabaseKpi {
         .subtract(Duration(days: days))
         .toIso8601String()
         .substring(0, 10);
-    return db.rawQuery('''
+    return db.rawQuery(
+      '''
       SELECT p.name, p.quantity_cache AS quantity
       FROM products p
       WHERE p.deleted_at IS NULL
@@ -333,7 +342,9 @@ mixin DatabaseKpi {
             AND substr(created_at, 1, 10) >= ?
         )
       ORDER BY p.quantity_cache DESC
-    ''', [cutoff]);
+    ''',
+      [cutoff],
+    );
   }
 
   Future<List<Map<String, dynamic>>> kpiTopSuppliers({
@@ -348,10 +359,10 @@ mixin DatabaseKpi {
              ROUND(COALESCE(SUM(ABS(sm.quantity_delta)), 0), 2) AS units_received,
              ROUND(COALESCE(SUM(ABS(sm.quantity_delta) * COALESCE(sm.unit_cost, 0)), 0), 2) AS value_received
       FROM stock_movements sm
-      LEFT JOIN suppliers s ON sm.source_id = s.id
+      LEFT JOIN suppliers s ON sm.supplier_id = s.id
       WHERE sm.deleted_at IS NULL AND sm.movement_type = 'purchase' $where
-        AND sm.source_id IS NOT NULL
-      GROUP BY sm.source_id, s.name
+        AND sm.supplier_id IS NOT NULL
+      GROUP BY sm.supplier_id, s.name
       ORDER BY value_received DESC LIMIT $limit
     ''');
   }
@@ -432,14 +443,17 @@ mixin DatabaseKpi {
         .subtract(Duration(days: days))
         .toIso8601String()
         .substring(0, 10);
-    final r = await db.rawQuery('''
+    final r = await db.rawQuery(
+      '''
       SELECT COUNT(*) AS cnt
       FROM customers
       WHERE deleted_at IS NULL
         AND bill_count > 0
         AND last_purchase_at IS NOT NULL
         AND substr(last_purchase_at, 1, 10) < ?
-    ''', [cutoff]);
+    ''',
+      [cutoff],
+    );
     return (r.first['cnt'] as num?)?.toInt() ?? 0;
   }
 
@@ -501,7 +515,8 @@ mixin DatabaseKpi {
         .subtract(Duration(days: days))
         .toIso8601String()
         .substring(0, 10);
-    return db.rawQuery('''
+    return db.rawQuery(
+      '''
       SELECT bi.product_name AS name,
              ROUND(COALESCE(SUM(bi.quantity), 0), 2) AS qty_sold
       FROM bill_items bi
@@ -510,7 +525,9 @@ mixin DatabaseKpi {
       GROUP BY bi.product_id, bi.product_name
       HAVING qty_sold < ?
       ORDER BY qty_sold ASC
-    ''', [cutoff, threshold]);
+    ''',
+      [cutoff, threshold],
+    );
   }
 
   Future<int> kpiNewProductsAdded({String? from, String? to}) async {
@@ -518,16 +535,11 @@ mixin DatabaseKpi {
     String clause = 'WHERE deleted_at IS NULL';
     if (from != null) clause += " AND substr(created_at,1,10) >= '$from'";
     if (to != null) clause += " AND substr(created_at,1,10) <= '$to'";
-    final r = await db.rawQuery(
-      'SELECT COUNT(*) AS cnt FROM products $clause',
-    );
+    final r = await db.rawQuery('SELECT COUNT(*) AS cnt FROM products $clause');
     return (r.first['cnt'] as num?)?.toInt() ?? 0;
   }
 
-  Future<double> kpiProductPriceCompliance({
-    String? from,
-    String? to,
-  }) async {
+  Future<double> kpiProductPriceCompliance({String? from, String? to}) async {
     final db = await database;
     final where = _dateWhere('bi.created_at', from, to);
     final r = await db.rawQuery('''
@@ -608,8 +620,12 @@ mixin DatabaseKpi {
   String _dateWhere(String col, String? from, String? to) {
     var clause = '';
     final dateRegex = RegExp(r'^\d{4}-\d{2}-\d{2}$');
-    if (from != null && dateRegex.hasMatch(from)) clause += " AND substr($col,1,10) >= '$from'";
-    if (to != null && dateRegex.hasMatch(to)) clause += " AND substr($col,1,10) <= '$to'";
+    if (from != null && dateRegex.hasMatch(from)) {
+      clause += " AND substr($col,1,10) >= '$from'";
+    }
+    if (to != null && dateRegex.hasMatch(to)) {
+      clause += " AND substr($col,1,10) <= '$to'";
+    }
     return clause;
   }
 }

@@ -42,6 +42,9 @@ class CategoryPricingSettings {
   final double? profitMarginPercent;
   final bool directPriceToggle;
   final double? manualPrice;
+  final String? hsnCode;
+  final String? hsnType;
+  final String? hsnDescription;
 
   const CategoryPricingSettings({
     this.id,
@@ -51,6 +54,9 @@ class CategoryPricingSettings {
     this.profitMarginPercent,
     this.directPriceToggle = false,
     this.manualPrice,
+    this.hsnCode,
+    this.hsnType,
+    this.hsnDescription,
   });
 
   factory CategoryPricingSettings.fromMap(Map<String, dynamic> map) {
@@ -62,6 +68,9 @@ class CategoryPricingSettings {
       profitMarginPercent: _optionalDouble(map['profit_margin_percent']),
       directPriceToggle: (map['direct_price_toggle'] as int? ?? 0) == 1,
       manualPrice: _optionalDouble(map['manual_price']),
+      hsnCode: _cleanHsnCode(map['hsn_code']?.toString()),
+      hsnType: _cleanOptional(map['hsn_type']?.toString()),
+      hsnDescription: _cleanOptional(map['hsn_description']?.toString()),
     );
   }
 
@@ -71,6 +80,9 @@ class CategoryPricingSettings {
     'profit_margin_percent': profitMarginPercent,
     'direct_price_toggle': directPriceToggle ? 1 : 0,
     'manual_price': manualPrice,
+    'hsn_code': hsnCode,
+    'hsn_type': hsnType,
+    'hsn_description': hsnDescription,
   };
 
   CategoryPricingSettings copyWith({
@@ -83,6 +95,12 @@ class CategoryPricingSettings {
     bool? directPriceToggle,
     double? manualPrice,
     bool clearManualPrice = false,
+    String? hsnCode,
+    bool clearHsnCode = false,
+    String? hsnType,
+    bool clearHsnType = false,
+    String? hsnDescription,
+    bool clearHsnDescription = false,
   }) {
     return CategoryPricingSettings(
       id: id,
@@ -96,6 +114,11 @@ class CategoryPricingSettings {
           : profitMarginPercent ?? this.profitMarginPercent,
       directPriceToggle: directPriceToggle ?? this.directPriceToggle,
       manualPrice: clearManualPrice ? null : manualPrice ?? this.manualPrice,
+      hsnCode: clearHsnCode ? null : hsnCode ?? this.hsnCode,
+      hsnType: clearHsnType ? null : hsnType ?? this.hsnType,
+      hsnDescription: clearHsnDescription
+          ? null
+          : hsnDescription ?? this.hsnDescription,
     );
   }
 }
@@ -114,6 +137,8 @@ class PriceBreakdown {
   final double landedCost;
   final double totalCost;
   final double profitAmount;
+  final double inputTaxAmount;
+  final double outputGstAmount;
   final double gstAmount;
   final double preGstSellingPrice;
   final double sellingPrice;
@@ -133,6 +158,8 @@ class PriceBreakdown {
     required this.landedCost,
     required this.totalCost,
     required this.profitAmount,
+    required this.inputTaxAmount,
+    required this.outputGstAmount,
     required this.gstAmount,
     required this.preGstSellingPrice,
     required this.sellingPrice,
@@ -180,13 +207,13 @@ class PricingCalculator {
               ? rawSellingPrice / (1 + gstPercent / 100)
               : rawSellingPrice
         : formulaPreGstSellingPrice;
-    final gstAmount = useProductDirect
+    final outputGstAmount = useProductDirect
         ? gstRegistered
               ? rawSellingPrice - preGstSellingPrice
-              : purchaseGst
+              : 0.0
         : gstRegistered
         ? formulaSellGst
-        : purchaseGst;
+        : 0.0;
     final profitAmount = preGstSellingPrice - totalCost;
     final resolvedMargin = totalCost == 0
         ? 0.0
@@ -205,7 +232,9 @@ class PricingCalculator {
       landedCost: landedCost,
       totalCost: totalCost,
       profitAmount: profitAmount,
-      gstAmount: gstAmount,
+      inputTaxAmount: purchaseGst,
+      outputGstAmount: outputGstAmount,
+      gstAmount: outputGstAmount,
       preGstSellingPrice: preGstSellingPrice,
       sellingPrice: rawSellingPrice,
       yourNet: profitAmount,
@@ -217,4 +246,14 @@ double? _optionalDouble(Object? value) {
   if (value == null) return null;
   if (value is num) return value.toDouble();
   return double.tryParse(value.toString());
+}
+
+String? _cleanOptional(String? value) {
+  final trimmed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
+  return trimmed == null || trimmed.isEmpty ? null : trimmed;
+}
+
+String? _cleanHsnCode(String? value) {
+  final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+  return digits == null || digits.isEmpty ? null : digits;
 }

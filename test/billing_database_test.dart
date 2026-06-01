@@ -124,6 +124,74 @@ void main() {
       expect(item.priceLabel, '₹250.00 / ltr');
     });
 
+    test('local shop id is generated and used by business rows', () async {
+      final shopId = await db.currentShopId();
+      expect(shopId, isNot('local-shop'));
+      expect(shopId, isNotEmpty);
+
+      final productId = await db.insertProduct(
+        Product(name: 'Generated Shop Item', mrp: 10, quantity: 1),
+      );
+      await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 10, itemCount: 1),
+        [
+          BillItem(
+            productId: productId,
+            productName: 'Generated Shop Item',
+            mrp: 10,
+          ),
+        ],
+      );
+
+      final database = await db.database;
+      final productRows = await database.query('products');
+      final billRows = await database.query('bills');
+      expect(productRows.single['shop_id'], shopId);
+      expect(billRows.single['shop_id'], shopId);
+    });
+
+    test('bill numbers allocate from invoice series without reuse', () async {
+      final firstId = await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 10, itemCount: 1),
+        [BillItem(productName: 'Item A', mrp: 10)],
+      );
+      await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 20, itemCount: 1),
+        [BillItem(productName: 'Item B', mrp: 20)],
+      );
+      await db.deleteBill(firstId);
+      await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 30, itemCount: 1),
+        [BillItem(productName: 'Item C', mrp: 30)],
+      );
+
+      final bills = await db.getAllBills();
+      final numbers = bills.map((bill) => bill.billNumber).toList();
+      expect(numbers, contains(endsWith('-0002')));
+      expect(numbers, contains(endsWith('-0003')));
+      expect(numbers, isNot(contains(endsWith('-0001'))));
+    });
+
+    test('non-GST shop bill items do not snapshot output GST', () async {
+      await db.saveGlobalPricingSettings(
+        const GlobalPricingSettings(
+          defaultGstPercent: 18,
+          gstRegistered: false,
+        ),
+      );
+      final productId = await db.insertProduct(
+        Product(name: 'Input Tax Item', purchasePrice: 100, quantity: 1),
+      );
+
+      final product = await db.getProductById(productId);
+      final item = await db.buildBillItemForProduct(product!);
+
+      expect(item.gstSnapshot, 0);
+      expect(item.cgstAmountSnapshot, 0);
+      expect(item.sgstAmountSnapshot, 0);
+      expect(item.igstAmountSnapshot, 0);
+    });
+
     test('paid status can be updated after bill creation', () async {
       final billId = await db.insertBill(
         Bill(
@@ -141,6 +209,28 @@ void main() {
       expect(bill.isPaid, isTrue);
     });
 
+    test('paid status records only the remaining balance', () async {
+      final billId = await db.insertBill(
+        Bill(
+          customerName: 'Walk-in Customer',
+          totalAmount: 100,
+          paidAmount: 30,
+          balanceDue: 70,
+          paymentStatus: Bill.statusPartial,
+          itemCount: 1,
+          isPaid: false,
+        ),
+        [BillItem(productName: 'Loose Item', mrp: 100)],
+      );
+
+      await db.updateBillPaidStatus(billId, true);
+
+      final bill = (await db.getAllBills()).single;
+      expect(bill.isPaid, isTrue);
+      expect(bill.paidAmount, 100);
+      expect(bill.balanceDue, 0);
+    });
+
     test('bill payment method defaults to cash', () async {
       await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 80, itemCount: 1),
@@ -149,6 +239,46 @@ void main() {
 
       final bill = (await db.getAllBills()).single;
       expect(bill.paymentMethod, 'cash');
+    });
+
+    test('partial bill payment is tracked with balance due', () async {
+      final billId = await db.insertBill(
+        Bill(
+          customerName: 'B2B Buyer',
+          customerPhone: '9876543210',
+          billType: Bill.typeB2b,
+          customerGstin: '27AAAAA0000A1Z5',
+          customerGstLegalName: 'B2B Buyer Private Limited',
+          totalAmount: 1000,
+          itemCount: 1,
+          isPaid: false,
+          paidAmount: 400,
+          paymentMethod: 'online',
+        ),
+        [
+          BillItem(
+            productName: 'Taxed Item',
+            mrp: 1000,
+            hsnCodeSnapshot: '123456',
+            gstPercentSnapshot: 18,
+            taxableValueSnapshot: 847.46,
+            gstSnapshot: 152.54,
+          ),
+        ],
+      );
+
+      var bill = (await db.getAllBills()).single;
+      expect(bill.paymentStatus, Bill.statusPartial);
+      expect(bill.paidAmount, 400);
+      expect(bill.balanceDue, 600);
+      expect(bill.customerGstin, '27AAAAA0000A1Z5');
+      expect(bill.items.single.hsnCodeSnapshot, '123456');
+
+      await db.recordBillPayment(billId, amount: 600);
+      bill = (await db.getAllBills()).single;
+      expect(bill.paymentStatus, Bill.statusPaid);
+      expect(bill.isPaid, isTrue);
+      expect(bill.balanceDue, 0);
     });
 
     test('same customer phone is unique and accumulates bill totals', () async {
@@ -308,26 +438,34 @@ void main() {
       },
     );
 
-    test('stock deduction never makes product quantity negative', () async {
-      final productId = await db.insertProduct(
-        Product(name: 'Low Stock Item', mrp: 25, quantity: 2),
-      );
+    test(
+      'bill creation rejects product quantity above available stock',
+      () async {
+        final productId = await db.insertProduct(
+          Product(name: 'Low Stock Item', mrp: 25, quantity: 2),
+        );
 
-      await db.insertBill(
-        Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
-        [
-          BillItem(
-            productId: productId,
-            productName: 'Low Stock Item',
-            mrp: 25,
-            quantity: 5,
+        expect(
+          () => db.insertBill(
+            Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
+            [
+              BillItem(
+                productId: productId,
+                productName: 'Low Stock Item',
+                mrp: 25,
+                quantity: 5,
+              ),
+            ],
           ),
-        ],
-      );
+          throwsA(isA<StateError>()),
+        );
 
-      final product = await db.getProductById(productId);
-      expect(product!.quantity, 0);
-    });
+        final product = await db.getProductById(productId);
+        final bills = await db.getAllBills();
+        expect(product!.quantity, 2);
+        expect(bills, isEmpty);
+      },
+    );
   });
 }
 

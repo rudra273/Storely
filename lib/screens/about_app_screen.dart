@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 
 class AboutAppScreen extends StatelessWidget {
   const AboutAppScreen({super.key});
@@ -8,144 +8,83 @@ class AboutAppScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: const Text(
-          'About the App',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('About')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Column(
+          AppCard(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Storely',
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                SizedBox(height: 6),
+                Text('Storely', style: AppText.title),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   'Inventory and billing companion for small stores.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                  style: AppText.caption,
                 ),
-                SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.md),
                 Text(
                   'Storely helps small retailers manage products, generate bills, and track daily sales from one simple mobile app.',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
+                  style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
             ),
             child: Row(
               children: [
-                const Icon(Icons.verified_outlined, color: AppColors.amber),
-                const SizedBox(width: 10),
-                const Text(
-                  'Version',
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w700,
-                  ),
+                const LeadingIconChip(
+                  icon: Icons.verified_outlined,
+                  color: AppColors.amber,
                 ),
+                const SizedBox(width: AppSpacing.md),
+                Text('Version', style: AppText.subtitle),
                 const Spacer(),
                 FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
                   builder: (context, snapshot) {
-                    final version = snapshot.data?.version ?? '1.0.0';
                     return Text(
-                      version,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      snapshot.data?.version ?? '—',
+                      style: AppText.body.copyWith(color: AppColors.inkMuted),
                     );
                   },
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Column(
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'What You Can Do',
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                SizedBox(height: 8),
+                Text('What You Can Do', style: AppText.subtitle),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   '• Add and organize products by category and supplier.\n'
                   '• Scan barcodes/QR codes for faster billing.\n'
                   '• Track unpaid bills and daily sales.\n'
                   '• Export and print billing/QR data for store operations.',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
+                  style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Column(
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Release Notes',
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                SizedBox(height: 8),
+                Text('Release Notes', style: AppText.subtitle),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   'Version 1.0.1 includes core inventory management, billing, QR scanning, and store setup features for first production release.',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
+                  style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
             ),

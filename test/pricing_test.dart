@@ -18,7 +18,9 @@ void main() {
 
       expect(result.gstRegistered, isFalse);
       expect(result.purchasePrice, 100);
-      expect(result.gstAmount, 18);
+      expect(result.inputTaxAmount, 18);
+      expect(result.outputGstAmount, 0);
+      expect(result.gstAmount, 0);
       expect(result.landedCost, 118);
       expect(result.totalCost, 138);
       expect(result.profitAmount, 69);
@@ -140,7 +142,9 @@ void main() {
         expect(result.totalCost, 138);
         expect(result.profitAmount, 62);
         expect(result.profitMarginPercent, closeTo(44.9275, 0.0001));
-        expect(result.gstAmount, 18);
+        expect(result.inputTaxAmount, 18);
+        expect(result.outputGstAmount, 0);
+        expect(result.gstAmount, 0);
       },
     );
 

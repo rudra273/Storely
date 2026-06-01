@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
+import '../models/bill.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -21,29 +22,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _loadDebits() async {
     final bills = await DatabaseHelper.instance.getUnpaidBills();
-    
-    // Group by customer
-    Map<String, double> debitsMap = {};
-    for (var bill in bills) {
-      final name = bill.customerName.trim().isNotEmpty ? bill.customerName.trim() : 'Unknown';
-      final phone = bill.customerPhone?.trim() ?? '';
-      final key = '$name|__|$phone';
-      
-      debitsMap[key] = (debitsMap[key] ?? 0) + bill.totalAmount;
-    }
-
-    // Convert to list
-    final debitsList = debitsMap.entries.map((e) {
-      final parts = e.key.split('|__|');
-      return {
-        'name': parts[0],
-        'phone': parts[1].isNotEmpty ? parts[1] : 'No phone provided',
-        'amount': e.value,
-      };
-    }).toList();
-
-    // Sort descending by amount
-    debitsList.sort((a, b) => (b['amount'] as double).compareTo(a['amount'] as double));
+    final debitsList = buildCustomerDebitRows(bills);
 
     if (mounted) {
       setState(() {
@@ -56,74 +35,91 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(
-        title: const Text(
-          'Notifications',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ),
-      body: _isLoading 
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Notifications')),
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _customerDebits.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No notifications are there.',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: AppColors.textMuted,
-                      fontWeight: FontWeight.w600,
+          ? Center(child: Text('No pending dues', style: AppText.caption))
+          : ListView.builder(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              itemCount: _customerDebits.length,
+              itemBuilder: (context, index) {
+                final data = _customerDebits[index];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: AppCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
                     ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _customerDebits.length,
-                  itemBuilder: (context, index) {
-                    final data = _customerDebits[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      color: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.error.withValues(alpha: 0.1),
-                          child: const Icon(Icons.warning_amber_rounded, color: AppColors.error),
+                    child: Row(
+                      children: [
+                        const LeadingIconChip(
+                          icon: Icons.warning_amber_rounded,
+                          color: AppColors.error,
                         ),
-                        title: Text(
-                          data['name'],
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data['name'] as String,
+                                style: AppText.subtitle,
+                              ),
+                              Text(
+                                data['phone'] as String,
+                                style: AppText.caption,
+                              ),
+                            ],
+                          ),
                         ),
-                        subtitle: Text(
-                          data['phone'],
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            const Text(
-                              'Pending Due',
-                              style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600),
-                            ),
+                            Text('PENDING', style: AppText.label),
                             Text(
                               '₹${(data['amount'] as double).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
+                              style: AppText.subtitle.copyWith(
                                 color: AppColors.error,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
+}
+
+List<Map<String, dynamic>> buildCustomerDebitRows(List<Bill> bills) {
+  final debitsMap = <String, double>{};
+  for (final bill in bills) {
+    final name = bill.customerName.trim().isNotEmpty
+        ? bill.customerName.trim()
+        : 'Unknown';
+    final phone = bill.customerPhone?.trim() ?? '';
+    final key = '$name|__|$phone';
+
+    debitsMap[key] = (debitsMap[key] ?? 0) + bill.balanceDue;
+  }
+
+  final debitsList = debitsMap.entries.map((e) {
+    final parts = e.key.split('|__|');
+    return {
+      'name': parts[0],
+      'phone': parts[1].isNotEmpty ? parts[1] : 'No phone provided',
+      'amount': e.value,
+    };
+  }).toList();
+
+  debitsList.sort(
+    (a, b) => (b['amount'] as double).compareTo(a['amount'] as double),
+  );
+  return debitsList;
 }

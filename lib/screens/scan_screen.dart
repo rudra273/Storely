@@ -2,11 +2,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../main.dart';
+import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
+
+part 'scan/manual_product_widgets.dart';
+part 'scan/customer_suggestion_list.dart';
+part 'scan/bill_summary_widgets.dart';
+part 'scan/bill_draft.dart';
 
 enum BillingEntryMode { scan, manual }
 
@@ -94,19 +99,33 @@ class _ScanScreenState extends State<ScanScreen> {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
       final id = (data['id'] as num?)?.toInt();
+      final uuid = data['uuid'] as String?;
       final code = data['code'] as String?;
       final barcode = data['barcode'] as String?;
-      final mrp = (data['mrp'] as num?)?.toDouble() ?? 0;
-      final unit = _cleanOptionalText(data['unit'] as String?);
       final product = await DatabaseHelper.instance.findProductForBilling(
         id: id,
+        productUuid: uuid,
         itemCode: code,
         barcode: barcode,
         name: name,
       );
-      final scannedItem = product == null
-          ? BillItem(productName: name, mrp: mrp, unit: unit)
-          : await DatabaseHelper.instance.buildBillItemForProduct(product);
+      if (product == null) {
+        if (!mounted) return;
+        setState(() => _showAddedStatus = false);
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Product not found for this QR code'),
+              duration: _invalidScanCooldown,
+            ),
+          );
+        _allowNextScanAfter(_invalidScanCooldown);
+        return;
+      }
+      final scannedItem = await DatabaseHelper.instance.buildBillItemForProduct(
+        product,
+      );
       if (!mounted) return;
 
       _addBillItem(scannedItem);
@@ -159,6 +178,14 @@ class _ScanScreenState extends State<ScanScreen> {
               existingItem.productName.toLowerCase() ==
                   item.productName.toLowerCase()),
     );
+    final available = _availableStockForItem(item);
+    if (available != null) {
+      final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
+      if (available <= 0 || currentQty + 1 > available) {
+        _showStockLimitMessage(item.productName, available);
+        return;
+      }
+    }
 
     setState(() {
       if (existing >= 0) {
@@ -169,6 +196,29 @@ class _ScanScreenState extends State<ScanScreen> {
       }
       _showAddedStatus = _entryMode == BillingEntryMode.scan;
     });
+  }
+
+  double? _availableStockForItem(BillItem item) {
+    final productId = item.productId;
+    if (productId == null) return null;
+    for (final product in _allProducts) {
+      if (product.id == productId) return product.quantity;
+    }
+    return null;
+  }
+
+  void _showStockLimitMessage(String productName, double available) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            available <= 0
+                ? '"$productName" is out of stock'
+                : 'Only ${_formatQuantityInput(available)} available for "$productName"',
+          ),
+        ),
+      );
   }
 
   void _allowNextScanAfter(Duration duration) {
@@ -185,8 +235,14 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<int?> _completeBill({
     required String customerName,
     required String? customerPhone,
+    required String billType,
+    required String? customerGstin,
+    required String? customerGstLegalName,
+    required String? customerGstTradeName,
+    required String? customerAddress,
+    required String? placeOfSupplyStateCode,
     required double discountPercent,
-    required bool isPaid,
+    required double paidAmount,
     required String paymentMethod,
   }) async {
     if (_items.isEmpty) return null;
@@ -197,40 +253,57 @@ class _ScanScreenState extends State<ScanScreen> {
     final percent = discountPercent.clamp(0, 100).toDouble();
     final discount = subtotal * percent / 100;
     final total = subtotal - discount;
+    final shop = await DatabaseHelper.instance.getShopProfile();
+    final gstRegistered = shop?.gstRegistered ?? false;
+    final shopStateCode = _stateCodeFromGstin(shop?.gstin);
+    final supplyStateCode = _cleanOptionalText(placeOfSupplyStateCode);
+    final interState =
+        gstRegistered &&
+        shopStateCode != null &&
+        supplyStateCode != null &&
+        shopStateCode != supplyStateCode;
     final itemCopies = _items
         .map(
-          (item) => BillItem(
-            uuid: item.uuid,
-            shopId: item.shopId,
-            productId: item.productId,
-            productUuid: item.productUuid,
-            productName: item.productName,
-            mrp: item.mrp,
-            unit: item.unit,
-            purchasePriceSnapshot: item.purchasePriceSnapshot,
-            sellingPriceSnapshot: item.sellingPriceSnapshot,
-            costSnapshot: item.costSnapshot,
-            profitSnapshot: item.profitSnapshot,
-            commissionSnapshot: item.commissionSnapshot,
-            gstSnapshot: item.gstSnapshot,
-            wasDirectPrice: item.wasDirectPrice,
-            quantity: item.quantity,
+          (item) => _taxAdjustedItemCopy(
+            item,
+            discountPercent: percent,
+            gstRegistered: gstRegistered,
+            interState: interState,
           ),
         )
         .toList();
+    final received = paidAmount.clamp(0, total).toDouble();
+    final taxableTotal = itemCopies.fold(
+      0.0,
+      (sum, item) => sum + item.totalTaxableValue,
+    );
+    final cgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalCgst);
+    final sgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalSgst);
+    final igstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalIgst);
 
     final bill = Bill(
+      billType: billType,
       customerName: customerName.trim().isEmpty
           ? 'Walk-in Customer'
           : customerName.trim(),
       customerPhone: _cleanOptionalText(customerPhone),
+      customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
+      customerGstLegalName: _cleanOptionalText(customerGstLegalName),
+      customerGstTradeName: _cleanOptionalText(customerGstTradeName),
+      customerAddressSnapshot: _cleanOptionalText(customerAddress),
+      placeOfSupplyStateCode: _cleanOptionalText(placeOfSupplyStateCode),
       subtotalAmount: subtotal,
       discountPercent: percent,
       discountAmount: discount,
+      taxableAmount: taxableTotal,
+      cgstAmount: cgstTotal,
+      sgstAmount: sgstTotal,
+      igstAmount: igstTotal,
       totalAmount: total,
       itemCount: _itemCount,
-      isPaid: isPaid,
+      isPaid: received >= total,
       paymentMethod: paymentMethod,
+      paidAmount: received,
     );
 
     try {
@@ -240,21 +313,80 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
+  BillItem _taxAdjustedItemCopy(
+    BillItem item, {
+    required double discountPercent,
+    required bool gstRegistered,
+    required bool interState,
+  }) {
+    final quantity = item.quantity;
+    final gstPercent = item.gstPercentSnapshot ?? 0.0;
+    final discountFactor = (1 - discountPercent / 100).clamp(0.0, 1.0);
+    final discountedUnitGross = item.sellingPriceSnapshot * discountFactor;
+    final taxableUnit = gstRegistered && gstPercent > 0
+        ? discountedUnitGross / (1 + gstPercent / 100)
+        : discountedUnitGross;
+    final gstUnit = gstRegistered
+        ? (discountedUnitGross - taxableUnit).clamp(0.0, double.infinity)
+        : 0.0;
+    final cgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
+    final sgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
+    final igstUnit = gstRegistered && interState ? gstUnit : 0.0;
+
+    return BillItem(
+      uuid: item.uuid,
+      shopId: item.shopId,
+      productId: item.productId,
+      productUuid: item.productUuid,
+      productName: item.productName,
+      hsnCodeSnapshot: item.hsnCodeSnapshot,
+      hsnTypeSnapshot: item.hsnTypeSnapshot,
+      mrp: item.mrp,
+      unit: item.unit,
+      purchasePriceSnapshot: item.purchasePriceSnapshot,
+      sellingPriceSnapshot: item.sellingPriceSnapshot,
+      costSnapshot: item.costSnapshot,
+      profitSnapshot: item.profitSnapshot,
+      commissionSnapshot: item.commissionSnapshot,
+      gstSnapshot: _roundMoney(gstUnit),
+      gstPercentSnapshot: item.gstPercentSnapshot,
+      taxableValueSnapshot: _roundMoney(taxableUnit),
+      cgstAmountSnapshot: _roundMoney(cgstUnit),
+      sgstAmountSnapshot: _roundMoney(sgstUnit),
+      igstAmountSnapshot: _roundMoney(igstUnit),
+      wasDirectPrice: item.wasDirectPrice,
+      quantity: quantity,
+    );
+  }
+
   Future<void> _openBillSheet() async {
     if (_items.isEmpty) return;
 
     final customerController = TextEditingController();
     final phoneController = TextEditingController(text: '+91 ');
+    final gstinController = TextEditingController();
+    final legalNameController = TextEditingController();
+    final tradeNameController = TextEditingController();
+    final addressController = TextEditingController();
+    final stateCodeController = TextEditingController();
     final discountController = TextEditingController();
+    final paidAmountController = TextEditingController();
     final customers = await DatabaseHelper.instance.getAllCustomers();
     if (!mounted) {
       customerController.dispose();
       phoneController.dispose();
+      gstinController.dispose();
+      legalNameController.dispose();
+      tradeNameController.dispose();
+      addressController.dispose();
+      stateCodeController.dispose();
       discountController.dispose();
+      paidAmountController.dispose();
       return;
     }
     var discountPercent = 0.0;
-    var isPaid = false;
+    var billType = Bill.typeB2c;
+    var paymentStatus = Bill.statusUnpaid;
     var paymentMethod = 'cash';
     var hideCustomerSuggestions = false;
 
@@ -273,6 +405,12 @@ class _ScanScreenState extends State<ScanScreen> {
               final percent = discountPercent.clamp(0, 100).toDouble();
               final discount = _subtotal * percent / 100;
               final total = _subtotal - discount;
+              final parsedPaid = paymentStatus == Bill.statusPaid
+                  ? total
+                  : paymentStatus == Bill.statusPartial
+                  ? (double.tryParse(paidAmountController.text) ?? 0)
+                  : 0.0;
+              final paidAmount = parsedPaid.clamp(0, total).toDouble();
               final customerMatches = hideCustomerSuggestions
                   ? <Customer>[]
                   : _matchingCustomers(
@@ -330,6 +468,77 @@ class _ScanScreenState extends State<ScanScreen> {
                           prefixIcon: Icon(Icons.phone_outlined),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: Bill.typeB2c,
+                            icon: Icon(Icons.person_outline_rounded),
+                            label: Text('B2C'),
+                          ),
+                          ButtonSegment(
+                            value: Bill.typeB2b,
+                            icon: Icon(Icons.business_outlined),
+                            label: Text('B2B'),
+                          ),
+                        ],
+                        selected: {billType},
+                        onSelectionChanged: (value) =>
+                            setSheetState(() => billType = value.first),
+                      ),
+                      if (billType == Bill.typeB2b) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: gstinController,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Customer GSTIN',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: legalNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Legal business name',
+                            prefixIcon: Icon(Icons.business_center_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: tradeNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Trade name (optional)',
+                            prefixIcon: Icon(Icons.storefront_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: addressController,
+                          minLines: 2,
+                          maxLines: 3,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: const InputDecoration(
+                            labelText: 'Business address',
+                            prefixIcon: Icon(Icons.location_on_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: stateCodeController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(2),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Place of supply state code',
+                            prefixIcon: Icon(Icons.map_outlined),
+                          ),
+                        ),
+                      ],
                       if (customerMatches.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         _CustomerSuggestionList(
@@ -344,6 +553,29 @@ class _ScanScreenState extends State<ScanScreen> {
                                 phoneController,
                                 _formatCustomerPhoneInput(customer.phone),
                               );
+                              _setControllerText(
+                                gstinController,
+                                customer.gstin ?? '',
+                              );
+                              _setControllerText(
+                                legalNameController,
+                                customer.gstLegalName ?? '',
+                              );
+                              _setControllerText(
+                                tradeNameController,
+                                customer.gstTradeName ?? '',
+                              );
+                              _setControllerText(
+                                addressController,
+                                customer.address ?? '',
+                              );
+                              _setControllerText(
+                                stateCodeController,
+                                customer.placeOfSupplyStateCode ?? '',
+                              );
+                              if (customer.gstin != null) {
+                                billType = Bill.typeB2b;
+                              }
                               hideCustomerSuggestions = true;
                             });
                           },
@@ -380,24 +612,63 @@ class _ScanScreenState extends State<ScanScreen> {
                         },
                       ),
                       const SizedBox(height: 14),
-                      SegmentedButton<bool>(
+                      SegmentedButton<String>(
                         segments: const [
                           ButtonSegment(
-                            value: true,
+                            value: Bill.statusPaid,
                             icon: Icon(Icons.check_circle_outline),
-                            label: Text('Paid'),
+                            label: Text('Paid full'),
                           ),
                           ButtonSegment(
-                            value: false,
+                            value: Bill.statusPartial,
+                            icon: Icon(Icons.payments_outlined),
+                            label: Text('Partial'),
+                          ),
+                          ButtonSegment(
+                            value: Bill.statusUnpaid,
                             icon: Icon(Icons.pending_actions_outlined),
                             label: Text('Unpaid'),
                           ),
                         ],
-                        selected: {isPaid},
-                        onSelectionChanged: (value) =>
-                            setSheetState(() => isPaid = value.first),
+                        selected: {paymentStatus},
+                        onSelectionChanged: (value) => setSheetState(() {
+                          paymentStatus = value.first;
+                          if (paymentStatus == Bill.statusPaid) {
+                            _setControllerText(
+                              paidAmountController,
+                              total.toStringAsFixed(2),
+                            );
+                          } else if (paymentStatus == Bill.statusUnpaid) {
+                            _setControllerText(paidAmountController, '');
+                          }
+                        }),
                       ),
-                      if (isPaid) ...[
+                      if (paymentStatus == Bill.statusPartial) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: paidAmountController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((
+                              oldValue,
+                              newValue,
+                            ) {
+                              final isValid = RegExp(
+                                r'^\d*\.?\d{0,2}$',
+                              ).hasMatch(newValue.text);
+                              return isValid ? newValue : oldValue;
+                            }),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Amount received',
+                            prefixText: '₹ ',
+                          ),
+                          onChanged: (_) => setSheetState(() {}),
+                        ),
+                      ],
+                      if (paymentStatus != Bill.statusUnpaid) ...[
                         const SizedBox(height: 12),
                         SegmentedButton<String>(
                           segments: const [
@@ -419,10 +690,11 @@ class _ScanScreenState extends State<ScanScreen> {
                       ],
                       const SizedBox(height: 16),
                       Container(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(AppSpacing.lg),
                         decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(14),
+                          color: AppColors.bg,
+                          borderRadius: AppRadius.mdRadius,
+                          border: Border.all(color: AppColors.border),
                         ),
                         child: Column(
                           children: [
@@ -437,6 +709,18 @@ class _ScanScreenState extends State<ScanScreen> {
                               value: '₹${total.toStringAsFixed(2)}',
                               isTotal: true,
                             ),
+                            if (paidAmount > 0) ...[
+                              const Divider(height: 20),
+                              _BillSummaryRow(
+                                label: 'Received',
+                                value: '₹${paidAmount.toStringAsFixed(2)}',
+                              ),
+                              _BillSummaryRow(
+                                label: 'Balance',
+                                value:
+                                    '₹${(total - paidAmount).clamp(0, total).toStringAsFixed(2)}',
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -450,8 +734,15 @@ class _ScanScreenState extends State<ScanScreen> {
                               _BillDraft(
                                 customerName: customerController.text,
                                 customerPhone: phoneController.text,
+                                billType: billType,
+                                customerGstin: gstinController.text,
+                                customerGstLegalName: legalNameController.text,
+                                customerGstTradeName: tradeNameController.text,
+                                customerAddress: addressController.text,
+                                placeOfSupplyStateCode:
+                                    stateCodeController.text,
                                 discountPercent: percent,
-                                isPaid: isPaid,
+                                paidAmount: paidAmount,
                                 paymentMethod: paymentMethod,
                               ),
                             );
@@ -477,8 +768,14 @@ class _ScanScreenState extends State<ScanScreen> {
       final billId = await _completeBill(
         customerName: draft.customerName,
         customerPhone: draft.customerPhone,
+        billType: draft.billType,
+        customerGstin: draft.customerGstin,
+        customerGstLegalName: draft.customerGstLegalName,
+        customerGstTradeName: draft.customerGstTradeName,
+        customerAddress: draft.customerAddress,
+        placeOfSupplyStateCode: draft.placeOfSupplyStateCode,
         discountPercent: draft.discountPercent,
-        isPaid: draft.isPaid,
+        paidAmount: draft.paidAmount,
         paymentMethod: draft.paymentMethod,
       );
       if (billId == null || !mounted) return;
@@ -490,12 +787,26 @@ class _ScanScreenState extends State<ScanScreen> {
         totalAmount:
             _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
         itemCount: _itemCount,
-        isPaid: draft.isPaid,
+        isPaid:
+            draft.paidAmount >=
+            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
       );
+    } catch (e) {
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Bad state: ', '');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
     } finally {
       customerController.dispose();
       phoneController.dispose();
+      gstinController.dispose();
+      legalNameController.dispose();
+      tradeNameController.dispose();
+      addressController.dispose();
+      stateCodeController.dispose();
       discountController.dispose();
+      paidAmountController.dispose();
     }
   }
 
@@ -556,6 +867,13 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _updateQty(int index, int delta) {
+    if (delta > 0) {
+      final available = _availableStockForItem(_items[index]);
+      if (available != null && _items[index].quantity + delta > available) {
+        _showStockLimitMessage(_items[index].productName, available);
+        return;
+      }
+    }
     setState(() {
       _items[index].quantity += delta;
       if (_items[index].quantity <= 0) _items.removeAt(index);
@@ -564,6 +882,12 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _setQty(int index, double quantity) {
     if (quantity <= 0) return;
+    final available = _availableStockForItem(_items[index]);
+    if (available != null && quantity > available) {
+      _showStockLimitMessage(_items[index].productName, available);
+      setState(() => _items[index].quantity = available);
+      return;
+    }
     setState(() => _items[index].quantity = quantity);
   }
 
@@ -572,6 +896,15 @@ class _ScanScreenState extends State<ScanScreen> {
     if (trimmed == null || trimmed.isEmpty || trimmed == '+91') return null;
     return trimmed;
   }
+
+  String? _stateCodeFromGstin(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.length < 2) return null;
+    final code = trimmed.substring(0, 2);
+    return RegExp(r'^\d{2}$').hasMatch(code) ? code : null;
+  }
+
+  double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 
   List<Customer> _matchingCustomers(
     List<Customer> customers,
@@ -715,11 +1048,11 @@ class _ScanScreenState extends State<ScanScreen> {
     return Container(
       height: height,
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.surface,
+        borderRadius: AppRadius.lgRadius,
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         children: [
@@ -731,7 +1064,7 @@ class _ScanScreenState extends State<ScanScreen> {
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpacing.sm),
           Expanded(
             child: _isLoadingProducts
                 ? const Center(child: CircularProgressIndicator())
@@ -781,7 +1114,6 @@ class _ScanScreenState extends State<ScanScreen> {
       appBar: AppBar(
         title: Text(
           _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
-          style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
@@ -835,17 +1167,22 @@ class _ScanScreenState extends State<ScanScreen> {
       // ── Bottom Total + Complete Button ──
       bottomNavigationBar: _items.isNotEmpty
           ? Container(
-              color: AppColors.cream,
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              color: AppColors.bg,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                AppSpacing.sm,
+              ),
               child: SafeArea(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
+                    horizontal: AppSpacing.xl,
+                    vertical: AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
                     color: AppColors.navy,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: AppRadius.lgRadius,
                   ),
                   child: Row(
                     children: [
@@ -902,8 +1239,8 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget _buildBillItemsPanel() {
     return Container(
       decoration: const BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        color: AppColors.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
       ),
       child: _items.isEmpty
           ? Center(
@@ -929,11 +1266,12 @@ class _ScanScreenState extends State<ScanScreen> {
               itemBuilder: (_, i) {
                 final item = _items[i];
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(14),
+                  margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
+                    color: AppColors.surface,
+                    borderRadius: AppRadius.mdRadius,
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Row(
                     children: [
@@ -962,8 +1300,8 @@ class _ScanScreenState extends State<ScanScreen> {
                       // Qty controls
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.cream,
-                          borderRadius: BorderRadius.circular(10),
+                          color: AppColors.bg,
+                          borderRadius: AppRadius.smRadius,
                         ),
                         child: Row(
                           children: [
@@ -1042,244 +1380,4 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
     );
   }
-}
-
-class _ManualEmptyState extends StatelessWidget {
-  final IconData icon;
-  final String message;
-
-  const _ManualEmptyState({required this.icon, required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 38,
-            color: AppColors.textMuted.withValues(alpha: 0.4),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ManualProductTile extends StatelessWidget {
-  final Product product;
-  final VoidCallback onAdd;
-
-  const _ManualProductTile({required this.product, required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    final isOut = product.quantity == 0;
-    return Material(
-      color: AppColors.cream,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onAdd,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        product.priceLabel,
-                        if (product.itemCode != null) product.itemCode!,
-                        if (product.barcode != null) product.barcode!,
-                      ].join(' • '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    isOut ? 'Out' : product.quantityLabel,
-                    style: TextStyle(
-                      color: isOut ? AppColors.error : AppColors.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Icon(
-                    Icons.add_circle_rounded,
-                    color: AppColors.navy,
-                    size: 22,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CustomerSuggestionList extends StatelessWidget {
-  final List<Customer> customers;
-  final ValueChanged<Customer> onSelected;
-
-  const _CustomerSuggestionList({
-    required this.customers,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 220),
-      decoration: BoxDecoration(
-        color: AppColors.cream,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.creamDark),
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        itemCount: customers.length,
-        separatorBuilder: (_, index) =>
-            Divider(height: 1, indent: 56, color: AppColors.creamDark),
-        itemBuilder: (_, index) {
-          final customer = customers[index];
-          return ListTile(
-            dense: true,
-            leading: CircleAvatar(
-              radius: 17,
-              backgroundColor: AppColors.navy,
-              foregroundColor: Colors.white,
-              child: Text(
-                customer.name.trim().isEmpty
-                    ? '?'
-                    : customer.name.trim().substring(0, 1).toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            title: Text(
-              customer.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            subtitle: Text(
-              '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: const Icon(Icons.check_circle_outline_rounded),
-            onTap: () => onSelected(customer),
-          );
-        },
-      ),
-    );
-  }
-
-  static String _displayPhone(String phone) {
-    final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length == 12 && digits.startsWith('91')) {
-      return '+91 ${digits.substring(2, 7)} ${digits.substring(7)}';
-    }
-    return phone;
-  }
-}
-
-class _BillSummaryRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool isTotal;
-
-  const _BillSummaryRow({
-    required this.label,
-    required this.value,
-    this.isTotal = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: isTotal ? AppColors.textDark : AppColors.textMuted,
-              fontSize: isTotal ? 16 : 14,
-              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w500,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              color: isTotal ? AppColors.textDark : AppColors.textMuted,
-              fontSize: isTotal ? 20 : 14,
-              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _formatQuantityInput(double value) {
-  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
-  return value
-      .toStringAsFixed(3)
-      .replaceFirst(RegExp(r'0+$'), '')
-      .replaceFirst(RegExp(r'\.$'), '');
-}
-
-class _BillDraft {
-  final String customerName;
-  final String? customerPhone;
-  final double discountPercent;
-  final bool isPaid;
-  final String paymentMethod;
-
-  const _BillDraft({
-    required this.customerName,
-    required this.customerPhone,
-    required this.discountPercent,
-    required this.isPaid,
-    required this.paymentMethod,
-  });
 }

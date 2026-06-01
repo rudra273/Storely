@@ -92,6 +92,31 @@ void main() {
       ),
     );
   });
+
+  test('reports bad import rows instead of silently skipping them', () async {
+    final csv = utf8.encode(
+      'Name,MRP,Quantity\n'
+      'Good Item,10,2\n'
+      'Bad Price,abc,1\n'
+      'Bad Quantity,20,-3\n',
+    );
+
+    expect(
+      () => CsvImporter.parseBytes(
+        Uint8List.fromList(csv),
+        fileName: 'products.csv',
+      ),
+      throwsA(
+        isA<Exception>()
+            .having((e) => e.toString(), 'bad price', contains('Row 3'))
+            .having(
+              (e) => e.toString(),
+              'bad quantity',
+              contains('Row 4: Quantity cannot be negative'),
+            ),
+      ),
+    );
+  });
 }
 
 Uint8List _xlsxBytes(List<List<Object?>> rows) {

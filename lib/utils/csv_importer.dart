@@ -62,33 +62,63 @@ class CsvImporter {
     }
 
     final products = <Product>[];
+    final errors = <String>[];
     for (int i = header.index + 1; i < rows.length; i++) {
       final row = rows[i];
-      if (row.isEmpty) continue;
+      if (_isBlankRow(row)) continue;
 
-      try {
-        final name = _getString(row, mapping['name']);
-        if (name == null || name.isEmpty) continue;
-
-        products.add(
-          Product(
-            productCode: _getString(row, mapping['product_code']),
-            barcode: _getString(row, mapping['barcode']),
-            name: name,
-            category: _getString(row, mapping['category']),
-            sellingPrice: _getDouble(row, mapping['selling_price']) ?? 0,
-            purchasePrice: _getDouble(row, mapping['purchase_price']),
-            directPriceToggle: mapping['purchase_price'] == null,
-            manualPrice: _getDouble(row, mapping['selling_price']) ?? 0,
-            quantity: _getDouble(row, mapping['quantity']) ?? 0,
-            unit: _getString(row, mapping['unit']),
-            supplier: _getString(row, mapping['supplier']),
-            source: ProductSource.imported,
-          ),
-        );
-      } catch (_) {
+      final rowNumber = i + 1;
+      final name = _getString(row, mapping['name']);
+      if (name == null || name.isEmpty) {
+        errors.add('Row $rowNumber: Product name is required');
         continue;
       }
+
+      final sellingPrice = _getMoney(
+        row,
+        mapping['selling_price'],
+        'Selling price',
+        rowNumber,
+        errors,
+      );
+      final purchasePrice = _getMoney(
+        row,
+        mapping['purchase_price'],
+        'Purchase price',
+        rowNumber,
+        errors,
+      );
+      final quantity = _getQuantity(
+        row,
+        mapping['quantity'],
+        rowNumber,
+        errors,
+      );
+
+      products.add(
+        Product(
+          productCode: _getString(row, mapping['product_code']),
+          barcode: _getString(row, mapping['barcode']),
+          name: name,
+          category: _getString(row, mapping['category']),
+          sellingPrice: sellingPrice ?? 0,
+          purchasePrice: purchasePrice,
+          directPriceToggle: mapping['purchase_price'] == null,
+          manualPrice: sellingPrice ?? 0,
+          quantity: quantity ?? 0,
+          unit: _getString(row, mapping['unit']),
+          supplier: _getString(row, mapping['supplier']),
+          source: ProductSource.imported,
+        ),
+      );
+    }
+
+    if (errors.isNotEmpty) {
+      final preview = errors.take(10).join('\n');
+      final suffix = errors.length > 10
+          ? '\n...and ${errors.length - 10} more row errors'
+          : '';
+      throw Exception('Import failed:\n$preview$suffix');
     }
 
     return products;
@@ -531,10 +561,55 @@ class CsvImporter {
     return val.isEmpty ? null : val;
   }
 
-  static double? _getDouble(List row, int? index) {
+  static bool _isBlankRow(List row) {
+    return row.every((value) => value.toString().trim().isEmpty);
+  }
+
+  static double? _getMoney(
+    List row,
+    int? index,
+    String label,
+    int rowNumber,
+    List<String> errors,
+  ) {
+    final value = _getDouble(row, index, label, rowNumber, errors);
+    if (value != null && value < 0) {
+      errors.add('Row $rowNumber: $label cannot be negative');
+    }
+    return value;
+  }
+
+  static double? _getQuantity(
+    List row,
+    int? index,
+    int rowNumber,
+    List<String> errors,
+  ) {
+    final value = _getDouble(row, index, 'Quantity', rowNumber, errors);
+    if (value != null && value < 0) {
+      errors.add('Row $rowNumber: Quantity cannot be negative');
+    }
+    return value;
+  }
+
+  static double? _getDouble(
+    List row,
+    int? index,
+    String label,
+    int rowNumber,
+    List<String> errors,
+  ) {
     if (index == null || index >= row.length) return null;
-    final val = row[index].toString().replaceAll(RegExp(r'[^0-9.]'), '');
-    return double.tryParse(val);
+    final raw = row[index].toString().trim();
+    if (raw.isEmpty) return null;
+    final normalised = raw
+        .replaceAll(',', '')
+        .replaceAll(RegExp(r'[^0-9.\-]'), '');
+    final value = double.tryParse(normalised);
+    if (value == null) {
+      errors.add('Row $rowNumber: Invalid $label "$raw"');
+    }
+    return value;
   }
 }
 

@@ -16,7 +16,7 @@ class SupplierProfile {
   SupplierProfile({
     this.id,
     String? uuid,
-    this.shopId = 'local-shop',
+    this.shopId = '',
     required this.name,
     String? phone,
     String? email,
@@ -40,7 +40,7 @@ class SupplierProfile {
     return SupplierProfile(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
-      shopId: map['shop_id'] as String? ?? 'local-shop',
+      shopId: map['shop_id'] as String? ?? '',
       name: map['name'] as String,
       phone: map['phone'] as String?,
       email: map['email'] as String?,

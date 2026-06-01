@@ -4,29 +4,15 @@ mixin DatabaseProducts {
   Future<Database> get database;
   Future<GlobalPricingSettings> getGlobalPricingSettings();
 
-  Future<int> insertProduct(Product product) async {
+  Future<int> insertProduct(Product product, {DateTime? purchaseDate}) async {
+    await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
-      final productToInsert = await _prepareProductForWrite(txn, product);
-      final id = await txn.insert(
-        'products',
-        productToInsert.toMap()..remove('id'),
-        conflictAlgorithm: ConflictAlgorithm.abort,
+      final id = await _insertProductInTransaction(
+        txn,
+        product,
+        purchaseDate: purchaseDate,
       );
-      if (productToInsert.quantity > 0) {
-        await _insertStockMovement(
-          txn,
-          productId: id,
-          productUuid: productToInsert.uuid,
-          movementType: StockMovementType.purchase,
-          quantityDelta: productToInsert.quantity,
-          unitCost: productToInsert.purchasePrice,
-          sourceType: productToInsert.source == ProductSource.imported
-              ? 'import'
-              : 'manual',
-          createdAt: productToInsert.createdAt,
-        );
-      }
       notifyDatabaseChanged();
       return id;
     });
@@ -108,11 +94,28 @@ mixin DatabaseProducts {
   }
 
   Future<int> updateProduct(Product product) async {
+    await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
+      final existing = product.id == null
+          ? const <Map<String, dynamic>>[]
+          : await _queryProducts(
+              txn,
+              where: 'p.id = ?',
+              whereArgs: [product.id],
+              limit: 1,
+            );
+      final current = existing.isEmpty
+          ? null
+          : Product.fromMap(existing.single);
       final productToUpdate = await _prepareProductForWrite(
         txn,
         product.copyWith(updatedAt: DateTime.now().toUtc()),
+      );
+      await _assertProductCodeAndBarcodeUnique(
+        txn,
+        productToUpdate,
+        excludeId: product.id,
       );
       final count = await txn.update(
         'products',
@@ -120,6 +123,20 @@ mixin DatabaseProducts {
         where: 'id = ?',
         whereArgs: [product.id],
       );
+      if (count > 0 && current != null) {
+        final quantityDelta = productToUpdate.quantity - current.quantity;
+        await _insertStockMovement(
+          txn,
+          productId: product.id!,
+          productUuid: productToUpdate.uuid,
+          movementType: StockMovementType.adjustment,
+          quantityDelta: quantityDelta,
+          unitCost: productToUpdate.purchasePrice,
+          sourceType: 'manual',
+          notes: 'Manual stock adjustment',
+        );
+        await _syncProductQuantityCache(txn, product.id!);
+      }
       notifyDatabaseChanged();
       return count;
     });
@@ -131,47 +148,70 @@ mixin DatabaseProducts {
     required DateTime purchaseDate,
     String source = ProductSource.mobile,
   }) async {
+    await _requireAdminMutation();
     if (product.id == null) throw ArgumentError('Product id is required');
     final db = await database;
     return db.transaction((txn) async {
-      final existing = await _queryProducts(
+      final count = await _restockProductInTransaction(
         txn,
-        where: 'p.id = ?',
-        whereArgs: [product.id],
-        limit: 1,
-      );
-      if (existing.isEmpty) return 0;
-      final current = Product.fromMap(existing.single);
-      final updatedProduct = await _prepareProductForWrite(
-        txn,
-        product.copyWith(
-          quantity: current.quantity + quantityAdded,
-          source: source,
-          updatedAt: DateTime.now().toUtc(),
-        ),
-      );
-      final count = await txn.update(
-        'products',
-        updatedProduct.toMap(),
-        where: 'id = ?',
-        whereArgs: [product.id],
-      );
-      await _insertStockMovement(
-        txn,
-        productId: product.id!,
-        productUuid: updatedProduct.uuid,
-        movementType: StockMovementType.purchase,
-        quantityDelta: quantityAdded.toDouble(),
-        unitCost: updatedProduct.purchasePrice,
-        sourceType: source == ProductSource.imported ? 'import' : 'manual',
-        createdAt: purchaseDate,
+        product,
+        quantityAdded: quantityAdded,
+        purchaseDate: purchaseDate,
+        source: source,
       );
       notifyDatabaseChanged();
       return count;
     });
   }
 
+  Future<int> commitProductPurchaseBatch(
+    List<ProductPurchaseCommit> commits, {
+    required DateTime purchaseDate,
+    String source = ProductSource.mobile,
+  }) async {
+    await _requireAdminMutation();
+    if (commits.isEmpty) return 0;
+    final db = await database;
+    return db.transaction((txn) async {
+      var committed = 0;
+      for (final commit in commits) {
+        final target = commit.restockTarget;
+        if (target != null) {
+          if (target.id == null) {
+            throw ArgumentError('Restock target id is required');
+          }
+          final restockProduct = commit.product.copyWith(
+            id: target.id,
+            uuid: target.uuid,
+            shopId: target.shopId,
+            createdAt: target.createdAt,
+          );
+          final count = await _restockProductInTransaction(
+            txn,
+            restockProduct,
+            quantityAdded: commit.quantityAdded,
+            purchaseDate: purchaseDate,
+            source: source,
+          );
+          if (count == 0) {
+            throw StateError('Product "${target.name}" no longer exists');
+          }
+        } else {
+          await _insertProductInTransaction(
+            txn,
+            commit.product,
+            purchaseDate: purchaseDate,
+          );
+        }
+        committed++;
+      }
+      notifyDatabaseChanged();
+      return committed;
+    });
+  }
+
   Future<int> deleteProduct(int id) async {
+    await _requireAdminMutation();
     final db = await database;
     final now = _nowIso();
     final count = await db.update(
@@ -195,6 +235,7 @@ mixin DatabaseProducts {
   }
 
   Future<void> saveCategoryPricing(CategoryPricingSettings settings) async {
+    await _requireAdminMutation();
     final db = await database;
     final name = _normaliseName(settings.name);
     if (name == null) throw ArgumentError('Category name is required');
@@ -238,21 +279,25 @@ mixin DatabaseProducts {
   }
 
   Future<void> addCategoryOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     await _ensureCategory(db, name);
   }
 
   Future<void> updateCategoryOption(String oldName, String newName) async {
+    await _requireAdminMutation();
     final db = await database;
     await _updateNameOption(db, 'categories', oldName, newName);
   }
 
   Future<void> deleteCategoryOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     await _softDeleteNameOption(db, 'categories', name);
   }
 
   Future<void> addSupplierOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     await _ensureSupplier(db, name);
   }
@@ -261,12 +306,14 @@ mixin DatabaseProducts {
     SupplierProfile supplier, {
     String? oldName,
   }) async {
+    await _requireAdminMutation();
     final db = await database;
     final name = _normaliseName(supplier.name);
     if (name == null) throw ArgumentError('Supplier name is required');
 
     await db.transaction((txn) async {
       final now = _nowIso();
+      final shopId = await _activeShopId(txn);
       final oldValue = _normaliseName(oldName);
       final existing = supplier.id != null
           ? await txn.query(
@@ -297,9 +344,7 @@ mixin DatabaseProducts {
               .copyWith(
                 name: name,
                 uuid: supplier.uuid.isEmpty ? _newUuid() : supplier.uuid,
-                shopId: supplier.shopId.isEmpty
-                    ? _defaultShopId
-                    : supplier.shopId,
+                shopId: supplier.shopId.isEmpty ? shopId : supplier.shopId,
                 updatedAt: DateTime.parse(now),
               )
               .toMap()
@@ -307,9 +352,7 @@ mixin DatabaseProducts {
 
       if (existing.isEmpty) {
         map['uuid'] = supplier.uuid.isEmpty ? _newUuid() : supplier.uuid;
-        map['shop_id'] = supplier.shopId.isEmpty
-            ? _defaultShopId
-            : supplier.shopId;
+        map['shop_id'] = supplier.shopId.isEmpty ? shopId : supplier.shopId;
         map['created_at'] = supplier.createdAt.toIso8601String();
         map['updated_at'] = now;
         await txn.insert('suppliers', map);
@@ -329,11 +372,13 @@ mixin DatabaseProducts {
   }
 
   Future<void> updateSupplierOption(String oldName, String newName) async {
+    await _requireAdminMutation();
     final db = await database;
     await _updateNameOption(db, 'suppliers', oldName, newName);
   }
 
   Future<void> deleteSupplierOption(String name) async {
+    await _requireAdminMutation();
     final db = await database;
     await _softDeleteNameOption(db, 'suppliers', name);
   }
@@ -348,6 +393,7 @@ mixin DatabaseProducts {
   }
 
   Future<int> refreshAllProductSellingPrices() async {
+    await _requireAdminMutation();
     final db = await database;
     final global = await getGlobalPricingSettings();
     final productMaps = await _queryProducts(db);
@@ -398,11 +444,22 @@ mixin DatabaseProducts {
 
   Future<Product?> findProductForBilling({
     int? id,
+    String? productUuid,
     String? itemCode,
     String? barcode,
     required String name,
   }) async {
     final db = await database;
+    final uuid = _normaliseName(productUuid);
+    if (uuid != null) {
+      final rows = await _queryProducts(
+        db,
+        where: 'p.uuid = ?',
+        whereArgs: [uuid],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return Product.fromMap(rows.first);
+    }
     if (id != null) {
       final rows = await _queryProducts(
         db,
@@ -442,20 +499,31 @@ mixin DatabaseProducts {
   }
 
   Future<BillItem> buildBillItemForProduct(Product product) async {
+    final db = await database;
+    final category = product.category == null
+        ? null
+        : await _getCategoryPricing(db, product.category!);
     final breakdown = await resolveProductPrice(product);
+    final outputGst = breakdown.outputGstAmount;
     return BillItem(
       uuid: _newUuid(),
       shopId: product.shopId,
       productId: product.id,
       productUuid: product.uuid,
       productName: product.name,
+      hsnCodeSnapshot: product.hsnCode ?? category?.hsnCode,
+      hsnTypeSnapshot: product.hsnType ?? category?.hsnType,
       unit: product.unit,
       purchasePriceSnapshot: breakdown.purchasePrice,
       sellingPriceSnapshot: breakdown.sellingPrice,
       costSnapshot: breakdown.totalCost,
       profitSnapshot: breakdown.profitAmount,
       commissionSnapshot: 0,
-      gstSnapshot: breakdown.gstAmount,
+      gstSnapshot: outputGst,
+      gstPercentSnapshot: breakdown.gstPercent,
+      taxableValueSnapshot: breakdown.preGstSellingPrice,
+      cgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
+      sgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
       wasDirectPrice: breakdown.wasDirectPrice,
     );
   }
@@ -464,9 +532,10 @@ mixin DatabaseProducts {
     List<Product> products, {
     DateTime? purchaseDate,
   }) async {
+    await _requireAdminMutation();
     final db = await database;
     final date = purchaseDate ?? DateTime.now();
-    final cleanProducts = _uniqueProductsByIdentity(
+    final cleanProducts = _productsGroupedByIdentity(
       products,
     ).map(_asImportedProduct).toList();
     final batchKey = _importBatchKey(cleanProducts, date);
@@ -502,17 +571,22 @@ mixin DatabaseProducts {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         }
+        final ledgerQuantity = await _ledgerQuantityForProduct(txn, id);
+        final stocktakeDelta = p.quantity - ledgerQuantity;
         await _insertStockMovement(
           txn,
           productId: id,
           productUuid: writeProduct.uuid,
-          movementType: StockMovementType.purchase,
-          quantityDelta: p.quantity,
+          movementType: StockMovementType.stocktake,
+          quantityDelta: stocktakeDelta,
           unitCost: writeProduct.purchasePrice,
           sourceType: 'import',
+          supplierId: writeProduct.supplierId,
           importBatchKey: batchKey,
+          notes: 'Import replacement stocktake',
           createdAt: date,
         );
+        await _syncProductQuantityCache(txn, id);
         count++;
       }
       notifyDatabaseChanged();
@@ -524,11 +598,10 @@ mixin DatabaseProducts {
     List<Product> products, {
     DateTime? purchaseDate,
   }) async {
+    await _requireAdminMutation();
     final db = await database;
     final date = purchaseDate ?? DateTime.now();
-    final cleanProducts = _uniqueProductsByIdentity(
-      products,
-    ).map(_asImportedProduct).toList();
+    final cleanProducts = products.map(_asImportedProduct).toList();
     final batchKey = _importBatchKey(cleanProducts, date);
     final rowSetKey = _importRowSetKey(cleanProducts);
 
@@ -538,7 +611,8 @@ mixin DatabaseProducts {
       final duplicateOnDifferentDate = !possibleDuplicate
           ? await _hasImportRowSet(txn, rowSetKey)
           : false;
-      for (final p in cleanProducts) {
+      for (var rowNumber = 0; rowNumber < cleanProducts.length; rowNumber++) {
+        final p = cleanProducts[rowNumber];
         final existing = await _findExistingProductRows(txn, p);
 
         if (existing.isNotEmpty) {
@@ -567,9 +641,12 @@ mixin DatabaseProducts {
             quantityDelta: p.quantity,
             unitCost: merged.purchasePrice,
             sourceType: 'import',
+            supplierId: merged.supplierId,
             importBatchKey: batchKey,
+            importRowNumber: rowNumber + 1,
             createdAt: date,
           );
+          await _syncProductQuantityCache(txn, existingId);
           updated++;
         } else {
           final writeProduct = await _prepareProductForWrite(txn, p);
@@ -586,9 +663,12 @@ mixin DatabaseProducts {
             quantityDelta: p.quantity,
             unitCost: writeProduct.purchasePrice,
             sourceType: 'import',
+            supplierId: writeProduct.supplierId,
             importBatchKey: batchKey,
+            importRowNumber: rowNumber + 1,
             createdAt: date,
           );
+          await _syncProductQuantityCache(txn, id);
           added++;
         }
       }
@@ -607,7 +687,7 @@ mixin DatabaseProducts {
     DateTime? purchaseDate,
   }) async {
     final db = await database;
-    final cleanProducts = _uniqueProductsByIdentity(products);
+    final cleanProducts = products;
     final sameDateDuplicate = purchaseDate != null
         ? await _hasImportBatch(
             db,
@@ -636,10 +716,14 @@ mixin DatabaseProducts {
     return result.possibleDuplicate || result.duplicateOnDifferentDate;
   }
 
-  List<Product> _uniqueProductsByIdentity(List<Product> products) {
+  List<Product> _productsGroupedByIdentity(List<Product> products) {
     final byIdentity = <String, Product>{};
     for (final product in products) {
-      byIdentity[_productIdentity(product)] = product;
+      final identity = _productIdentity(product);
+      final existing = byIdentity[identity];
+      byIdentity[identity] = existing == null
+          ? product
+          : product.copyWith(quantity: existing.quantity + product.quantity);
     }
     return byIdentity.values.toList();
   }
@@ -681,11 +765,125 @@ mixin DatabaseProducts {
     );
   }
 
+  Future<void> _assertProductCodeAndBarcodeUnique(
+    DatabaseExecutor executor,
+    Product product, {
+    int? excludeId,
+  }) async {
+    Future<void> checkField(
+      String column,
+      String label,
+      String? rawValue,
+    ) async {
+      final value = _normaliseName(rawValue);
+      if (value == null) return;
+      final rows = await _queryProducts(
+        executor,
+        where: excludeId == null
+            ? 'LOWER(p.$column) = LOWER(?)'
+            : 'LOWER(p.$column) = LOWER(?) AND p.id != ?',
+        whereArgs: excludeId == null ? [value] : [value, excludeId],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        throw ArgumentError('$label "$value" already exists');
+      }
+    }
+
+    await checkField('product_code', 'Product code', product.productCode);
+    await checkField('barcode', 'Barcode', product.barcode);
+  }
+
+  Future<int> _insertProductInTransaction(
+    DatabaseExecutor executor,
+    Product product, {
+    DateTime? purchaseDate,
+  }) async {
+    final productToInsert = await _prepareProductForWrite(executor, product);
+    await _assertProductCodeAndBarcodeUnique(executor, productToInsert);
+    final id = await executor.insert(
+      'products',
+      productToInsert.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+    if (productToInsert.quantity > 0) {
+      await _insertStockMovement(
+        executor,
+        productId: id,
+        productUuid: productToInsert.uuid,
+        movementType: StockMovementType.purchase,
+        quantityDelta: productToInsert.quantity,
+        unitCost: productToInsert.purchasePrice,
+        sourceType: productToInsert.source == ProductSource.imported
+            ? 'import'
+            : 'manual',
+        supplierId: productToInsert.supplierId,
+        createdAt: purchaseDate ?? productToInsert.createdAt,
+      );
+      await _syncProductQuantityCache(executor, id);
+    }
+    return id;
+  }
+
+  Future<int> _restockProductInTransaction(
+    DatabaseExecutor executor,
+    Product product, {
+    required num quantityAdded,
+    required DateTime purchaseDate,
+    String source = ProductSource.mobile,
+  }) async {
+    if (product.id == null) throw ArgumentError('Product id is required');
+    final existing = await _queryProducts(
+      executor,
+      where: 'p.id = ?',
+      whereArgs: [product.id],
+      limit: 1,
+    );
+    if (existing.isEmpty) return 0;
+    final current = Product.fromMap(existing.single);
+    final updatedProduct = await _prepareProductForWrite(
+      executor,
+      product.copyWith(
+        quantity: current.quantity + quantityAdded,
+        source: source,
+        updatedAt: DateTime.now().toUtc(),
+      ),
+    );
+    await _assertProductCodeAndBarcodeUnique(
+      executor,
+      updatedProduct,
+      excludeId: product.id,
+    );
+    final count = await executor.update(
+      'products',
+      updatedProduct.toMap(),
+      where: 'id = ?',
+      whereArgs: [product.id],
+    );
+    await _insertStockMovement(
+      executor,
+      productId: product.id!,
+      productUuid: updatedProduct.uuid,
+      movementType: StockMovementType.purchase,
+      quantityDelta: quantityAdded.toDouble(),
+      unitCost: updatedProduct.purchasePrice,
+      sourceType: source == ProductSource.imported ? 'import' : 'manual',
+      supplierId: updatedProduct.supplierId,
+      createdAt: purchaseDate,
+    );
+    await _syncProductQuantityCache(executor, product.id!);
+    return count;
+  }
+
   Future<Product> _prepareProductForWrite(
     DatabaseExecutor executor,
     Product product,
   ) async {
+    if (product.quantity < 0) {
+      throw ArgumentError('Product quantity cannot be negative');
+    }
     final now = DateTime.now().toUtc();
+    final shopId = await _activeShopId(executor);
     final categoryId = product.category == null
         ? product.categoryId
         : await _ensureCategory(executor, product.category!);
@@ -697,7 +895,9 @@ mixin DatabaseProducts {
         : await _ensureUnit(executor, product.unit!);
     return product.copyWith(
       uuid: product.uuid.isEmpty ? _newUuid() : product.uuid,
-      shopId: product.shopId.isEmpty ? _defaultShopId : product.shopId,
+      shopId: product.shopId.isEmpty || product.shopId == _legacyShopId
+          ? shopId
+          : product.shopId,
       categoryId: categoryId,
       supplierId: supplierId,
       unitId: unitId,
@@ -714,26 +914,40 @@ mixin DatabaseProducts {
     required double quantityDelta,
     double? unitCost,
     String? sourceType,
-    int? sourceId,
-    String? sourceUuid,
+    int? supplierId,
+    String? supplierUuid,
+    String? sourceDocumentType,
+    int? sourceDocumentId,
+    String? sourceDocumentUuid,
     String? importBatchKey,
+    int? importRowNumber,
     String? notes,
     DateTime? createdAt,
   }) async {
     if (quantityDelta == 0) return;
     final now = DateTime.now().toUtc();
+    final shopId = await _activeShopId(executor);
+    final resolvedSupplierUuid =
+        supplierUuid ??
+        (supplierId == null
+            ? null
+            : await _uuidForId(executor, 'suppliers', supplierId));
     await executor.insert('stock_movements', {
       'uuid': _newUuid(),
-      'shop_id': _defaultShopId,
+      'shop_id': shopId,
       'product_id': productId,
       'product_uuid': productUuid,
       'movement_type': movementType,
       'quantity_delta': quantityDelta,
       'unit_cost': unitCost,
       'source_type': sourceType,
-      'source_id': sourceId,
-      'source_uuid': sourceUuid,
+      'supplier_id': supplierId,
+      'supplier_uuid': resolvedSupplierUuid,
+      'source_document_type': sourceDocumentType,
+      'source_document_id': sourceDocumentId,
+      'source_document_uuid': sourceDocumentUuid,
       'import_batch_key': importBatchKey,
+      'import_row_number': importRowNumber,
       'notes': notes,
       'created_at': (createdAt ?? now).toIso8601String(),
       'updated_at': now.toIso8601String(),
@@ -790,6 +1004,53 @@ mixin DatabaseProducts {
     final barcode = _normaliseName(product.barcode);
     if (barcode != null) return 'barcode:${barcode.toLowerCase()}';
     return 'name:${product.name.trim().toLowerCase()}';
+  }
+
+  Future<double> _ledgerQuantityForProduct(
+    DatabaseExecutor executor,
+    int productId,
+  ) async {
+    final rows = await executor.rawQuery(
+      '''
+      SELECT COALESCE(SUM(quantity_delta), 0) AS quantity
+      FROM stock_movements
+      WHERE deleted_at IS NULL AND product_id = ?
+      ''',
+      [productId],
+    );
+    return (rows.single['quantity'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  Future<void> _syncProductQuantityCache(
+    DatabaseExecutor executor,
+    int productId,
+  ) async {
+    final quantity = await _ledgerQuantityForProduct(executor, productId);
+    await executor.update(
+      'products',
+      {'quantity_cache': quantity, 'updated_at': _nowIso()},
+      where: 'id = ?',
+      whereArgs: [productId],
+    );
+  }
+
+  Future<void> rebuildAllProductQuantityCaches(
+    DatabaseExecutor executor,
+  ) async {
+    await executor.rawUpdate(
+      '''
+      UPDATE products
+      SET quantity_cache = COALESCE((
+            SELECT SUM(quantity_delta)
+            FROM stock_movements
+            WHERE stock_movements.deleted_at IS NULL
+              AND stock_movements.product_id = products.id
+          ), 0),
+          updated_at = ?
+      WHERE deleted_at IS NULL
+      ''',
+      [_nowIso()],
+    );
   }
 }
 
@@ -883,9 +1144,10 @@ Future<int> _ensureNameRecord(
   );
   if (rows.isNotEmpty) return rows.single['id'] as int;
   final now = _nowIso();
+  final shopId = await _activeShopId(executor);
   return executor.insert(table, {
     'uuid': _newUuid(),
-    'shop_id': _defaultShopId,
+    'shop_id': shopId,
     'name': value,
     'created_at': now,
     'updated_at': now,
