@@ -134,7 +134,7 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Release Notes', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Version 1.0.2 prepares Storely for production with purchase-based product import, strict CSV/XLSX column rules, optional direct selling price imports, bill customization, QR/barcode labels, owner/staff cloud onboarding, and stronger billing and stock safeguards.',
+                  'Version 1.0.3 brings UI improvements across all screens, custom billing options, updated import functionality, barcode scanning support, and major bug fixes for a smoother experience.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
