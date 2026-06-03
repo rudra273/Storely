@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/customer.dart';
 import '../models/product.dart';
 import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
@@ -27,12 +28,19 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Product> _lowStockProducts = [];
+  List<Product> _products = [];
   List<Bill> _unpaidBills = [];
+  List<Bill> _bills = [];
+  List<Customer> _customers = [];
+  Map<int, double> _pendingByCustomerId = {};
+  Map<String, double> _pendingByPhone = {};
   int _productCount = 0;
   int _todayBillCount = 0;
   double _todaySales = 0;
   double _todayCollected = 0;
   String? _shopName;
+  final _homeSearchCtrl = TextEditingController();
+  String _homeSearchQuery = '';
 
   @override
   void initState() {
@@ -46,22 +54,36 @@ class _HomeScreenState extends State<HomeScreen> {
     if (oldWidget.refreshToken != widget.refreshToken) _loadData();
   }
 
+  @override
+  void dispose() {
+    _homeSearchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     final db = DatabaseHelper.instance;
     final products = await db.getAllProducts();
+    final customers = await db.getAllCustomers();
+    final bills = await db.getAllBills();
     final shopName = await db.getShopName();
     final lowStockThreshold = await db.getLowStockThreshold();
     final todaySales = await db.getTodaySales();
     final todayCollected = await db.getTodayCollected();
     final todayBillCount = await db.getTodayBillCount();
-    final unpaidBills = await db.getUnpaidBills(limit: 3);
+    final unpaidBills = bills.where((bill) => bill.balanceDue > 0).take(3);
+    final pending = _buildCustomerPendingMaps(bills);
     if (!mounted) return;
     setState(() {
+      _products = products;
       _productCount = products.length;
       _todaySales = todaySales;
       _todayCollected = todayCollected;
       _todayBillCount = todayBillCount;
-      _unpaidBills = unpaidBills;
+      _unpaidBills = unpaidBills.toList();
+      _bills = bills;
+      _customers = customers;
+      _pendingByCustomerId = pending.byCustomerId;
+      _pendingByPhone = pending.byPhone;
       _shopName = shopName;
       _lowStockProducts = products
           .where((p) => p.quantity <= lowStockThreshold)
@@ -117,12 +139,29 @@ class _HomeScreenState extends State<HomeScreen> {
                       productCount: _productCount,
                       billCount: _todayBillCount,
                     ),
+                    const SizedBox(height: AppSpacing.md),
+                    _HomeSearchSection(
+                      controller: _homeSearchCtrl,
+                      query: _homeSearchQuery,
+                      results: _searchResults,
+                      onChanged: (value) =>
+                          setState(() => _homeSearchQuery = value.trim()),
+                      onClear: () {
+                        _homeSearchCtrl.clear();
+                        setState(() => _homeSearchQuery = '');
+                      },
+                    ),
                     const SizedBox(height: AppSpacing.xxl),
                     _QuickActionsSection(
                       onScan: widget.onScan,
                       onAddProduct: widget.onAddProduct,
                       onQrSheet: _openQrSheet,
                       onReports: _openReports,
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    _WorkspaceShortcutsSection(
+                      customerCount: _customers.length,
+                      onCustomers: _openCustomersSheet,
                     ),
                     const SizedBox(height: AppSpacing.xxl),
                     SectionHeader(
@@ -154,6 +193,79 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  List<_HomeSearchResult> get _searchResults {
+    final query = _homeSearchQuery.toLowerCase();
+    if (query.isEmpty) return [];
+    final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
+    final results = <_HomeSearchResult>[];
+
+    for (final product in _products) {
+      if (results.length >= 8) break;
+      final matches =
+          product.name.toLowerCase().contains(query) ||
+          (product.itemCode?.toLowerCase().contains(query) ?? false) ||
+          (product.barcode?.toLowerCase().contains(query) ?? false) ||
+          (product.category?.toLowerCase().contains(query) ?? false) ||
+          (product.supplier?.toLowerCase().contains(query) ?? false);
+      if (!matches) continue;
+      results.add(
+        _HomeSearchResult(
+          icon: Icons.inventory_2_outlined,
+          color: AppColors.navy,
+          title: product.name,
+          subtitle: 'Product · ${product.quantityLabel} in stock',
+          trailing: '₹${product.sellingPrice.toStringAsFixed(0)}',
+          onTap: () => widget.onNavigate(1),
+        ),
+      );
+    }
+
+    for (final bill in _bills) {
+      if (results.length >= 8) break;
+      final number = _cleanBillNumber(bill).toLowerCase();
+      final phone = bill.customerPhone?.replaceAll(RegExp(r'[^0-9]'), '') ?? '';
+      final matches =
+          number.contains(query) ||
+          bill.customerName.toLowerCase().contains(query) ||
+          (digits.isNotEmpty && phone.contains(digits));
+      if (!matches) continue;
+      results.add(
+        _HomeSearchResult(
+          icon: Icons.receipt_long_outlined,
+          color: AppColors.amber,
+          title: _cleanBillNumber(bill),
+          subtitle: 'Bill · ${bill.customerName}',
+          trailing: '₹${bill.totalAmount.toStringAsFixed(0)}',
+          onTap: () => widget.onNavigate(2),
+        ),
+      );
+    }
+
+    for (final customer in _customers) {
+      if (results.length >= 8) break;
+      final matches =
+          customer.name.toLowerCase().contains(query) ||
+          customer.phone.contains(digits.isEmpty ? query : digits) ||
+          (customer.gstin?.toLowerCase().contains(query) ?? false) ||
+          (customer.address?.toLowerCase().contains(query) ?? false);
+      if (!matches) continue;
+      final pending = _pendingAmount(customer);
+      results.add(
+        _HomeSearchResult(
+          icon: Icons.people_outline_rounded,
+          color: AppColors.success,
+          title: customer.name,
+          subtitle:
+              'Customer · ${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
+          trailing: pending > 0 ? 'Due ₹${pending.toStringAsFixed(0)}' : 'Paid',
+          onTap: _openCustomersSheet,
+        ),
+      );
+    }
+
+    return results;
+  }
+
   Future<void> _openQrSheet() async {
     final products = await DatabaseHelper.instance.getAllProducts();
     if (!mounted) return;
@@ -173,6 +285,440 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+    );
+  }
+
+  Future<void> _openCustomersSheet() async {
+    final customers = await DatabaseHelper.instance.getAllCustomers();
+    final bills = await DatabaseHelper.instance.getAllBills();
+    if (!mounted) return;
+    final pending = _buildCustomerPendingMaps(bills);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _HomeCustomersSheet(
+        customers: customers,
+        pendingByCustomerId: pending.byCustomerId,
+        pendingByPhone: pending.byPhone,
+      ),
+    );
+    await _loadData();
+  }
+
+  double _pendingAmount(Customer customer) {
+    final byId = customer.id == null ? null : _pendingByCustomerId[customer.id];
+    if (byId != null) return byId;
+    return _pendingByPhone[customer.phone] ?? 0;
+  }
+}
+
+// ── Home Search ───────────────────────────────────────────────────────────────
+
+class _HomeSearchSection extends StatelessWidget {
+  final TextEditingController controller;
+  final String query;
+  final List<_HomeSearchResult> results;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _HomeSearchSection({
+    required this.controller,
+    required this.query,
+    required this.results,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TextField(
+          controller: controller,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search products, bills, customers...',
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+            suffixIcon: query.isEmpty
+                ? null
+                : IconButton(
+                    onPressed: onClear,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+          ),
+          onChanged: onChanged,
+        ),
+        if (query.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          results.isEmpty
+              ? _EmptyState(
+                  icon: Icons.search_off_rounded,
+                  message: 'No matching products, bills, or customers',
+                )
+              : CompactListCard(
+                  rows: results
+                      .map(
+                        (result) => CompactListRow(
+                          leading: LeadingIconChip(
+                            icon: result.icon,
+                            color: result.color,
+                          ),
+                          title: result.title,
+                          subtitle: result.subtitle,
+                          trailing: Text(
+                            result.trailing,
+                            style: AppText.caption.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                          onTap: result.onTap,
+                        ),
+                      )
+                      .toList(),
+                ),
+        ],
+      ],
+    );
+  }
+}
+
+class _HomeSearchResult {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final VoidCallback onTap;
+
+  const _HomeSearchResult({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    required this.onTap,
+  });
+}
+
+// ── Workspace Shortcuts ───────────────────────────────────────────────────────
+
+class _WorkspaceShortcutsSection extends StatelessWidget {
+  final int customerCount;
+  final VoidCallback onCustomers;
+
+  const _WorkspaceShortcutsSection({
+    required this.customerCount,
+    required this.onCustomers,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Workspace'),
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: [
+            _WorkspaceTile(
+              icon: Icons.people_outline_rounded,
+              label: 'Customers',
+              subtitle: '$customerCount saved',
+              color: AppColors.success,
+              onTap: onCustomers,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            const _WorkspaceTile(
+              icon: Icons.handshake_outlined,
+              label: 'Suppliers',
+              subtitle: 'Soon',
+              color: AppColors.navy,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            const _WorkspaceTile(
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'Expenses',
+              subtitle: 'Soon',
+              color: AppColors.navy,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            const _WorkspaceTile(
+              icon: Icons.group_work_outlined,
+              label: 'Staff',
+              subtitle: 'Soon',
+              color: AppColors.navy,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkspaceTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _WorkspaceTile({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.55,
+          child: Column(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: enabled
+                      ? color.withValues(alpha: 0.1)
+                      : AppColors.surface,
+                  borderRadius: AppRadius.mdRadius,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                label,
+                style: AppText.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.ink,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                subtitle,
+                style: AppText.caption.copyWith(fontSize: 11),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Customers Sheet ───────────────────────────────────────────────────────────
+
+class _HomeCustomersSheet extends StatefulWidget {
+  final List<Customer> customers;
+  final Map<int, double> pendingByCustomerId;
+  final Map<String, double> pendingByPhone;
+
+  const _HomeCustomersSheet({
+    required this.customers,
+    required this.pendingByCustomerId,
+    required this.pendingByPhone,
+  });
+
+  @override
+  State<_HomeCustomersSheet> createState() => _HomeCustomersSheetState();
+}
+
+class _HomeCustomersSheetState extends State<_HomeCustomersSheet> {
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Customer> get _filtered {
+    final query = _searchCtrl.text.trim().toLowerCase();
+    if (query.isEmpty) return widget.customers;
+    final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
+    return widget.customers.where((customer) {
+      return customer.name.toLowerCase().contains(query) ||
+          customer.phone.contains(digits.isEmpty ? query : digits) ||
+          (customer.gstin?.toLowerCase().contains(query) ?? false) ||
+          (customer.address?.toLowerCase().contains(query) ?? false);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final customers = _filtered;
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.84,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.creamDark,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const LeadingIconChip(
+                  icon: Icons.people_outline_rounded,
+                  color: AppColors.success,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    'Customers',
+                    style: AppText.title.copyWith(color: AppColors.navy),
+                  ),
+                ),
+                Text(
+                  '${widget.customers.length}',
+                  style: AppText.subtitle.copyWith(color: AppColors.inkMuted),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _searchCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Search customers',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Flexible(
+              child: customers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No matching customers',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: customers.length,
+                      separatorBuilder: (_, index) =>
+                          const SizedBox(height: AppSpacing.sm),
+                      itemBuilder: (_, index) {
+                        final customer = customers[index];
+                        return _CustomerSummaryRow(
+                          customer: customer,
+                          pendingAmount: _pendingAmount(customer),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double _pendingAmount(Customer customer) {
+    final byId = customer.id == null
+        ? null
+        : widget.pendingByCustomerId[customer.id];
+    if (byId != null) return byId;
+    return widget.pendingByPhone[customer.phone] ?? 0;
+  }
+}
+
+class _CustomerSummaryRow extends StatelessWidget {
+  final Customer customer;
+  final double pendingAmount;
+
+  const _CustomerSummaryRow({
+    required this.customer,
+    required this.pendingAmount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          const LeadingIconChip(
+            icon: Icons.person_outline_rounded,
+            color: AppColors.success,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  customer.name,
+                  style: AppText.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (customer.phone.isNotEmpty)
+                      _displayPhone(customer.phone),
+                    '${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
+                  ].join(' · '),
+                  style: AppText.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '₹${customer.totalPurchaseAmount.toStringAsFixed(0)}',
+                style: AppText.subtitle.copyWith(fontSize: 14),
+              ),
+              Text(
+                pendingAmount > 0
+                    ? 'Due ₹${pendingAmount.toStringAsFixed(0)}'
+                    : 'No due',
+                style: AppText.caption.copyWith(
+                  color: pendingAmount > 0
+                      ? AppColors.error
+                      : AppColors.success,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -656,4 +1202,46 @@ class _EmptyState extends StatelessWidget {
 String _cleanBillNumber(Bill bill) {
   if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';
   return bill.billNumber.replaceFirst(RegExp(r'^SHOP-LOCAL-local-'), 'INV-');
+}
+
+_CustomerPendingMaps _buildCustomerPendingMaps(List<Bill> bills) {
+  final byCustomerId = <int, double>{};
+  final byPhone = <String, double>{};
+  for (final bill in bills) {
+    if (bill.balanceDue <= 0) continue;
+    final customerId = bill.customerId;
+    if (customerId != null) {
+      byCustomerId[customerId] =
+          (byCustomerId[customerId] ?? 0) + bill.balanceDue;
+    }
+    final phone = _normaliseHomePhone(bill.customerPhone);
+    if (phone != null) {
+      byPhone[phone] = (byPhone[phone] ?? 0) + bill.balanceDue;
+    }
+  }
+  return _CustomerPendingMaps(byCustomerId: byCustomerId, byPhone: byPhone);
+}
+
+String? _normaliseHomePhone(String? value) {
+  final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits == null || digits.isEmpty || digits == '91') return null;
+  if (digits.length == 10) return '91$digits';
+  return digits;
+}
+
+String _displayPhone(String phone) {
+  if (phone.length == 12 && phone.startsWith('91')) {
+    return '+91 ${phone.substring(2, 7)} ${phone.substring(7)}';
+  }
+  return phone;
+}
+
+class _CustomerPendingMaps {
+  final Map<int, double> byCustomerId;
+  final Map<String, double> byPhone;
+
+  const _CustomerPendingMaps({
+    required this.byCustomerId,
+    required this.byPhone,
+  });
 }
