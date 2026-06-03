@@ -4,11 +4,13 @@ class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
   final double subtotal;
   final int itemCount;
+  final Bill? initialBill;
 
   const _BillCheckoutSheet({
     required this.customers,
     required this.subtotal,
     required this.itemCount,
+    this.initialBill,
   });
 
   @override
@@ -31,6 +33,46 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   var _paymentStatus = Bill.statusUnpaid;
   var _paymentMethod = 'cash';
   var _hideCustomerSuggestions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final bill = widget.initialBill;
+    if (bill == null) return;
+    _setCheckoutControllerText(_customerController, bill.customerName);
+    _setCheckoutControllerText(
+      _phoneController,
+      _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
+    );
+    _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
+    _setCheckoutControllerText(
+      _legalNameController,
+      bill.customerGstLegalName ?? '',
+    );
+    _setCheckoutControllerText(
+      _tradeNameController,
+      bill.customerGstTradeName ?? '',
+    );
+    _setCheckoutControllerText(
+      _addressController,
+      bill.customerAddressSnapshot ?? '',
+    );
+    _setCheckoutControllerText(
+      _stateCodeController,
+      bill.placeOfSupplyStateCode ?? '',
+    );
+    if (bill.discountPercent > 0) {
+      _discountPercent = bill.discountPercent;
+      _setCheckoutControllerText(
+        _discountController,
+        bill.discountPercent.toStringAsFixed(2),
+      );
+    }
+    _billType = bill.billType;
+    _paymentStatus = Bill.statusUnpaid;
+    _paymentMethod = 'cash';
+    _hideCustomerSuggestions = true;
+  }
 
   @override
   void dispose() {

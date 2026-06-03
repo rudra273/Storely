@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 20,
+      version: 21,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -368,6 +368,10 @@ mixin DatabaseSchema {
         paid_amount REAL NOT NULL DEFAULT 0,
         balance_due REAL NOT NULL DEFAULT 0,
         payment_status TEXT NOT NULL DEFAULT 'unpaid',
+        lifecycle_status TEXT NOT NULL DEFAULT 'finalized',
+        cancelled_at TEXT,
+        cancel_reason TEXT,
+        duplicated_from_bill_uuid TEXT,
         device_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -649,6 +653,10 @@ mixin DatabaseSchema {
       'paid_amount': 'REAL NOT NULL DEFAULT 0',
       'balance_due': 'REAL NOT NULL DEFAULT 0',
       'payment_status': "TEXT NOT NULL DEFAULT 'unpaid'",
+      'lifecycle_status': "TEXT NOT NULL DEFAULT 'finalized'",
+      'cancelled_at': 'TEXT',
+      'cancel_reason': 'TEXT',
+      'duplicated_from_bill_uuid': 'TEXT',
     });
     await _ensureColumns(executor, 'bill_items', {
       'hsn_code_snapshot': 'TEXT',
@@ -844,7 +852,7 @@ mixin DatabaseSchema {
         'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
         'updated_at': now,
       };
-      if (existingId != null && ledger.gstin == null) {
+      if (existingId != null) {
         data
           ..remove('gstin')
           ..remove('gst_legal_name')

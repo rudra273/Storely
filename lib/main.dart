@@ -231,6 +231,7 @@ class _AppShellState extends State<AppShell> {
   int _productsRefreshToken = 0;
   int _billsRefreshToken = 0;
   int _storeRefreshToken = 0;
+  int _productPurchaseRequestToken = 0;
 
   void _switchTab(int index) {
     setState(() {
@@ -255,6 +256,25 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _goHomeFromBack() {
+    if (_currentIndex == 0) return;
+    _switchTab(0);
+  }
+
+  void _openProductPurchaseFlow() {
+    setState(() {
+      _productPurchaseRequestToken++;
+    });
+  }
+
+  void _refreshAfterProductPurchaseFlow() {
+    if (!mounted) return;
+    setState(() {
+      _homeRefreshToken++;
+      _productsRefreshToken++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -262,18 +282,32 @@ class _AppShellState extends State<AppShell> {
         refreshToken: _homeRefreshToken,
         onNavigate: _switchTab,
         onScan: _openScanner,
+        onAddProduct: _openProductPurchaseFlow,
       ),
-      ProductsScreen(refreshToken: _productsRefreshToken),
+      ProductsScreen(
+        refreshToken: _productsRefreshToken,
+        isActiveMainTab: _currentIndex == 1,
+        openPurchaseFlowToken: _productPurchaseRequestToken,
+        onPurchaseFlowComplete: _refreshAfterProductPurchaseFlow,
+        onBackToHome: _goHomeFromBack,
+      ),
       BillsScreen(refreshToken: _billsRefreshToken),
       StoreScreen(refreshToken: _storeRefreshToken),
     ];
 
-    return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: pages),
-      bottomNavigationBar: _BottomNavBar(
-        currentIndex: _currentIndex,
-        onTabTap: _switchTab,
-        onScanTap: _openScanner,
+    return PopScope(
+      canPop: _currentIndex == 0 || _currentIndex == 1,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || _currentIndex == 1) return;
+        _goHomeFromBack();
+      },
+      child: Scaffold(
+        body: IndexedStack(index: _currentIndex, children: pages),
+        bottomNavigationBar: _BottomNavBar(
+          currentIndex: _currentIndex,
+          onTabTap: _switchTab,
+          onScanTap: _openScanner,
+        ),
       ),
     );
   }

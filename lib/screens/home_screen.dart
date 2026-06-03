@@ -11,12 +11,14 @@ class HomeScreen extends StatefulWidget {
   final int refreshToken;
   final ValueChanged<int> onNavigate;
   final VoidCallback onScan;
+  final VoidCallback onAddProduct;
 
   const HomeScreen({
     super.key,
     this.refreshToken = 0,
     required this.onNavigate,
     required this.onScan,
+    required this.onAddProduct,
   });
 
   @override
@@ -118,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: AppSpacing.xxl),
                     _QuickActionsSection(
                       onScan: widget.onScan,
-                      onAddProduct: () => widget.onNavigate(1),
+                      onAddProduct: widget.onAddProduct,
                       onQrSheet: _openQrSheet,
                       onReports: _openReports,
                     ),

@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/customer.dart';
 import 'package:storely/models/pricing.dart';
 import 'package:storely/models/product.dart';
 
@@ -393,6 +394,76 @@ void main() {
       expect(itemRows, hasLength(2));
       expect(itemRows.every((row) => row['deleted_at'] != null), isTrue);
     });
+
+    test(
+      'cancel bill stores reason and removes it from active bills',
+      () async {
+        final billId = await db.insertBill(
+          Bill(customerName: 'Customer', totalAmount: 120, itemCount: 1),
+          [BillItem(productName: 'Item A', mrp: 120)],
+        );
+
+        await db.cancelBill(billId, reason: 'Wrong customer selected');
+
+        expect(await db.getAllBills(), isEmpty);
+        final database = await db.database;
+        final rows = await database.query(
+          'bills',
+          where: 'id = ?',
+          whereArgs: [billId],
+        );
+        expect(rows.single['lifecycle_status'], Bill.lifecycleCancelled);
+        expect(rows.single['cancel_reason'], 'Wrong customer selected');
+        expect(rows.single['cancelled_at'], isNotNull);
+        expect(rows.single['deleted_at'], isNotNull);
+      },
+    );
+
+    test(
+      'saved bill customer snapshots are not changed by customer edit',
+      () async {
+        await db.insertBill(
+          Bill(
+            customerName: 'Original Buyer',
+            customerPhone: '9876543210',
+            billType: Bill.typeB2b,
+            customerGstin: '27AAAAA0000A1Z5',
+            customerGstLegalName: 'Original Legal Name',
+            customerAddressSnapshot: 'Old Address',
+            placeOfSupplyStateCode: '27',
+            totalAmount: 500,
+            itemCount: 1,
+          ),
+          [BillItem(productName: 'Item A', mrp: 500)],
+        );
+        final customer = (await db.getAllCustomers()).single;
+        final now = DateTime.now();
+
+        await db.saveCustomerProfile(
+          Customer(
+            id: customer.id,
+            uuid: customer.uuid,
+            shopId: customer.shopId,
+            name: 'Updated Buyer',
+            phone: customer.phone,
+            address: 'New Address',
+            gstin: '29BBBBB0000B1Z5',
+            gstLegalName: 'Updated Legal Name',
+            totalPurchaseAmount: customer.totalPurchaseAmount,
+            billCount: customer.billCount,
+            createdAt: customer.createdAt,
+            updatedAt: now,
+          ),
+        );
+
+        final bill = (await db.getAllBills()).single;
+        expect(bill.customerName, 'Original Buyer');
+        expect(bill.customerGstin, '27AAAAA0000A1Z5');
+        expect(bill.customerGstLegalName, 'Original Legal Name');
+        expect(bill.customerAddressSnapshot, 'Old Address');
+        expect(bill.placeOfSupplyStateCode, '27');
+      },
+    );
 
     test('deleting a customer bill reduces customer purchase total', () async {
       final firstBillId = await db.insertBill(

@@ -22,8 +22,19 @@ part 'products/product_cards.dart';
 
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
+  final bool isActiveMainTab;
+  final int openPurchaseFlowToken;
+  final VoidCallback? onPurchaseFlowComplete;
+  final VoidCallback? onBackToHome;
 
-  const ProductsScreen({super.key, this.refreshToken = 0});
+  const ProductsScreen({
+    super.key,
+    this.refreshToken = 0,
+    this.isActiveMainTab = true,
+    this.openPurchaseFlowToken = 0,
+    this.onPurchaseFlowComplete,
+    this.onBackToHome,
+  });
 
   @override
   State<ProductsScreen> createState() => _ProductsScreenState();
@@ -44,6 +55,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
   bool _isUpdatingPrices = false;
+  bool _isOpeningRequestedPurchaseFlow = false;
   int _lowStockThreshold = 5;
   DateTime? _selectedPurchaseDate;
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
@@ -66,6 +78,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
       _loadProducts();
+    }
+    if (oldWidget.openPurchaseFlowToken != widget.openPurchaseFlowToken) {
+      _openRequestedPurchaseFlow();
     }
   }
 
@@ -115,6 +130,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
       _isUpdatingPrices = false;
     });
     _applyFilter();
+  }
+
+  void _openRequestedPurchaseFlow() {
+    if (_isOpeningRequestedPurchaseFlow) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _isOpeningRequestedPurchaseFlow) return;
+      _isOpeningRequestedPurchaseFlow = true;
+      try {
+        await _loadProducts();
+        if (!mounted) return;
+        await _showNewPurchaseFlow();
+      } finally {
+        _isOpeningRequestedPurchaseFlow = false;
+        widget.onPurchaseFlowComplete?.call();
+      }
+    });
   }
 
   void _applyFilter() {
@@ -1762,7 +1793,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             labelText: 'Purchase Price *',
                                             prefixText: '₹',
                                             prefixIcon: Icon(
-                                              Icons.currency_rupee_rounded,
+                                              Icons.inventory_2_outlined,
                                               size: 18,
                                             ),
                                           ),
@@ -2132,9 +2163,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_selectionMode,
+      canPop:
+          !widget.isActiveMainTab ||
+          (!_selectionMode && widget.onBackToHome == null),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _selectionMode) _clearProductSelection();
+        if (!widget.isActiveMainTab) return;
+        if (didPop) return;
+        if (_selectionMode) {
+          _clearProductSelection();
+          return;
+        }
+        widget.onBackToHome?.call();
       },
       child: Scaffold(
         backgroundColor: AppColors.bg,

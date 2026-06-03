@@ -2,7 +2,8 @@ part of '../bills_screen.dart';
 
 class _BillCard extends StatefulWidget {
   final Bill bill;
-  final VoidCallback onDelete;
+  final VoidCallback onCancel;
+  final VoidCallback onDuplicate;
   final VoidCallback onSendWhatsApp;
   final VoidCallback onSharePdf;
   final void Function(bool isPaid, String? paymentMethod) onStatusChanged;
@@ -10,7 +11,8 @@ class _BillCard extends StatefulWidget {
 
   const _BillCard({
     required this.bill,
-    required this.onDelete,
+    required this.onCancel,
+    required this.onDuplicate,
     required this.onSendWhatsApp,
     required this.onSharePdf,
     required this.onStatusChanged,
@@ -267,11 +269,17 @@ class _BillCardState extends State<_BillCard> {
                       children: [
                         if (CloudService.instance.state.value.isAdmin)
                           _ActionButton(
-                            onPressed: widget.onDelete,
-                            icon: Icons.delete_outline,
-                            label: 'Delete',
+                            onPressed: widget.onCancel,
+                            icon: Icons.block_rounded,
+                            label: 'Cancel',
                             color: AppColors.error,
                           ),
+                        _ActionButton(
+                          onPressed: widget.onDuplicate,
+                          icon: Icons.copy_rounded,
+                          label: 'Duplicate',
+                          color: AppColors.navy,
+                        ),
                         _ActionButton(
                           onPressed: _togglePaidStatus,
                           icon: bill.isPaid

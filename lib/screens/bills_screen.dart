@@ -58,29 +58,55 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _deleteBill(Bill bill) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.delete_outline, color: AppColors.error, size: 32),
-        title: const Text('Delete Bill'),
-        content: Text('Delete ${_billDisplayId(bill)}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+  Future<void> _cancelBill(Bill bill) async {
+    if (bill.id == null) return;
+    final reasonCtrl = TextEditingController();
+    try {
+      final reason = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(Icons.block_rounded, color: AppColors.error, size: 32),
+          title: const Text('Cancel Bill'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Cancel ${_billDisplayId(bill)}? Stock and customer ledger will be reversed.',
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: reasonCtrl,
+                textCapitalization: TextCapitalization.sentences,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  prefixIcon: Icon(Icons.notes_outlined),
+                ),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await DatabaseHelper.instance.deleteBill(bill.id!);
-      _loadBills();
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Keep Bill'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, reasonCtrl.text),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Cancel Bill'),
+            ),
+          ],
+        ),
+      );
+      if (reason == null) return;
+      await DatabaseHelper.instance.cancelBill(
+        bill.id!,
+        reason: reason.trim().isEmpty ? 'Correction required' : reason,
+      );
+      await _loadBills();
+    } finally {
+      reasonCtrl.dispose();
     }
   }
 
@@ -181,6 +207,19 @@ class _BillsScreenState extends State<BillsScreen> {
     await _loadBills();
   }
 
+  Future<void> _duplicateBill(Bill bill) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScanScreen(
+          initialMode: BillingEntryMode.manual,
+          duplicateFromBill: bill,
+        ),
+      ),
+    );
+    await _loadBills();
+  }
+
   Future<void> _sendBillOnWhatsApp(Bill bill) async {
     final phone = _whatsAppPhone(bill.customerPhone);
     if (phone == null) return;
@@ -273,13 +312,16 @@ class _BillsScreenState extends State<BillsScreen> {
                 title: 'Create bills',
                 points: [
                   'Use New Bill for manual billing, or Scan & Bill from home for product labels.',
+                  'Until Generate Bill, the billing screen is an editable draft.',
                   'Products added to a bill use price snapshots so old bills do not change when product prices change later.',
                   'Bill settings in Store control invoice title, numbering, logo, signature, and visible fields.',
                 ],
               ),
               AppInfoSection(
-                title: 'Payments and sharing',
+                title: 'After saving',
                 points: [
+                  'Final bills are locked for amount, GST, item, and customer snapshot corrections.',
+                  'For mistakes, cancel the old bill with a reason and duplicate it as a new bill.',
                   'Unpaid and partial bills can be updated with Record Payment.',
                   'Share PDF creates a printable invoice from the saved bill data.',
                   'WhatsApp sharing uses the customer phone saved on the bill.',
@@ -373,7 +415,8 @@ class _BillsScreenState extends State<BillsScreen> {
       widgets.add(
         _BillCard(
           bill: bill,
-          onDelete: () => _deleteBill(bill),
+          onCancel: () => _cancelBill(bill),
+          onDuplicate: () => _duplicateBill(bill),
           onStatusChanged: (isPaid, method) =>
               _updateBillStatus(bill, isPaid, paymentMethod: method),
           onRecordPayment: () => _recordPayment(bill),

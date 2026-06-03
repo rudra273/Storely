@@ -18,8 +18,13 @@ enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
   final BillingEntryMode initialMode;
+  final Bill? duplicateFromBill;
 
-  const ScanScreen({super.key, this.initialMode = BillingEntryMode.scan});
+  const ScanScreen({
+    super.key,
+    this.initialMode = BillingEntryMode.scan,
+    this.duplicateFromBill,
+  });
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -46,7 +51,12 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _entryMode = widget.initialMode;
+    _entryMode = widget.duplicateFromBill == null
+        ? widget.initialMode
+        : BillingEntryMode.manual;
+    if (widget.duplicateFromBill != null) {
+      _items.addAll(widget.duplicateFromBill!.items.map(_copyItemForNewBill));
+    }
     _productSearchCtrl.addListener(_applyProductSearch);
     _loadProducts();
   }
@@ -169,6 +179,31 @@ class _ScanScreenState extends State<ScanScreen> {
     if (!mounted) return;
     _addBillItem(item);
     HapticFeedback.selectionClick();
+  }
+
+  BillItem _copyItemForNewBill(BillItem item) {
+    return BillItem(
+      productId: item.productId,
+      productUuid: item.productUuid,
+      productName: item.productName,
+      hsnCodeSnapshot: item.hsnCodeSnapshot,
+      hsnTypeSnapshot: item.hsnTypeSnapshot,
+      mrp: item.mrp,
+      unit: item.unit,
+      purchasePriceSnapshot: item.purchasePriceSnapshot,
+      sellingPriceSnapshot: item.sellingPriceSnapshot,
+      costSnapshot: item.costSnapshot,
+      profitSnapshot: item.profitSnapshot,
+      commissionSnapshot: item.commissionSnapshot,
+      gstSnapshot: item.gstSnapshot,
+      gstPercentSnapshot: item.gstPercentSnapshot,
+      taxableValueSnapshot: item.taxableValueSnapshot,
+      cgstAmountSnapshot: item.cgstAmountSnapshot,
+      sgstAmountSnapshot: item.sgstAmountSnapshot,
+      igstAmountSnapshot: item.igstAmountSnapshot,
+      wasDirectPrice: item.wasDirectPrice,
+      quantity: item.quantity,
+    );
   }
 
   void _addBillItem(BillItem item) {
@@ -308,6 +343,7 @@ class _ScanScreenState extends State<ScanScreen> {
       isPaid: received >= total,
       paymentMethod: paymentMethod,
       paidAmount: received,
+      duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
     );
 
     try {
@@ -382,6 +418,7 @@ class _ScanScreenState extends State<ScanScreen> {
           customers: customers,
           subtotal: _subtotal,
           itemCount: _itemCount,
+          initialBill: widget.duplicateFromBill,
         ),
       );
       if (draft == null) return;
@@ -688,7 +725,11 @@ class _ScanScreenState extends State<ScanScreen> {
       backgroundColor: AppColors.navy,
       appBar: AppBar(
         title: Text(
-          _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
+          widget.duplicateFromBill != null
+              ? 'Duplicate Bill'
+              : _entryMode == BillingEntryMode.scan
+              ? 'Scan & Bill'
+              : 'Manual Bill',
         ),
         backgroundColor: AppColors.navy,
         foregroundColor: Colors.white,
@@ -709,8 +750,10 @@ class _ScanScreenState extends State<ScanScreen> {
               AppInfoSection(
                 title: 'Complete bill',
                 points: [
+                  'Before Generate Bill, this screen is your editable draft.',
                   'Complete Bill opens checkout for customer, discount, and payment details.',
                   'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
+                  'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
                   'If stock is insufficient, bill creation is blocked before saving.',
                 ],
               ),
