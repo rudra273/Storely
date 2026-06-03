@@ -258,7 +258,9 @@ class _ScanScreenState extends State<ScanScreen> {
     final shop = await DatabaseHelper.instance.getShopProfile();
     final gstRegistered = shop?.gstRegistered ?? false;
     final shopStateCode = _stateCodeFromGstin(shop?.gstin);
-    final supplyStateCode = _cleanOptionalText(placeOfSupplyStateCode);
+    final supplyStateCode =
+        _cleanStateCode(placeOfSupplyStateCode) ??
+        _stateCodeFromGstin(customerGstin);
     final interState =
         gstRegistered &&
         shopStateCode != null &&
@@ -293,7 +295,7 @@ class _ScanScreenState extends State<ScanScreen> {
       customerGstLegalName: _cleanOptionalText(customerGstLegalName),
       customerGstTradeName: _cleanOptionalText(customerGstTradeName),
       customerAddressSnapshot: _cleanOptionalText(customerAddress),
-      placeOfSupplyStateCode: _cleanOptionalText(placeOfSupplyStateCode),
+      placeOfSupplyStateCode: supplyStateCode,
       subtotalAmount: subtotal,
       discountPercent: percent,
       discountAmount: discount,
@@ -510,6 +512,12 @@ class _ScanScreenState extends State<ScanScreen> {
     if (trimmed == null || trimmed.length < 2) return null;
     final code = trimmed.substring(0, 2);
     return RegExp(r'^\d{2}$').hasMatch(code) ? code : null;
+  }
+
+  String? _cleanStateCode(String? value) {
+    final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits == null || digits.isEmpty) return null;
+    return digits.padLeft(2, '0').substring(0, 2);
   }
 
   double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));

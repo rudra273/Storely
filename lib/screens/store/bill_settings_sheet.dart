@@ -238,7 +238,7 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
                     },
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  const _SectionLabel(title: 'Bill Header & Footer'),
+                  const _SectionLabel(title: 'Invoice Content'),
                   const SizedBox(height: AppSpacing.sm),
                   TextField(
                     controller: _titleCtrl,
@@ -258,94 +258,312 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
                       prefixIcon: Icon(Icons.notes_outlined),
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  _AssetRow(
-                    title: 'Shop logo',
-                    hasAsset: _settings.shopLogoBase64 != null,
-                    enabled: _settings.showShopLogo,
-                    onToggle: (value) => setState(
-                      () => _settings = _settings.copyWith(showShopLogo: value),
-                    ),
-                    onPick: _pickLogo,
-                    onClear: () => setState(
-                      () => _settings = _settings.copyWith(clearShopLogo: true),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _AssetRow(
-                    title: 'Digital signature',
-                    hasAsset: _settings.digitalSignatureBase64 != null,
-                    enabled: _settings.showDigitalSignature,
-                    onToggle: (value) => setState(
-                      () => _settings = _settings.copyWith(
-                        showDigitalSignature: value,
-                      ),
-                    ),
-                    onPick: _pickSignature,
-                    onClear: () => setState(
-                      () => _settings = _settings.copyWith(
-                        clearDigitalSignature: true,
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: AppSpacing.lg),
-                  const _SectionLabel(title: 'Show On Bill'),
-                  _switch(
-                    'Shop address',
-                    _settings.showShopAddress,
-                    (value) =>
-                        _settings = _settings.copyWith(showShopAddress: value),
+                  _ToggleGroup(
+                    title: 'Header',
+                    children: [
+                      _switch(
+                        'Invoice title',
+                        _settings.showInvoiceTitle,
+                        (value) => _settings = _settings.copyWith(
+                          showInvoiceTitle: value,
+                        ),
+                      ),
+                      _AssetRow(
+                        title: 'Shop logo',
+                        hasAsset: _settings.shopLogoBase64 != null,
+                        enabled: _settings.showShopLogo,
+                        onToggle: (value) => setState(
+                          () => _settings = _settings.copyWith(
+                            showShopLogo: value,
+                          ),
+                        ),
+                        onPick: _pickLogo,
+                        onClear: () => setState(
+                          () => _settings = _settings.copyWith(
+                            clearShopLogo: true,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Shop phone',
-                    _settings.showShopPhone,
-                    (value) =>
-                        _settings = _settings.copyWith(showShopPhone: value),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Seller / Shop Details',
+                    children: [
+                      _switch(
+                        'Shop name',
+                        _settings.showShopName,
+                        (value) =>
+                            _settings = _settings.copyWith(showShopName: value),
+                      ),
+                      _switch(
+                        'Shop address',
+                        _settings.showShopAddress,
+                        (value) => _settings = _settings.copyWith(
+                          showShopAddress: value,
+                        ),
+                      ),
+                      _switch(
+                        'Shop phone',
+                        _settings.showShopPhone,
+                        (value) => _settings = _settings.copyWith(
+                          showShopPhone: value,
+                        ),
+                      ),
+                      _switch(
+                        'Shop email',
+                        _settings.showShopEmail,
+                        (value) => _settings = _settings.copyWith(
+                          showShopEmail: value,
+                        ),
+                      ),
+                      _switch(
+                        'Shop GSTIN',
+                        _settings.showShopGstin,
+                        (value) => _settings = _settings.copyWith(
+                          showShopGstin: value,
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Shop email',
-                    _settings.showShopEmail,
-                    (value) =>
-                        _settings = _settings.copyWith(showShopEmail: value),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Buyer / Customer Details',
+                    children: [
+                      _switch(
+                        'Customer name',
+                        _settings.showCustomerName,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerName: value,
+                        ),
+                      ),
+                      _switch(
+                        'Customer phone',
+                        _settings.showCustomerPhone,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerPhone: value,
+                        ),
+                      ),
+                      _switch(
+                        'Customer address',
+                        _settings.showCustomerAddress,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerAddress: value,
+                        ),
+                      ),
+                      _switch(
+                        'Customer GSTIN',
+                        _settings.showCustomerGstin,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerGstin: value,
+                        ),
+                      ),
+                      _switch(
+                        'Legal business name',
+                        _settings.showCustomerLegalName,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerLegalName: value,
+                        ),
+                      ),
+                      _switch(
+                        'Trade name',
+                        _settings.showCustomerTradeName,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerTradeName: value,
+                        ),
+                      ),
+                      _switch(
+                        'Place of supply',
+                        _settings.showCustomerPlaceOfSupply,
+                        (value) => _settings = _settings.copyWith(
+                          showCustomerPlaceOfSupply: value,
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Shop GSTIN',
-                    _settings.showShopGstin,
-                    (value) =>
-                        _settings = _settings.copyWith(showShopGstin: value),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Invoice Info Row',
+                    children: [
+                      _switch(
+                        'Invoice number',
+                        _settings.showInvoiceNumber,
+                        (value) => _settings = _settings.copyWith(
+                          showInvoiceNumber: value,
+                        ),
+                      ),
+                      _switch(
+                        'Invoice date',
+                        _settings.showInvoiceDate,
+                        (value) => _settings = _settings.copyWith(
+                          showInvoiceDate: value,
+                        ),
+                      ),
+                      _switch(
+                        'Place of supply',
+                        _settings.showInvoicePlaceOfSupply,
+                        (value) => _settings = _settings.copyWith(
+                          showInvoicePlaceOfSupply: value,
+                        ),
+                      ),
+                      _switch(
+                        'Supply type',
+                        _settings.showInvoiceSupplyType,
+                        (value) => _settings = _settings.copyWith(
+                          showInvoiceSupplyType: value,
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Customer phone',
-                    _settings.showCustomerPhone,
-                    (value) => _settings = _settings.copyWith(
-                      showCustomerPhone: value,
-                    ),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Item Table Columns',
+                    children: [
+                      _switch(
+                        'Serial number',
+                        _settings.showItemSerialColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showItemSerialColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'Item name',
+                        _settings.showItemNameColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showItemNameColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'HSN column',
+                        _settings.showHsnColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showHsnColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'Quantity',
+                        _settings.showQuantityColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showQuantityColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'Rate',
+                        _settings.showRateColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showRateColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'GST percent',
+                        _settings.showGstPercentColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showGstPercentColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'GST amount',
+                        _settings.showGstAmountColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showGstAmountColumn: value,
+                        ),
+                      ),
+                      _switch(
+                        'Amount',
+                        _settings.showAmountColumn,
+                        (value) => _settings = _settings.copyWith(
+                          showAmountColumn: value,
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Customer address',
-                    _settings.showCustomerAddress,
-                    (value) => _settings = _settings.copyWith(
-                      showCustomerAddress: value,
-                    ),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Totals',
+                    children: [
+                      _switch(
+                        'Subtotal',
+                        _settings.showSubtotal,
+                        (value) =>
+                            _settings = _settings.copyWith(showSubtotal: value),
+                      ),
+                      _switch(
+                        'Discount',
+                        _settings.showDiscount,
+                        (value) =>
+                            _settings = _settings.copyWith(showDiscount: value),
+                      ),
+                      _switch(
+                        'Taxable amount',
+                        _settings.showTaxableAmount,
+                        (value) => _settings = _settings.copyWith(
+                          showTaxableAmount: value,
+                        ),
+                      ),
+                      _switch(
+                        'CGST / SGST / IGST',
+                        _settings.showCgstSgstIgst,
+                        (value) => _settings = _settings.copyWith(
+                          showCgstSgstIgst: value,
+                        ),
+                      ),
+                      _switch(
+                        'GST total',
+                        _settings.showGstTotal,
+                        (value) =>
+                            _settings = _settings.copyWith(showGstTotal: value),
+                      ),
+                      _switch(
+                        'Grand total',
+                        _settings.showGrandTotal,
+                        (value) => _settings = _settings.copyWith(
+                          showGrandTotal: value,
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'Payment details',
-                    _settings.showPaymentDetails,
-                    (value) => _settings = _settings.copyWith(
-                      showPaymentDetails: value,
-                    ),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Footer',
+                    children: [
+                      _switch(
+                        'Footer text',
+                        _settings.showFooterText,
+                        (value) => _settings = _settings.copyWith(
+                          showFooterText: value,
+                        ),
+                      ),
+                      _AssetRow(
+                        title: 'Digital signature',
+                        hasAsset: _settings.digitalSignatureBase64 != null,
+                        enabled: _settings.showDigitalSignature,
+                        onToggle: (value) => setState(
+                          () => _settings = _settings.copyWith(
+                            showDigitalSignature: value,
+                          ),
+                        ),
+                        onPick: _pickSignature,
+                        onClear: () => setState(
+                          () => _settings = _settings.copyWith(
+                            clearDigitalSignature: true,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  _switch(
-                    'GST breakdown',
-                    _settings.showGstBreakdown,
-                    (value) =>
-                        _settings = _settings.copyWith(showGstBreakdown: value),
-                  ),
-                  _switch(
-                    'HSN column',
-                    _settings.showHsnColumn,
-                    (value) =>
-                        _settings = _settings.copyWith(showHsnColumn: value),
+                  const SizedBox(height: AppSpacing.md),
+                  _ToggleGroup(
+                    title: 'Tax Display',
+                    children: [
+                      _switch(
+                        'GST breakdown',
+                        _settings.showGstBreakdown,
+                        (value) => _settings = _settings.copyWith(
+                          showGstBreakdown: value,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -377,6 +595,46 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
   }
 }
 
+class _ToggleGroup extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _ToggleGroup({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 2),
+            child: Text(
+              title,
+              style: AppText.caption.copyWith(
+                color: AppColors.inkMuted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
 class _AssetRow extends StatelessWidget {
   final String title;
   final bool hasAsset;
@@ -396,13 +654,8 @@ class _AssetRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.border),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         children: [
           Switch(value: enabled, onChanged: onToggle),

@@ -250,6 +250,9 @@ void main() {
           billType: Bill.typeB2b,
           customerGstin: '27AAAAA0000A1Z5',
           customerGstLegalName: 'B2B Buyer Private Limited',
+          customerGstTradeName: 'B2B Buyer',
+          customerAddressSnapshot: 'Industrial Estate, Mumbai',
+          placeOfSupplyStateCode: '27',
           totalAmount: 1000,
           itemCount: 1,
           isPaid: false,
@@ -273,6 +276,10 @@ void main() {
       expect(bill.paidAmount, 400);
       expect(bill.balanceDue, 600);
       expect(bill.customerGstin, '27AAAAA0000A1Z5');
+      expect(bill.customerGstLegalName, 'B2B Buyer Private Limited');
+      expect(bill.customerGstTradeName, 'B2B Buyer');
+      expect(bill.customerAddressSnapshot, 'Industrial Estate, Mumbai');
+      expect(bill.placeOfSupplyStateCode, '27');
       expect(bill.items.single.hsnCodeSnapshot, '123456');
 
       await db.recordBillPayment(billId, amount: 600);

@@ -73,6 +73,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   }
 
   void _submit(double total, double paidAmount) {
+    if (_billType == Bill.typeB2b && !_validateB2bFields()) return;
     Navigator.pop(
       context,
       _BillDraft(
@@ -83,12 +84,50 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
         customerGstLegalName: _legalNameController.text,
         customerGstTradeName: _tradeNameController.text,
         customerAddress: _addressController.text,
-        placeOfSupplyStateCode: _stateCodeController.text,
+        placeOfSupplyStateCode: _stateCodeController.text.trim().isEmpty
+            ? _gstinController.text.trim()
+            : _stateCodeController.text,
         discountPercent: _discountPercent.clamp(0, 100).toDouble(),
         paidAmount: paidAmount.clamp(0, total).toDouble(),
         paymentMethod: _paymentMethod,
       ),
     );
+  }
+
+  bool _validateB2bFields() {
+    final customerName = _customerController.text.trim();
+    final gstin = _gstinController.text.trim().toUpperCase();
+    final address = _addressController.text.trim();
+    final stateCode = _stateCodeController.text.trim();
+    if (customerName.isEmpty) {
+      _showCheckoutError('Customer name is required for B2B bills');
+      return false;
+    }
+    if (!_isValidGstin(gstin)) {
+      _showCheckoutError('Enter a valid 15-character customer GSTIN');
+      return false;
+    }
+    if (address.isEmpty) {
+      _showCheckoutError('Business address is required for B2B bills');
+      return false;
+    }
+    if (stateCode.isNotEmpty && !RegExp(r'^\d{2}$').hasMatch(stateCode)) {
+      _showCheckoutError('Place of supply state code must be 2 digits');
+      return false;
+    }
+    return true;
+  }
+
+  bool _isValidGstin(String value) {
+    return RegExp(
+      r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
+    ).hasMatch(value);
+  }
+
+  void _showCheckoutError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

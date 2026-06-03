@@ -160,6 +160,42 @@ class _BillCardState extends State<_BillCard> {
                           ],
                         ),
                       ),
+                    if (bill.billType == Bill.typeB2b ||
+                        bill.customerGstin != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (bill.customerGstin != null)
+                              _BillMetaRow(
+                                icon: Icons.badge_outlined,
+                                text: 'GSTIN ${bill.customerGstin}',
+                              ),
+                            if (bill.customerGstLegalName != null)
+                              _BillMetaRow(
+                                icon: Icons.business_center_outlined,
+                                text: bill.customerGstLegalName!,
+                              ),
+                            if (bill.customerGstTradeName != null)
+                              _BillMetaRow(
+                                icon: Icons.storefront_outlined,
+                                text: bill.customerGstTradeName!,
+                              ),
+                            if (bill.customerAddressSnapshot != null)
+                              _BillMetaRow(
+                                icon: Icons.location_on_outlined,
+                                text: bill.customerAddressSnapshot!,
+                              ),
+                            if (bill.placeOfSupplyStateCode != null)
+                              _BillMetaRow(
+                                icon: Icons.map_outlined,
+                                text:
+                                    'Place of supply ${bill.placeOfSupplyStateCode}',
+                              ),
+                          ],
+                        ),
+                      ),
                     ...bill.items.map(
                       (item) => Padding(
                         padding: const EdgeInsets.symmetric(
@@ -280,6 +316,28 @@ class _BillCardState extends State<_BillCard> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BillMetaRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _BillMetaRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: AppColors.inkMuted),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: Text(text, style: AppText.caption)),
+        ],
       ),
     );
   }
