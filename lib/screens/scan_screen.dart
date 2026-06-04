@@ -504,7 +504,12 @@ class _ScanScreenState extends State<ScanScreen> {
                 Navigator.pop(ctx);
                 Navigator.pop(context);
               },
-              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.brandOf(ctx),
+                foregroundColor: AppColors.isDark(ctx)
+                    ? Colors.black
+                    : Colors.white,
+              ),
               child: const Text('Done'),
             ),
           ],
@@ -577,7 +582,9 @@ class _ScanScreenState extends State<ScanScreen> {
         ],
         selected: {_entryMode},
         style: SegmentedButton.styleFrom(
-          backgroundColor: AppColors.navyLight,
+          backgroundColor: AppColors.isDark(context)
+              ? AppColors.darkSurfaceRaised
+              : AppColors.navyLight,
           selectedBackgroundColor: AppColors.amber,
           foregroundColor: Colors.white,
           selectedForegroundColor: Colors.white,
@@ -721,8 +728,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
+    final headerSurface = isDark ? AppColors.darkBg : AppColors.navy;
     return Scaffold(
-      backgroundColor: AppColors.navy,
+      backgroundColor: headerSurface,
       appBar: AppBar(
         title: Text(
           widget.duplicateFromBill != null
@@ -731,7 +740,7 @@ class _ScanScreenState extends State<ScanScreen> {
               ? 'Scan & Bill'
               : 'Manual Bill',
         ),
-        backgroundColor: AppColors.navy,
+        backgroundColor: headerSurface,
         foregroundColor: Colors.white,
         actions: [
           const AppInfoAction(
@@ -822,7 +831,9 @@ class _ScanScreenState extends State<ScanScreen> {
                     vertical: AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.navy,
+                    color: AppColors.isDark(context)
+                        ? AppColors.darkSurfaceRaised
+                        : AppColors.navy,
                     borderRadius: AppRadius.lgRadius,
                   ),
                   child: Row(

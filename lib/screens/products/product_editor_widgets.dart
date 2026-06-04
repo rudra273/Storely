@@ -206,7 +206,7 @@ class _DirectPriceControl extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -257,8 +257,9 @@ class _PriceModeSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
     return Material(
-      color: selected ? Colors.white : Colors.transparent,
+      color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -269,7 +270,7 @@ class _PriceModeSegment extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: selected
-                ? Border.all(color: AppColors.navy.withValues(alpha: 0.18))
+                ? Border.all(color: brand.withValues(alpha: 0.18))
                 : null,
           ),
           child: Row(
@@ -277,7 +278,7 @@ class _PriceModeSegment extends StatelessWidget {
               Icon(
                 icon,
                 size: 19,
-                color: selected ? AppColors.navy : AppColors.textMuted,
+                color: selected ? brand : AppColors.inkMutedOf(context),
               ),
               const SizedBox(width: 7),
               Expanded(
@@ -290,7 +291,7 @@ class _PriceModeSegment extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: selected ? AppColors.navy : AppColors.textDark,
+                        color: selected ? brand : AppColors.inkOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w900,
                       ),
@@ -395,7 +396,10 @@ class _ProductSheetActionBar extends StatelessWidget {
                   : 'Add',
             ),
             style: FilledButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -861,12 +865,13 @@ class _SourcePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: AppColors.navy.withValues(alpha: 0.08),
+          color: brand.withValues(alpha: AppColors.isDark(context) ? 0.16 : 0.08),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
@@ -877,7 +882,7 @@ class _SourcePill extends StatelessWidget {
                   ? Icons.upload_file_rounded
                   : Icons.phone_android_rounded,
               size: 12,
-              color: AppColors.navy,
+              color: brand,
             ),
             const SizedBox(width: 4),
             Flexible(
@@ -885,8 +890,8 @@ class _SourcePill extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.navy,
+                style: TextStyle(
+                  color: brand,
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                 ),

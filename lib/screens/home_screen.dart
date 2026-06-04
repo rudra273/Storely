@@ -371,7 +371,7 @@ class _HomeSearchSection extends StatelessWidget {
                             result.trailing,
                             style: AppText.caption.copyWith(
                               fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
+                              color: AppColors.inkOf(context),
                             ),
                           ),
                           onTap: result.onTap,
@@ -431,25 +431,25 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
               onTap: onCustomers,
             ),
             const SizedBox(width: AppSpacing.sm),
-            const _WorkspaceTile(
+            _WorkspaceTile(
               icon: Icons.handshake_outlined,
               label: 'Suppliers',
               subtitle: 'Soon',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
             ),
             const SizedBox(width: AppSpacing.sm),
-            const _WorkspaceTile(
+            _WorkspaceTile(
               icon: Icons.account_balance_wallet_outlined,
               label: 'Expenses',
               subtitle: 'Soon',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
             ),
             const SizedBox(width: AppSpacing.sm),
-            const _WorkspaceTile(
+            _WorkspaceTile(
               icon: Icons.group_work_outlined,
               label: 'Staff',
               subtitle: 'Soon',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
             ),
           ],
         ),
@@ -488,10 +488,10 @@ class _WorkspaceTile extends StatelessWidget {
                 height: 52,
                 decoration: BoxDecoration(
                   color: enabled
-                      ? color.withValues(alpha: 0.1)
-                      : AppColors.surface,
+                      ? color.withValues(alpha: 0.12)
+                      : AppColors.surfaceOf(context),
                   borderRadius: AppRadius.mdRadius,
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.borderOf(context)),
                 ),
                 child: Icon(icon, color: color, size: 24),
               ),
@@ -500,7 +500,7 @@ class _WorkspaceTile extends StatelessWidget {
                 label,
                 style: AppText.caption.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+                  color: AppColors.inkOf(context),
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -581,7 +581,7 @@ class _HomeCustomersSheetState extends State<_HomeCustomersSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.creamDark,
+                  color: AppColors.borderStrongOf(context),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -597,7 +597,7 @@ class _HomeCustomersSheetState extends State<_HomeCustomersSheet> {
                 Expanded(
                   child: Text(
                     'Customers',
-                    style: AppText.title.copyWith(color: AppColors.navy),
+                    style: AppText.title.copyWith(color: AppColors.inkOf(context)),
                   ),
                 ),
                 Text(
@@ -739,7 +739,7 @@ class _SalesHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      color: AppColors.navy,
+      color: AppColors.isDark(context) ? AppColors.darkSurfaceRaised : AppColors.navy,
       borderRadius: AppRadius.lgRadius,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Row(
@@ -857,10 +857,10 @@ class _StatTile extends StatelessWidget {
             children: [
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
+                  color: AppColors.inkOf(context),
                   height: 1.1,
                 ),
               ),
@@ -908,7 +908,7 @@ class _QuickActionsSection extends StatelessWidget {
             _QuickActionTile(
               icon: Icons.add_rounded,
               label: 'Add Product',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
               filled: true,
               onTap: onAddProduct,
             ),
@@ -916,7 +916,7 @@ class _QuickActionsSection extends StatelessWidget {
             _QuickActionTile(
               icon: Icons.grid_view_rounded,
               label: 'Labels',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
               filled: false,
               onTap: onQrSheet,
             ),
@@ -924,7 +924,7 @@ class _QuickActionsSection extends StatelessWidget {
             _QuickActionTile(
               icon: Icons.bar_chart_rounded,
               label: 'Reports',
-              color: AppColors.navy,
+              color: AppColors.brandOf(context),
               filled: false,
               onTap: onReports,
             ),
@@ -961,10 +961,10 @@ class _QuickActionTile extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: filled ? color : AppColors.surface,
+                color: filled ? color : AppColors.surfaceOf(context),
                 borderRadius: AppRadius.mdRadius,
                 border: Border.all(
-                  color: filled ? Colors.transparent : AppColors.border,
+                  color: filled ? Colors.transparent : AppColors.borderOf(context),
                 ),
               ),
               child: Icon(icon, color: filled ? Colors.white : color, size: 24),
@@ -974,7 +974,7 @@ class _QuickActionTile extends StatelessWidget {
               label,
               style: AppText.caption.copyWith(
                 fontWeight: FontWeight.w600,
-                color: AppColors.ink,
+                color: AppColors.inkOf(context),
               ),
               textAlign: TextAlign.center,
               maxLines: 1,
@@ -1018,10 +1018,10 @@ class _UnpaidBillsSection extends StatelessWidget {
                 children: [
                   Text(
                     '₹${bill.balanceDue.toStringAsFixed(0)}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
-                      color: AppColors.ink,
+                      color: AppColors.inkOf(context),
                     ),
                   ),
                   bill.paymentStatus == Bill.statusPartial

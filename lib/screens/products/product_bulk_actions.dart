@@ -25,8 +25,13 @@ class _BulkSelectionBar extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.navy,
+        color: AppColors.isDark(context)
+            ? AppColors.darkSurfaceRaised
+            : AppColors.navy,
         borderRadius: BorderRadius.circular(16),
+        border: AppColors.isDark(context)
+            ? Border.all(color: AppColors.darkBorderStrong)
+            : null,
       ),
       child: Row(
         children: [

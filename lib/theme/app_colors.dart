@@ -30,15 +30,16 @@ class AppColors {
   static const error = Color(0xFFEF4444);
   static const warning = amber;
 
-  // Dark mode: pure dark/grey base with the same yellow accent.
-  static const darkBg = Color(0xFF000000);
-  static const darkSurface = navy;
-  static const darkSurfaceRaised = navyLight;
-  static const darkInk = Color(0xFFF5F5F5);
-  static const darkInkMuted = Color(0xFFB8B8B8);
-  static const darkInkFaint = Color(0xFF7A7A7A);
-  static const darkBorder = Color(0xFF2A2A2A);
-  static const darkBorderStrong = Color(0xFF3A3A3A);
+  // Dark mode: neutral charcoal system — amber accent pops on grey.
+  static const darkBg = Color(0xFF161616);
+  static const darkSurface = Color(0xFF1F1F1F);
+  static const darkSurfaceRaised = Color(0xFF2A2A2A);
+  static const darkInput = Color(0xFF252525);
+  static const darkInk = Color(0xFFEEEEEE);
+  static const darkInkMuted = Color(0xFFA1A1A1);
+  static const darkInkFaint = Color(0xFF6B6B6B);
+  static const darkBorder = Color(0xFF333333);
+  static const darkBorderStrong = Color(0xFF3F3F3F);
 
   static bool isDark(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark;

@@ -50,10 +50,10 @@ class KpiSectionHeader extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w800,
-              color: AppColors.navy,
+              color: AppColors.inkOf(context),
             ),
           ),
         ],
@@ -74,15 +74,18 @@ class KpiPanel extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surfaceOf(context),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: AppColors.borderOf(context)),
+        boxShadow: AppColors.isDark(context)
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: child,
     );
@@ -95,10 +98,10 @@ class _PanelTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text,
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w700,
-      color: AppColors.navy,
+      color: AppColors.inkOf(context),
       letterSpacing: 0.2,
     ),
   );
@@ -192,7 +195,7 @@ class KpiCard extends StatelessWidget {
             style: TextStyle(
               fontSize: 26,
               fontWeight: FontWeight.w800,
-              color: valueColor ?? AppColors.navy,
+              color: valueColor ?? AppColors.inkOf(context),
             ),
           ),
           if (subtitle != null) ...[
@@ -292,7 +295,7 @@ class KpiHorizBarList extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: fraction,
                       minHeight: 7,
-                      backgroundColor: AppColors.creamDark,
+                      backgroundColor: AppColors.borderStrongOf(context),
                       valueColor: AlwaysStoppedAnimation<Color>(color),
                     ),
                   ),
@@ -419,7 +422,7 @@ class KpiBarChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (data.isEmpty) return KpiEmpty(title: title);
     final maxVal = data.map((e) => e.value).fold(0.0, (a, b) => a > b ? a : b);
-    final color = barColor ?? AppColors.navy;
+    final color = barColor ?? AppColors.brandOf(context);
     return KpiPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -489,7 +492,7 @@ class KpiBarChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (_) =>
-                      const FlLine(color: AppColors.creamDark, strokeWidth: 1),
+                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 barGroups: data.asMap().entries.map((e) {
@@ -568,7 +571,7 @@ class KpiLineChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (_) =>
-                      const FlLine(color: AppColors.creamDark, strokeWidth: 1),
+                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: const AxisTitles(
@@ -719,7 +722,7 @@ class KpiGaugeCard extends StatelessWidget {
                     CircularProgressIndicator(
                       value: (value / 100).clamp(0.0, 1.0),
                       strokeWidth: 7,
-                      backgroundColor: AppColors.creamDark,
+                      backgroundColor: AppColors.borderStrongOf(context),
                       valueColor: AlwaysStoppedAnimation<Color>(c),
                     ),
                     Text(
@@ -741,7 +744,7 @@ class KpiGaugeCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: (value / 100).clamp(0.0, 1.0),
               minHeight: 5,
-              backgroundColor: AppColors.creamDark,
+              backgroundColor: AppColors.borderStrongOf(context),
               valueColor: AlwaysStoppedAnimation<Color>(c),
             ),
           ),

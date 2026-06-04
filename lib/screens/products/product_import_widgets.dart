@@ -34,11 +34,13 @@ class _ProductSuggestionList extends StatelessWidget {
               : 'Last ${_formatFullDate(summary!.lastPurchaseDate!)}';
           return ListTile(
             dense: true,
-            leading: const CircleAvatar(
+            leading: CircleAvatar(
               radius: 17,
-              backgroundColor: AppColors.navy,
-              foregroundColor: Colors.white,
-              child: Icon(Icons.inventory_2_outlined, size: 17),
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
+              child: const Icon(Icons.inventory_2_outlined, size: 17),
             ),
             title: Text(
               product.name,

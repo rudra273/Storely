@@ -228,7 +228,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -240,7 +240,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -256,7 +256,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(mode.label),
                   trailing: mode == _sortMode
-                      ? const Icon(Icons.check_rounded, color: AppColors.navy)
+                      ? Icon(Icons.check_rounded, color: AppColors.brandOf(ctx))
                       : null,
                   onTap: () => Navigator.pop(ctx, mode),
                 ),
@@ -327,7 +327,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -339,7 +339,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 38,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -614,7 +614,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           height: MediaQuery.sizeOf(ctx).height * 0.62,
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           clipBehavior: Clip.antiAlias,
@@ -624,11 +624,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Scan Barcode',
                         style: TextStyle(
-                          color: AppColors.navy,
+                          color: AppColors.inkOf(ctx),
                           fontWeight: FontWeight.w900,
                           fontSize: 18,
                         ),
@@ -681,7 +681,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surfaceOf(ctx),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Column(
@@ -691,7 +691,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -789,7 +789,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     FilledButton(
                       onPressed: () => Navigator.pop(ctx, true),
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.brandOf(ctx),
+                        foregroundColor: AppColors.isDark(ctx)
+                            ? Colors.black
+                            : Colors.white,
                       ),
                       child: const Text('Apply'),
                     ),

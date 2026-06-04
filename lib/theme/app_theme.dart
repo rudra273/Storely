@@ -113,7 +113,7 @@ class StorelyTheme {
       ),
       appBarTheme: AppBarTheme(
         centerTitle: false,
-        backgroundColor: isDark ? Colors.black : AppColors.navy,
+        backgroundColor: isDark ? AppColors.darkBg : AppColors.navy,
         foregroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -149,7 +149,7 @@ class StorelyTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? const Color(0xFF202020) : raisedSurface,
+        fillColor: isDark ? AppColors.darkInput : raisedSurface,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg,
           vertical: AppSpacing.md,

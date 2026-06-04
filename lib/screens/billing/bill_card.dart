@@ -246,7 +246,7 @@ class _BillCardState extends State<_BillCard> {
                         Text(
                           '₹${bill.totalAmount.toStringAsFixed(2)}',
                           style: AppText.subtitle.copyWith(
-                            color: AppColors.navy,
+                            color: AppColors.inkOf(context),
                           ),
                         ),
                       ],
@@ -278,7 +278,7 @@ class _BillCardState extends State<_BillCard> {
                           onPressed: widget.onDuplicate,
                           icon: Icons.copy_rounded,
                           label: 'Duplicate',
-                          color: AppColors.navy,
+                          color: AppColors.brandOf(context),
                         ),
                         _ActionButton(
                           onPressed: _togglePaidStatus,
@@ -308,13 +308,13 @@ class _BillCardState extends State<_BillCard> {
                           onPressed: widget.onSharePdf,
                           icon: Icons.ios_share_rounded,
                           label: 'Share',
-                          color: AppColors.navy,
+                          color: AppColors.brandOf(context),
                         ),
                         _ActionButton(
                           onPressed: _showProfitSummary,
                           icon: Icons.trending_up_rounded,
                           label: 'View Profit',
-                          color: AppColors.navy,
+                          color: AppColors.brandOf(context),
                         ),
                       ],
                     ),

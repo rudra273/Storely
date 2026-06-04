@@ -158,7 +158,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 Text(
                   'Welcome to Storely',
                   textAlign: TextAlign.center,
-                  style: AppText.display.copyWith(color: AppColors.navy),
+                  style: AppText.display.copyWith(color: AppColors.inkOf(context)),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(

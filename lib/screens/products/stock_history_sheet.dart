@@ -20,7 +20,7 @@ class _StockMovementHistorySheet extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surfaceOf(context),
           borderRadius: BorderRadius.circular(24),
         ),
         child: Column(
@@ -32,7 +32,7 @@ class _StockMovementHistorySheet extends StatelessWidget {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.creamDark,
+                  color: AppColors.borderStrongOf(context),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -40,8 +40,8 @@ class _StockMovementHistorySheet extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               'Stock History',
-              style: const TextStyle(
-                color: AppColors.navy,
+              style: TextStyle(
+                color: AppColors.inkOf(context),
                 fontSize: 20,
                 fontWeight: FontWeight.w900,
               ),
@@ -64,7 +64,7 @@ class _StockMovementHistorySheet extends StatelessWidget {
                       shrinkWrap: true,
                       itemCount: movements.length,
                       separatorBuilder: (_, _) =>
-                          const Divider(height: 1, color: AppColors.creamDark),
+                          Divider(height: 1, color: AppColors.borderOf(context)),
                       itemBuilder: (_, index) =>
                           _StockMovementRow(movement: movements[index]),
                     ),
