@@ -123,6 +123,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final showSearchResults = _searchOpen && _homeSearchQuery.isNotEmpty;
+
     return PopScope(
       canPop: !_searchOpen,
       onPopInvokedWithResult: (didPop, result) {
@@ -137,95 +139,95 @@ class _HomeScreenState extends State<HomeScreen> {
           child: CustomScrollView(
             slivers: [
               SliverPersistentHeader(
-              pinned: true,
-              delegate: AppScreenHeaderDelegate(
-                title: 'Storely',
-                subtitle: _shopName,
-                topPadding: MediaQuery.paddingOf(context).top,
-                titleOverride: _searchOpen
-                    ? _HomeSearchField(controller: _homeSearchCtrl)
-                    : null,
-                actions: [
-                  IconButton(
-                    onPressed: _toggleSearch,
-                    icon: Icon(
-                      _searchOpen ? Icons.close_rounded : Icons.search_rounded,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen(),
+                pinned: true,
+                delegate: AppScreenHeaderDelegate(
+                  title: 'Storely',
+                  subtitle: _shopName,
+                  topPadding: MediaQuery.paddingOf(context).top,
+                  titleOverride: _searchOpen
+                      ? _HomeSearchField(controller: _homeSearchCtrl)
+                      : null,
+                  actions: [
+                    IconButton(
+                      onPressed: _toggleSearch,
+                      icon: Icon(
+                        _searchOpen
+                            ? Icons.close_rounded
+                            : Icons.search_rounded,
+                        color: Colors.white,
+                        size: 22,
                       ),
                     ),
-                    icon: const Icon(
-                      Icons.notifications_outlined,
-                      color: Colors.white,
-                      size: 22,
+                    IconButton(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen(),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.notifications_outlined,
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_searchOpen && _homeSearchQuery.isNotEmpty) ...[
-                      _HomeSearchResults(results: _searchResults),
-                      const SizedBox(height: AppSpacing.lg),
-                    ],
-                    _SalesHero(
-                      sales: _todaySales,
-                      collected: _todayCollected,
-                      billCount: _todayBillCount,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _StatsRow(
-                      productCount: _productCount,
-                      billCount: _todayBillCount,
-                    ),
-                    const SizedBox(height: AppSpacing.xxl),
-                    _QuickActionsSection(
-                      onScan: widget.onScan,
-                      onAddProduct: widget.onAddProduct,
-                      onQrSheet: _openQrSheet,
-                      onReports: _openReports,
-                    ),
-                    const SizedBox(height: AppSpacing.xxl),
-                    _WorkspaceShortcutsSection(
-                      customerCount: _customers.length,
-                      onCustomers: _openCustomersSheet,
-                    ),
-                    const SizedBox(height: AppSpacing.xxl),
-                    SectionHeader(
-                      title: 'Unpaid Bills',
-                      actionLabel: 'View All →',
-                      onAction: () => widget.onNavigate(2),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _UnpaidBillsSection(bills: _unpaidBills),
-                    const SizedBox(height: AppSpacing.xxl),
-                    SectionHeader(
-                      title: 'Needs Attention',
-                      actionLabel: 'View All →',
-                      onAction: () => widget.onNavigate(1),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _NeedsAttentionSection(
-                      products: _lowStockProducts,
-                      onUpdate: _loadData,
-                    ),
-                    const SizedBox(height: 80),
                   ],
                 ),
               ),
-            ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: showSearchResults
+                        ? [_HomeSearchResults(results: _searchResults)]
+                        : [
+                            _SalesHero(
+                              sales: _todaySales,
+                              collected: _todayCollected,
+                              billCount: _todayBillCount,
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            _StatsRow(
+                              productCount: _productCount,
+                              billCount: _todayBillCount,
+                            ),
+                            const SizedBox(height: AppSpacing.xxl),
+                            _QuickActionsSection(
+                              onScan: widget.onScan,
+                              onAddProduct: widget.onAddProduct,
+                              onQrSheet: _openQrSheet,
+                              onReports: _openReports,
+                            ),
+                            const SizedBox(height: AppSpacing.xxl),
+                            _WorkspaceShortcutsSection(
+                              customerCount: _customers.length,
+                              onCustomers: _openCustomersSheet,
+                            ),
+                            const SizedBox(height: AppSpacing.xxl),
+                            SectionHeader(
+                              title: 'Unpaid Bills',
+                              actionLabel: 'View All →',
+                              onAction: () => widget.onNavigate(2),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            _UnpaidBillsSection(bills: _unpaidBills),
+                            const SizedBox(height: AppSpacing.xxl),
+                            SectionHeader(
+                              title: 'Needs Attention',
+                              actionLabel: 'View All →',
+                              onAction: () => widget.onNavigate(1),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            _NeedsAttentionSection(
+                              products: _lowStockProducts,
+                              onUpdate: _loadData,
+                            ),
+                            const SizedBox(height: 80),
+                          ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -407,10 +409,7 @@ class _HomeSearchResults extends StatelessWidget {
       rows: results
           .map(
             (result) => CompactListRow(
-              leading: LeadingIconChip(
-                icon: result.icon,
-                color: result.color,
-              ),
+              leading: LeadingIconChip(icon: result.icon, color: result.color),
               title: result.title,
               subtitle: result.subtitle,
               trailing: Text(
@@ -640,7 +639,9 @@ class _HomeCustomersSheetState extends State<_HomeCustomersSheet> {
                 Expanded(
                   child: Text(
                     'Customers',
-                    style: AppText.title.copyWith(color: AppColors.inkOf(context)),
+                    style: AppText.title.copyWith(
+                      color: AppColors.inkOf(context),
+                    ),
                   ),
                 ),
                 Text(
@@ -782,7 +783,9 @@ class _SalesHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      color: AppColors.isDark(context) ? AppColors.darkSurfaceRaised : AppColors.navy,
+      color: AppColors.isDark(context)
+          ? AppColors.darkSurfaceRaised
+          : AppColors.navy,
       borderRadius: AppRadius.lgRadius,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Row(
@@ -1007,7 +1010,9 @@ class _QuickActionTile extends StatelessWidget {
                 color: filled ? color : AppColors.surfaceOf(context),
                 borderRadius: AppRadius.mdRadius,
                 border: Border.all(
-                  color: filled ? Colors.transparent : AppColors.borderOf(context),
+                  color: filled
+                      ? Colors.transparent
+                      : AppColors.borderOf(context),
                 ),
               ),
               child: Icon(icon, color: filled ? Colors.white : color, size: 24),

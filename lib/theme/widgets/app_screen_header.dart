@@ -55,16 +55,8 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: _lerp(20, 16, collapsed),
-                            fontWeight: FontWeight.w700,
-                            height: 1.15,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        _buildTitle(
+                          fontSize: _lerp(20, 16, collapsed),
                         ),
                         if (subtitle != null)
                           Opacity(
@@ -92,6 +84,35 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 
   double _lerp(double a, double b, double t) => a + (b - a) * t;
+
+  Widget _buildTitle({required double fontSize}) {
+    final base = TextStyle(
+      color: Colors.white,
+      fontSize: fontSize,
+      fontWeight: FontWeight.w700,
+      height: 1.15,
+    );
+    // Brand: render trailing "ly" of "Storely" in amber.
+    if (title == 'Storely') {
+      return Text.rich(
+        TextSpan(
+          style: base,
+          children: const [
+            TextSpan(text: 'Store'),
+            TextSpan(text: 'ly', style: TextStyle(color: AppColors.amber)),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Text(
+      title,
+      style: base,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
 
   @override
   bool shouldRebuild(covariant AppScreenHeaderDelegate old) =>
