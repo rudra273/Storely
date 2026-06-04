@@ -4,11 +4,13 @@ class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
   final double subtotal;
   final int itemCount;
+  final Bill? initialBill;
 
   const _BillCheckoutSheet({
     required this.customers,
     required this.subtotal,
     required this.itemCount,
+    this.initialBill,
   });
 
   @override
@@ -31,6 +33,46 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   var _paymentStatus = Bill.statusUnpaid;
   var _paymentMethod = 'cash';
   var _hideCustomerSuggestions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final bill = widget.initialBill;
+    if (bill == null) return;
+    _setCheckoutControllerText(_customerController, bill.customerName);
+    _setCheckoutControllerText(
+      _phoneController,
+      _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
+    );
+    _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
+    _setCheckoutControllerText(
+      _legalNameController,
+      bill.customerGstLegalName ?? '',
+    );
+    _setCheckoutControllerText(
+      _tradeNameController,
+      bill.customerGstTradeName ?? '',
+    );
+    _setCheckoutControllerText(
+      _addressController,
+      bill.customerAddressSnapshot ?? '',
+    );
+    _setCheckoutControllerText(
+      _stateCodeController,
+      bill.placeOfSupplyStateCode ?? '',
+    );
+    if (bill.discountPercent > 0) {
+      _discountPercent = bill.discountPercent;
+      _setCheckoutControllerText(
+        _discountController,
+        bill.discountPercent.toStringAsFixed(2),
+      );
+    }
+    _billType = bill.billType;
+    _paymentStatus = Bill.statusUnpaid;
+    _paymentMethod = 'cash';
+    _hideCustomerSuggestions = true;
+  }
 
   @override
   void dispose() {
@@ -73,6 +115,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   }
 
   void _submit(double total, double paidAmount) {
+    if (_billType == Bill.typeB2b && !_validateB2bFields()) return;
     Navigator.pop(
       context,
       _BillDraft(
@@ -83,12 +126,50 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
         customerGstLegalName: _legalNameController.text,
         customerGstTradeName: _tradeNameController.text,
         customerAddress: _addressController.text,
-        placeOfSupplyStateCode: _stateCodeController.text,
+        placeOfSupplyStateCode: _stateCodeController.text.trim().isEmpty
+            ? _gstinController.text.trim()
+            : _stateCodeController.text,
         discountPercent: _discountPercent.clamp(0, 100).toDouble(),
         paidAmount: paidAmount.clamp(0, total).toDouble(),
         paymentMethod: _paymentMethod,
       ),
     );
+  }
+
+  bool _validateB2bFields() {
+    final customerName = _customerController.text.trim();
+    final gstin = _gstinController.text.trim().toUpperCase();
+    final address = _addressController.text.trim();
+    final stateCode = _stateCodeController.text.trim();
+    if (customerName.isEmpty) {
+      _showCheckoutError('Customer name is required for B2B bills');
+      return false;
+    }
+    if (!_isValidGstin(gstin)) {
+      _showCheckoutError('Enter a valid 15-character customer GSTIN');
+      return false;
+    }
+    if (address.isEmpty) {
+      _showCheckoutError('Business address is required for B2B bills');
+      return false;
+    }
+    if (stateCode.isNotEmpty && !RegExp(r'^\d{2}$').hasMatch(stateCode)) {
+      _showCheckoutError('Place of supply state code must be 2 digits');
+      return false;
+    }
+    return true;
+  }
+
+  bool _isValidGstin(String value) {
+    return RegExp(
+      r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
+    ).hasMatch(value);
+  }
+
+  void _showCheckoutError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -346,9 +427,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               Container(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
-                  color: AppColors.bg,
+                  color: AppColors.softBgOf(context),
                   borderRadius: AppRadius.mdRadius,
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.borderOf(context)),
                 ),
                 child: Column(
                   children: [

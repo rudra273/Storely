@@ -43,7 +43,12 @@ class _AddOptionDialogState extends State<_AddOptionDialog> {
         ),
         FilledButton(
           onPressed: _submit,
-          style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.brandOf(context),
+            foregroundColor: AppColors.isDark(context)
+                ? Colors.black
+                : Colors.white,
+          ),
           child: const Text('Add'),
         ),
       ],
@@ -60,13 +65,14 @@ class _ProductFilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSelection = count > 0;
+    final brand = AppColors.brandOf(context);
     return OutlinedButton.icon(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
-        foregroundColor: hasSelection ? AppColors.navy : AppColors.textDark,
-        backgroundColor: Colors.white,
+        foregroundColor: hasSelection ? brand : AppColors.inkOf(context),
+        backgroundColor: AppColors.surfaceOf(context),
         side: BorderSide(
-          color: hasSelection ? AppColors.navy : AppColors.creamDark,
+          color: hasSelection ? brand : AppColors.borderStrongOf(context),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -95,12 +101,13 @@ class _ActiveFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
     return InputChip(
       label: Text(
         label,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: isClearAction ? AppColors.textMuted : AppColors.navy,
+          color: isClearAction ? AppColors.inkMutedOf(context) : brand,
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),
@@ -111,10 +118,10 @@ class _ActiveFilterChip extends StatelessWidget {
       ),
       onDeleted: onDeleted,
       backgroundColor: isClearAction
-          ? Colors.white
-          : AppColors.navy.withValues(alpha: 0.08),
+          ? AppColors.surfaceOf(context)
+          : brand.withValues(alpha: AppColors.isDark(context) ? 0.16 : 0.08),
       side: BorderSide(
-        color: isClearAction ? AppColors.creamDark : AppColors.navy,
+        color: isClearAction ? AppColors.borderStrongOf(context) : brand,
       ),
       visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -133,9 +140,9 @@ class _SortDropdownButton extends StatelessWidget {
     return OutlinedButton.icon(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textDark,
-        backgroundColor: Colors.white,
-        side: const BorderSide(color: AppColors.creamDark),
+        foregroundColor: AppColors.inkOf(context),
+        backgroundColor: AppColors.surfaceOf(context),
+        side: BorderSide(color: AppColors.borderStrongOf(context)),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -172,8 +179,8 @@ class _FilterSheetSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.cream.withValues(alpha: 0.5),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.softBgOf(context),
+        border: Border.all(color: AppColors.borderOf(context)),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -181,7 +188,7 @@ class _FilterSheetSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 18, color: AppColors.navy),
+              Icon(icon, size: 18, color: AppColors.brandOf(context)),
               const SizedBox(width: 8),
               Text(
                 title,
@@ -218,16 +225,16 @@ class _FilterSheetSection extends StatelessWidget {
                             ),
                             selected: selected.contains(option),
                             onSelected: (value) => onChanged(option, value),
-                            selectedColor: AppColors.navy.withValues(
-                              alpha: 0.12,
+                            selectedColor: AppColors.brandOf(context).withValues(
+                              alpha: AppColors.isDark(context) ? 0.22 : 0.12,
                             ),
-                            checkmarkColor: AppColors.navy,
+                            checkmarkColor: AppColors.brandOf(context),
                             side: BorderSide(
                               color: selected.contains(option)
-                                  ? AppColors.navy
-                                  : AppColors.creamDark,
+                                  ? AppColors.brandOf(context)
+                                  : AppColors.borderOf(context),
                             ),
-                            backgroundColor: Colors.white,
+                            backgroundColor: AppColors.surfaceOf(context),
                             materialTapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,
                           ),
@@ -259,13 +266,13 @@ class _PurchaseDateFilterTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.cream.withValues(alpha: 0.5),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.softBgOf(context),
+        border: Border.all(color: AppColors.borderOf(context)),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         children: [
-          const Icon(Icons.event_outlined, size: 18, color: AppColors.navy),
+          Icon(Icons.event_outlined, size: 18, color: AppColors.brandOf(context)),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -296,8 +303,8 @@ class _PurchaseDateFilterTile extends StatelessWidget {
           OutlinedButton(
             onPressed: onPick,
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.navy,
-              side: const BorderSide(color: AppColors.creamDark),
+              foregroundColor: AppColors.brandOf(context),
+              side: BorderSide(color: AppColors.borderStrongOf(context)),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),

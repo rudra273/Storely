@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
@@ -22,8 +23,19 @@ part 'products/product_cards.dart';
 
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
+  final bool isActiveMainTab;
+  final int openPurchaseFlowToken;
+  final VoidCallback? onPurchaseFlowComplete;
+  final VoidCallback? onBackToHome;
 
-  const ProductsScreen({super.key, this.refreshToken = 0});
+  const ProductsScreen({
+    super.key,
+    this.refreshToken = 0,
+    this.isActiveMainTab = true,
+    this.openPurchaseFlowToken = 0,
+    this.onPurchaseFlowComplete,
+    this.onBackToHome,
+  });
 
   @override
   State<ProductsScreen> createState() => _ProductsScreenState();
@@ -44,6 +56,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
   bool _isUpdatingPrices = false;
+  bool _isOpeningRequestedPurchaseFlow = false;
   int _lowStockThreshold = 5;
   DateTime? _selectedPurchaseDate;
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
@@ -66,6 +79,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
       _loadProducts();
+    }
+    if (oldWidget.openPurchaseFlowToken != widget.openPurchaseFlowToken) {
+      _openRequestedPurchaseFlow();
     }
   }
 
@@ -115,6 +131,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
       _isUpdatingPrices = false;
     });
     _applyFilter();
+  }
+
+  void _openRequestedPurchaseFlow() {
+    if (_isOpeningRequestedPurchaseFlow) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _isOpeningRequestedPurchaseFlow) return;
+      _isOpeningRequestedPurchaseFlow = true;
+      try {
+        await _loadProducts();
+        if (!mounted) return;
+        await _showNewPurchaseFlow();
+      } finally {
+        _isOpeningRequestedPurchaseFlow = false;
+        widget.onPurchaseFlowComplete?.call();
+      }
+    });
   }
 
   void _applyFilter() {
@@ -197,7 +229,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -209,7 +241,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -225,7 +257,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(mode.label),
                   trailing: mode == _sortMode
-                      ? const Icon(Icons.check_rounded, color: AppColors.navy)
+                      ? Icon(Icons.check_rounded, color: AppColors.brandOf(ctx))
                       : null,
                   onTap: () => Navigator.pop(ctx, mode),
                 ),
@@ -296,7 +328,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -308,7 +340,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 38,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -583,7 +615,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           height: MediaQuery.sizeOf(ctx).height * 0.62,
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surfaceOf(ctx),
             borderRadius: BorderRadius.circular(24),
           ),
           clipBehavior: Clip.antiAlias,
@@ -593,11 +625,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Scan Barcode',
                         style: TextStyle(
-                          color: AppColors.navy,
+                          color: AppColors.inkOf(ctx),
                           fontWeight: FontWeight.w900,
                           fontSize: 18,
                         ),
@@ -650,7 +682,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surfaceOf(ctx),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Column(
@@ -660,7 +692,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(ctx),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -758,7 +790,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     FilledButton(
                       onPressed: () => Navigator.pop(ctx, true),
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.brandOf(ctx),
+                        foregroundColor: AppColors.isDark(ctx)
+                            ? Colors.black
+                            : Colors.white,
                       ),
                       child: const Text('Apply'),
                     ),
@@ -822,9 +857,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
             top: false,
             child: Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceOf(ctx),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+                border: AppColors.isDark(ctx)
+                    ? Border.all(color: AppColors.borderOf(ctx))
+                    : null,
               ),
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(ctx).viewInsets.bottom,
@@ -1444,11 +1484,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     constraints: BoxConstraints(
                       maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
                     ),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceOf(ctx),
+                      borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(24),
                       ),
+                      border: AppColors.isDark(ctx)
+                          ? Border.all(color: AppColors.borderOf(ctx))
+                          : null,
                     ),
                     padding: EdgeInsets.only(
                       bottom: MediaQuery.of(ctx).viewInsets.bottom,
@@ -1500,34 +1543,40 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           ),
                                     child: Column(
                                       children: [
-                                        TextFormField(
-                                          controller: nameCtrl,
-                                          textCapitalization:
-                                              TextCapitalization.words,
-                                          decoration: InputDecoration(
-                                            labelText: 'Product Name *',
-                                            errorText: nameError,
-                                            prefixIcon: const Icon(
-                                              Icons.label_outline_rounded,
-                                              size: 18,
+                                        TestKeys.tag(
+                                          TestKeys.productNameField,
+                                          TextFormField(
+                                            controller: nameCtrl,
+                                            textCapitalization:
+                                                TextCapitalization.words,
+                                            decoration: InputDecoration(
+                                              labelText: 'Product Name *',
+                                              errorText: nameError,
+                                              prefixIcon: const Icon(
+                                                Icons.label_outline_rounded,
+                                                size: 18,
+                                              ),
                                             ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              hideProductSuggestions = false;
+                                              if (!lockedRestockTarget) {
+                                                selectedExistingProduct = null;
+                                              }
+                                              if (nameError != null) {
+                                                setSheet(
+                                                  () => nameError = null,
+                                                );
+                                              } else {
+                                                setSheet(() {});
+                                              }
+                                            },
+                                            validator: (v) =>
+                                                (v == null || v.trim().isEmpty)
+                                                ? 'Required'
+                                                : null,
                                           ),
-                                          onChanged: (_) {
-                                            markEdited();
-                                            hideProductSuggestions = false;
-                                            if (!lockedRestockTarget) {
-                                              selectedExistingProduct = null;
-                                            }
-                                            if (nameError != null) {
-                                              setSheet(() => nameError = null);
-                                            } else {
-                                              setSheet(() {});
-                                            }
-                                          },
-                                          validator: (v) =>
-                                              (v == null || v.trim().isEmpty)
-                                              ? 'Required'
-                                              : null,
+                                          textField: true,
                                         ),
                                         if (!isEditing &&
                                             !hideProductSuggestions &&
@@ -1633,52 +1682,57 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             ),
                                             const SizedBox(width: 10),
                                             Expanded(
-                                              child: TextFormField(
-                                                controller: barcodeCtrl,
-                                                keyboardType:
-                                                    TextInputType.text,
-                                                decoration: InputDecoration(
-                                                  labelText: 'Barcode',
-                                                  prefixIcon: const Icon(
-                                                    Icons
-                                                        .qr_code_scanner_rounded,
-                                                    size: 18,
-                                                  ),
-                                                  suffixIcon: IconButton(
-                                                    tooltip: 'Scan barcode',
-                                                    icon: const Icon(
-                                                      Icons.center_focus_strong,
+                                              child: TestKeys.tag(
+                                                TestKeys.productBarcodeField,
+                                                TextFormField(
+                                                  controller: barcodeCtrl,
+                                                  keyboardType:
+                                                      TextInputType.text,
+                                                  decoration: InputDecoration(
+                                                    labelText: 'Barcode',
+                                                    prefixIcon: const Icon(
+                                                      Icons
+                                                          .qr_code_scanner_rounded,
+                                                      size: 18,
                                                     ),
-                                                    onPressed: () async {
-                                                      final value =
-                                                          await _scanBarcodeValue(
-                                                            ctx,
-                                                          );
-                                                      if (value == null ||
-                                                          !ctx.mounted) {
-                                                        return;
-                                                      }
-                                                      markEdited();
-                                                      setFieldText(
-                                                        barcodeCtrl,
-                                                        value,
-                                                      );
-                                                      setSheet(() {});
-                                                    },
+                                                    suffixIcon: IconButton(
+                                                      tooltip: 'Scan barcode',
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .center_focus_strong,
+                                                      ),
+                                                      onPressed: () async {
+                                                        final value =
+                                                            await _scanBarcodeValue(
+                                                              ctx,
+                                                            );
+                                                        if (value == null ||
+                                                            !ctx.mounted) {
+                                                          return;
+                                                        }
+                                                        markEdited();
+                                                        setFieldText(
+                                                          barcodeCtrl,
+                                                          value,
+                                                        );
+                                                        setSheet(() {});
+                                                      },
+                                                    ),
                                                   ),
+                                                  onTapOutside: (_) =>
+                                                      FocusScope.of(
+                                                        ctx,
+                                                      ).unfocus(),
+                                                  onChanged: (_) {
+                                                    markEdited();
+                                                    setSheet(() {});
+                                                  },
+                                                  onFieldSubmitted: (_) =>
+                                                      FocusScope.of(
+                                                        ctx,
+                                                      ).unfocus(),
                                                 ),
-                                                onTapOutside: (_) =>
-                                                    FocusScope.of(
-                                                      ctx,
-                                                    ).unfocus(),
-                                                onChanged: (_) {
-                                                  markEdited();
-                                                  setSheet(() {});
-                                                },
-                                                onFieldSubmitted: (_) =>
-                                                    FocusScope.of(
-                                                      ctx,
-                                                    ).unfocus(),
+                                                textField: true,
                                               ),
                                             ),
                                           ],
@@ -1747,38 +1801,43 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           },
                                         ),
                                         const SizedBox(height: 10),
-                                        TextFormField(
-                                          controller: purchaseCtrl,
-                                          keyboardType:
-                                              const TextInputType.numberWithOptions(
-                                                decimal: true,
+                                        TestKeys.tag(
+                                          TestKeys.productCostField,
+                                          TextFormField(
+                                            controller: purchaseCtrl,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,2}'),
                                               ),
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter.allow(
-                                              RegExp(r'^\d*\.?\d{0,2}'),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Purchase Price *',
+                                              prefixText: '₹',
+                                              prefixIcon: Icon(
+                                                Icons.inventory_2_outlined,
+                                                size: 18,
+                                              ),
                                             ),
-                                          ],
-                                          decoration: const InputDecoration(
-                                            labelText: 'Purchase Price *',
-                                            prefixText: '₹',
-                                            prefixIcon: Icon(
-                                              Icons.currency_rupee_rounded,
-                                              size: 18,
-                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              updateMarginFromDirectPrice();
+                                              setSheet(() {});
+                                            },
+                                            validator: (value) {
+                                              final number = double.tryParse(
+                                                value ?? '',
+                                              );
+                                              return number == null ||
+                                                      number <= 0
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
                                           ),
-                                          onChanged: (_) {
-                                            markEdited();
-                                            updateMarginFromDirectPrice();
-                                            setSheet(() {});
-                                          },
-                                          validator: (value) {
-                                            final number = double.tryParse(
-                                              value ?? '',
-                                            );
-                                            return number == null || number <= 0
-                                                ? 'Invalid'
-                                                : null;
-                                          },
+                                          textField: true,
                                         ),
                                         const SizedBox(height: 10),
                                         _OptionDropdown(
@@ -1833,38 +1892,45 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         Row(
                                           children: [
                                             Expanded(
-                                              child: TextFormField(
-                                                controller: qtyCtrl,
-                                                keyboardType:
-                                                    const TextInputType.numberWithOptions(
-                                                      decimal: true,
-                                                    ),
-                                                inputFormatters: [
-                                                  FilteringTextInputFormatter.allow(
-                                                    RegExp(r'^\d*\.?\d{0,3}'),
-                                                  ),
-                                                ],
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Quantity *',
-                                                      prefixIcon: Icon(
-                                                        Icons.layers_outlined,
-                                                        size: 18,
+                                              child: TestKeys.tag(
+                                                TestKeys.productQtyField,
+                                                TextFormField(
+                                                  controller: qtyCtrl,
+                                                  keyboardType:
+                                                      const TextInputType.numberWithOptions(
+                                                        decimal: true,
                                                       ),
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter.allow(
+                                                      RegExp(r'^\d*\.?\d{0,3}'),
                                                     ),
-                                                onChanged: (_) {
-                                                  markEdited();
-                                                  setSheet(() {});
-                                                },
-                                                validator: (v) {
-                                                  if (v == null || v.isEmpty) {
-                                                    return 'Required';
-                                                  }
-                                                  final n = double.tryParse(v);
-                                                  return (n == null || n < 0)
-                                                      ? 'Invalid'
-                                                      : null;
-                                                },
+                                                  ],
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        labelText: 'Quantity *',
+                                                        prefixIcon: Icon(
+                                                          Icons.layers_outlined,
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                  onChanged: (_) {
+                                                    markEdited();
+                                                    setSheet(() {});
+                                                  },
+                                                  validator: (v) {
+                                                    if (v == null ||
+                                                        v.isEmpty) {
+                                                      return 'Required';
+                                                    }
+                                                    final n = double.tryParse(
+                                                      v,
+                                                    );
+                                                    return (n == null || n < 0)
+                                                        ? 'Invalid'
+                                                        : null;
+                                                  },
+                                                ),
+                                                textField: true,
                                               ),
                                             ),
                                             const SizedBox(width: 10),
@@ -2069,12 +2135,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               ),
                             ),
                           ),
-                          _ProductSheetActionBar(
-                            sellingPrice: preview.sellingPrice,
-                            unit: selectedUnit,
-                            isEditing: isEditing,
-                            isSaving: isSaving,
-                            onPressed: saveProduct,
+                          TestKeys.tag(
+                            TestKeys.saveBtn,
+                            _ProductSheetActionBar(
+                              sellingPrice: preview.sellingPrice,
+                              unit: selectedUnit,
+                              isEditing: isEditing,
+                              isSaving: isSaving,
+                              onPressed: saveProduct,
+                            ),
+                            button: true,
                           ),
                         ],
                       ),
@@ -2132,28 +2202,52 @@ class _ProductsScreenState extends State<ProductsScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_selectionMode,
+      canPop:
+          !widget.isActiveMainTab ||
+          (!_selectionMode && !_searchOpen && widget.onBackToHome == null),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _selectionMode) _clearProductSelection();
+        if (!widget.isActiveMainTab) return;
+        if (didPop) return;
+        if (_searchOpen) {
+          setState(() {
+            _searchOpen = false;
+            _searchCtrl.clear();
+          });
+          return;
+        }
+        if (_selectionMode) {
+          _clearProductSelection();
+          return;
+        }
+        widget.onBackToHome?.call();
       },
       child: Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: _selectionMode
               ? Text('${_selectedProductIds.length} selected')
               : _searchOpen
-              ? TextField(
-                  controller: _searchCtrl,
-                  autofocus: true,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                  decoration: InputDecoration(
-                    hintText: 'Search products...',
-                    hintStyle: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
+              ? TestKeys.tag(
+                  TestKeys.productSearchField,
+                  TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    cursorColor: AppColors.amber,
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      hintText: 'Search products...',
+                      hintStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 16,
+                      ),
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                     ),
-                    border: InputBorder.none,
-                    filled: false,
                   ),
+                  textField: true,
                 )
               : const Text('Products'),
           actions: [
@@ -2225,10 +2319,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
           children: _selectionMode
               ? []
               : [
-                  FloatingActionButton(
-                    heroTag: 'add',
-                    onPressed: _showNewPurchaseFlow,
-                    child: const Icon(Icons.add_rounded),
+                  TestKeys.tag(
+                    TestKeys.addProductBtn,
+                    FloatingActionButton(
+                      heroTag: 'add',
+                      onPressed: _showNewPurchaseFlow,
+                      child: const Icon(Icons.add_rounded),
+                    ),
+                    label: 'Add product',
+                    button: true,
                   ),
                 ],
         ),
@@ -2289,16 +2388,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
           child: Row(
             children: [
               Expanded(
-                child: _ProductFilterButton(
-                  count: _activeFilterCount,
-                  onTap: _showProductFilters,
+                child: TestKeys.tag(
+                  TestKeys.productFilterBtn,
+                  _ProductFilterButton(
+                    count: _activeFilterCount,
+                    onTap: _showProductFilters,
+                  ),
+                  button: true,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: _SortDropdownButton(
-                  label: 'Sort: ${_sortMode.label}',
-                  onTap: _showSortOptions,
+                child: TestKeys.tag(
+                  TestKeys.productSortBtn,
+                  _SortDropdownButton(
+                    label: 'Sort: ${_sortMode.label}',
+                    onTap: _showSortOptions,
+                  ),
+                  button: true,
                 ),
               ),
             ],
@@ -2415,22 +2522,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     120,
                   ),
                   itemCount: _filtered.length,
-                  itemBuilder: (_, i) => _ProductCard(
-                    product: _filtered[i],
-                    purchaseSummary: _filtered[i].id == null
-                        ? null
-                        : _purchaseSummaries[_filtered[i].id],
-                    lowStockThreshold: _lowStockThreshold,
-                    selectionMode: _selectionMode,
-                    isSelected:
-                        _filtered[i].id != null &&
-                        _selectedProductIds.contains(_filtered[i].id),
-                    onTap: () => _selectionMode
-                        ? _toggleProductSelection(_filtered[i])
-                        : _showAddEditSheet(product: _filtered[i]),
-                    onLongPress: () => _toggleProductSelection(_filtered[i]),
-                    onHistory: () => _showStockHistory(_filtered[i]),
-                    onDelete: () => _deleteProduct(_filtered[i]),
+                  itemBuilder: (_, i) => TestKeys.tag(
+                    TestKeys.productRow(_filtered[i].id ?? i),
+                    _ProductCard(
+                      product: _filtered[i],
+                      purchaseSummary: _filtered[i].id == null
+                          ? null
+                          : _purchaseSummaries[_filtered[i].id],
+                      lowStockThreshold: _lowStockThreshold,
+                      selectionMode: _selectionMode,
+                      isSelected:
+                          _filtered[i].id != null &&
+                          _selectedProductIds.contains(_filtered[i].id),
+                      onTap: () => _selectionMode
+                          ? _toggleProductSelection(_filtered[i])
+                          : _showAddEditSheet(product: _filtered[i]),
+                      onLongPress: () => _toggleProductSelection(_filtered[i]),
+                      onHistory: () => _showStockHistory(_filtered[i]),
+                      onDelete: () => _deleteProduct(_filtered[i]),
+                    ),
                   ),
                 ),
         ),

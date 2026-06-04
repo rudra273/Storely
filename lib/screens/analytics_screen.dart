@@ -56,7 +56,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.cream,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
           'KPI Dashboard',
@@ -121,10 +121,14 @@ class _PeriodFilter extends StatelessWidget {
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: active ? AppColors.navy : Colors.white,
+                  color: active
+                      ? AppColors.brandOf(context)
+                      : AppColors.surfaceOf(context),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: active ? AppColors.navy : AppColors.creamDark,
+                    color: active
+                        ? AppColors.brandOf(context)
+                        : AppColors.borderOf(context),
                   ),
                 ),
                 child: Text(
@@ -132,7 +136,11 @@ class _PeriodFilter extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: active ? Colors.white : AppColors.textMuted,
+                    color: active
+                        ? (AppColors.isDark(context)
+                              ? Colors.black
+                              : Colors.white)
+                        : AppColors.inkMutedOf(context),
                   ),
                 ),
               ),
@@ -720,7 +728,7 @@ class _ProductsSection extends StatelessWidget {
               title: 'Top 10 by Units Sold',
               items: items,
               isRupee: false,
-              barColor: AppColors.navy,
+              barColor: AppColors.brandOf(context),
             );
           },
         ),

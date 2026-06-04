@@ -158,27 +158,11 @@ mixin DatabaseBills {
         where: 'id = ?',
         whereArgs: [customer.id],
       );
-      await txn.update(
-        'bills',
-        {
-          'customer_name': name,
-          'customer_phone': phone,
-          'customer_gstin': customer.gstin,
-          'customer_gst_legal_name': customer.gstLegalName,
-          'customer_gst_trade_name': customer.gstTradeName,
-          'customer_address_snapshot': customer.address,
-          'place_of_supply_state_code': customer.placeOfSupplyStateCode,
-          'bill_type': customer.gstin == null ? Bill.typeB2c : Bill.typeB2b,
-          'updated_at': now,
-        },
-        where: 'deleted_at IS NULL AND customer_id = ?',
-        whereArgs: [customer.id],
-      );
       await syncCustomersFromBills(txn);
     });
   }
 
-  Future<int> deleteBill(int id) async {
+  Future<int> cancelBill(int id, {required String reason}) async {
     await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
@@ -231,7 +215,13 @@ mixin DatabaseBills {
       );
       final count = await txn.update(
         'bills',
-        {'deleted_at': now, 'updated_at': now},
+        {
+          'lifecycle_status': Bill.lifecycleCancelled,
+          'cancelled_at': now,
+          'cancel_reason': _normaliseName(reason) ?? 'Cancelled',
+          'deleted_at': now,
+          'updated_at': now,
+        },
         where: 'id = ?',
         whereArgs: [id],
       );
@@ -242,10 +232,15 @@ mixin DatabaseBills {
           amountDelta: -totalAmount,
           billCountDelta: -1,
         );
+        await syncCustomersFromBills(txn);
       }
       notifyDatabaseChanged();
       return count;
     });
+  }
+
+  Future<int> deleteBill(int id) {
+    return cancelBill(id, reason: 'Deleted');
   }
 
   Future<int> updateBillPaidStatus(
@@ -475,8 +470,7 @@ mixin DatabaseBills {
     );
 
     final template =
-        series['format_template']?.toString() ??
-        'INV-{YYYY}{MM}{DD}-{SEQ}';
+        series['format_template']?.toString() ?? 'INV-{YYYY}{MM}{DD}-{SEQ}';
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
     final deviceId = series['device_id']?.toString() ?? 'local';
     final number = _formatInvoiceNumber(

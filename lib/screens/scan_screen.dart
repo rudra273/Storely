@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
@@ -18,8 +19,13 @@ enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
   final BillingEntryMode initialMode;
+  final Bill? duplicateFromBill;
 
-  const ScanScreen({super.key, this.initialMode = BillingEntryMode.scan});
+  const ScanScreen({
+    super.key,
+    this.initialMode = BillingEntryMode.scan,
+    this.duplicateFromBill,
+  });
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -46,7 +52,12 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _entryMode = widget.initialMode;
+    _entryMode = widget.duplicateFromBill == null
+        ? widget.initialMode
+        : BillingEntryMode.manual;
+    if (widget.duplicateFromBill != null) {
+      _items.addAll(widget.duplicateFromBill!.items.map(_copyItemForNewBill));
+    }
     _productSearchCtrl.addListener(_applyProductSearch);
     _loadProducts();
   }
@@ -171,6 +182,31 @@ class _ScanScreenState extends State<ScanScreen> {
     HapticFeedback.selectionClick();
   }
 
+  BillItem _copyItemForNewBill(BillItem item) {
+    return BillItem(
+      productId: item.productId,
+      productUuid: item.productUuid,
+      productName: item.productName,
+      hsnCodeSnapshot: item.hsnCodeSnapshot,
+      hsnTypeSnapshot: item.hsnTypeSnapshot,
+      mrp: item.mrp,
+      unit: item.unit,
+      purchasePriceSnapshot: item.purchasePriceSnapshot,
+      sellingPriceSnapshot: item.sellingPriceSnapshot,
+      costSnapshot: item.costSnapshot,
+      profitSnapshot: item.profitSnapshot,
+      commissionSnapshot: item.commissionSnapshot,
+      gstSnapshot: item.gstSnapshot,
+      gstPercentSnapshot: item.gstPercentSnapshot,
+      taxableValueSnapshot: item.taxableValueSnapshot,
+      cgstAmountSnapshot: item.cgstAmountSnapshot,
+      sgstAmountSnapshot: item.sgstAmountSnapshot,
+      igstAmountSnapshot: item.igstAmountSnapshot,
+      wasDirectPrice: item.wasDirectPrice,
+      quantity: item.quantity,
+    );
+  }
+
   void _addBillItem(BillItem item) {
     final existing = _items.indexWhere(
       (existingItem) =>
@@ -258,7 +294,9 @@ class _ScanScreenState extends State<ScanScreen> {
     final shop = await DatabaseHelper.instance.getShopProfile();
     final gstRegistered = shop?.gstRegistered ?? false;
     final shopStateCode = _stateCodeFromGstin(shop?.gstin);
-    final supplyStateCode = _cleanOptionalText(placeOfSupplyStateCode);
+    final supplyStateCode =
+        _cleanStateCode(placeOfSupplyStateCode) ??
+        _stateCodeFromGstin(customerGstin);
     final interState =
         gstRegistered &&
         shopStateCode != null &&
@@ -293,7 +331,7 @@ class _ScanScreenState extends State<ScanScreen> {
       customerGstLegalName: _cleanOptionalText(customerGstLegalName),
       customerGstTradeName: _cleanOptionalText(customerGstTradeName),
       customerAddressSnapshot: _cleanOptionalText(customerAddress),
-      placeOfSupplyStateCode: _cleanOptionalText(placeOfSupplyStateCode),
+      placeOfSupplyStateCode: supplyStateCode,
       subtotalAmount: subtotal,
       discountPercent: percent,
       discountAmount: discount,
@@ -306,6 +344,7 @@ class _ScanScreenState extends State<ScanScreen> {
       isPaid: received >= total,
       paymentMethod: paymentMethod,
       paidAmount: received,
+      duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
     );
 
     try {
@@ -372,7 +411,7 @@ class _ScanScreenState extends State<ScanScreen> {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surfaceOf(context),
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
@@ -380,6 +419,7 @@ class _ScanScreenState extends State<ScanScreen> {
           customers: customers,
           subtotal: _subtotal,
           itemCount: _itemCount,
+          initialBill: widget.duplicateFromBill,
         ),
       );
       if (draft == null) return;
@@ -465,7 +505,12 @@ class _ScanScreenState extends State<ScanScreen> {
                 Navigator.pop(ctx);
                 Navigator.pop(context);
               },
-              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.brandOf(ctx),
+                foregroundColor: AppColors.isDark(ctx)
+                    ? Colors.black
+                    : Colors.white,
+              ),
               child: const Text('Done'),
             ),
           ],
@@ -512,6 +557,12 @@ class _ScanScreenState extends State<ScanScreen> {
     return RegExp(r'^\d{2}$').hasMatch(code) ? code : null;
   }
 
+  String? _cleanStateCode(String? value) {
+    final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits == null || digits.isEmpty) return null;
+    return digits.padLeft(2, '0').substring(0, 2);
+  }
+
   double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 
   Widget _buildModeSelector() {
@@ -532,7 +583,9 @@ class _ScanScreenState extends State<ScanScreen> {
         ],
         selected: {_entryMode},
         style: SegmentedButton.styleFrom(
-          backgroundColor: AppColors.navyLight,
+          backgroundColor: AppColors.isDark(context)
+              ? AppColors.darkSurfaceRaised
+              : AppColors.navyLight,
           selectedBackgroundColor: AppColors.amber,
           foregroundColor: Colors.white,
           selectedForegroundColor: Colors.white,
@@ -617,9 +670,9 @@ class _ScanScreenState extends State<ScanScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceOf(context),
         borderRadius: AppRadius.lgRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Column(
         children: [
@@ -676,13 +729,19 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
+    final headerSurface = isDark ? AppColors.darkBg : AppColors.navy;
     return Scaffold(
-      backgroundColor: AppColors.navy,
+      backgroundColor: headerSurface,
       appBar: AppBar(
         title: Text(
-          _entryMode == BillingEntryMode.scan ? 'Scan & Bill' : 'Manual Bill',
+          widget.duplicateFromBill != null
+              ? 'Duplicate Bill'
+              : _entryMode == BillingEntryMode.scan
+              ? 'Scan & Bill'
+              : 'Manual Bill',
         ),
-        backgroundColor: AppColors.navy,
+        backgroundColor: headerSurface,
         foregroundColor: Colors.white,
         actions: [
           const AppInfoAction(
@@ -701,8 +760,10 @@ class _ScanScreenState extends State<ScanScreen> {
               AppInfoSection(
                 title: 'Complete bill',
                 points: [
+                  'Before Generate Bill, this screen is your editable draft.',
                   'Complete Bill opens checkout for customer, discount, and payment details.',
                   'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
+                  'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
                   'If stock is insufficient, bill creation is blocked before saving.',
                 ],
               ),
@@ -757,7 +818,7 @@ class _ScanScreenState extends State<ScanScreen> {
       // ── Bottom Total + Complete Button ──
       bottomNavigationBar: _items.isNotEmpty
           ? Container(
-              color: AppColors.bg,
+              color: AppColors.bgOf(context),
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.lg,
                 AppSpacing.sm,
@@ -771,7 +832,9 @@ class _ScanScreenState extends State<ScanScreen> {
                     vertical: AppSpacing.md,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.navy,
+                    color: AppColors.isDark(context)
+                        ? AppColors.darkSurfaceRaised
+                        : AppColors.navy,
                     borderRadius: AppRadius.lgRadius,
                   ),
                   child: Row(
@@ -798,24 +861,28 @@ class _ScanScreenState extends State<ScanScreen> {
                         ],
                       ),
                       const Spacer(),
-                      FilledButton.icon(
-                        onPressed: _openBillSheet,
-                        icon: const Icon(Icons.receipt_long_rounded),
-                        label: const Text(
-                          'Bill',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.amber,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
+                      TestKeys.tag(
+                        TestKeys.scanBillBtn,
+                        FilledButton.icon(
+                          onPressed: _openBillSheet,
+                          icon: const Icon(Icons.receipt_long_rounded),
+                          label: const Text(
+                            'Bill',
+                            style: TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.amber,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
+                        button: true,
                       ),
                     ],
                   ),
@@ -828,9 +895,11 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Widget _buildBillItemsPanel() {
     return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.lg),
+        ),
       ),
       child: _items.isEmpty
           ? Center(
@@ -859,9 +928,9 @@ class _ScanScreenState extends State<ScanScreen> {
                   margin: const EdgeInsets.only(bottom: AppSpacing.sm),
                   padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
+                    color: AppColors.surfaceOf(context),
                     borderRadius: AppRadius.mdRadius,
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: AppColors.borderOf(context)),
                   ),
                   child: Row(
                     children: [
@@ -880,7 +949,7 @@ class _ScanScreenState extends State<ScanScreen> {
                             Text(
                               item.priceLabel,
                               style: TextStyle(
-                                color: AppColors.textMuted,
+                                color: AppColors.inkMutedOf(context),
                                 fontSize: 12,
                               ),
                             ),
@@ -890,7 +959,7 @@ class _ScanScreenState extends State<ScanScreen> {
                       // Qty controls
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.bg,
+                          color: AppColors.softBgOf(context),
                           borderRadius: AppRadius.smRadius,
                         ),
                         child: Row(

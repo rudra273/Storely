@@ -15,13 +15,16 @@ class _ManualEmptyState extends StatelessWidget {
           Icon(
             icon,
             size: 38,
-            color: AppColors.textMuted.withValues(alpha: 0.4),
+            color: AppColors.inkMutedOf(context).withValues(alpha: 0.4),
           ),
           const SizedBox(height: 8),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+            style: TextStyle(
+              color: AppColors.inkMutedOf(context),
+              fontSize: 13,
+            ),
           ),
         ],
       ),
@@ -39,7 +42,7 @@ class _ManualProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOut = product.quantity == 0;
     return Material(
-      color: AppColors.bg,
+      color: AppColors.softBgOf(context),
       borderRadius: AppRadius.mdRadius,
       child: InkWell(
         onTap: onAdd,
@@ -74,7 +77,7 @@ class _ManualProductTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: AppColors.textMuted,
+                        color: AppColors.inkMutedOf(context),
                         fontSize: 12,
                       ),
                     ),
@@ -88,7 +91,9 @@ class _ManualProductTile extends StatelessWidget {
                   Text(
                     isOut ? 'Out' : product.quantityLabel,
                     style: TextStyle(
-                      color: isOut ? AppColors.error : AppColors.textMuted,
+                      color: isOut
+                          ? AppColors.error
+                          : AppColors.inkMutedOf(context),
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                     ),
@@ -96,7 +101,7 @@ class _ManualProductTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Icon(
                     Icons.add_circle_rounded,
-                    color: AppColors.navy,
+                    color: AppColors.brandOf(context),
                     size: 22,
                   ),
                 ],

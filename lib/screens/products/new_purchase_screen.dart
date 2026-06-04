@@ -183,7 +183,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
         if (await _confirmDiscard() && mounted) navigator.pop();
       },
       child: Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('New Purchase'),
           actions: const [
@@ -283,15 +283,20 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
             onPressed: (_drafts.isEmpty || _committing) ? null : _confirm,
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(50),
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
             ),
             child: _committing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 22,
                     height: 22,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.5,
-                      color: Colors.white,
+                      color: AppColors.isDark(context)
+                          ? Colors.black
+                          : Colors.white,
                     ),
                   )
                 : Text(
@@ -348,15 +353,15 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
     final unit = (p.unit == null || p.unit!.isEmpty) ? '' : ' ${p.unit}';
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceOf(context),
         borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       clipBehavior: Clip.antiAlias,
       child: CompactListRow(
         leading: LeadingIconChip(
           icon: isRestock ? Icons.refresh_rounded : Icons.inventory_2_outlined,
-          color: isRestock ? AppColors.amber : AppColors.navy,
+          color: isRestock ? AppColors.amber : AppColors.brandOf(context),
         ),
         title: p.name,
         subtitle:

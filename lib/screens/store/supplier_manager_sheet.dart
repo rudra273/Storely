@@ -15,6 +15,7 @@ class _SupplierManagerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
     return SafeArea(
       top: false,
       child: Container(
@@ -24,8 +25,11 @@ class _SupplierManagerSheet extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surfaceOf(context),
           borderRadius: BorderRadius.circular(24),
+          border: isDark
+              ? Border.all(color: AppColors.borderOf(context))
+              : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -34,7 +38,7 @@ class _SupplierManagerSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColors.creamDark,
+                color: AppColors.borderStrongOf(context),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -43,11 +47,11 @@ class _SupplierManagerSheet extends StatelessWidget {
               children: [
                 const _PanelIcon(icon: Icons.local_shipping_outlined),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Suppliers',
                     style: TextStyle(
-                      color: AppColors.navy,
+                      color: AppColors.brandOf(context),
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                     ),
@@ -63,10 +67,10 @@ class _SupplierManagerSheet extends StatelessWidget {
             const SizedBox(height: 12),
             Flexible(
               child: suppliers.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'No suppliers yet',
-                        style: TextStyle(color: AppColors.textMuted),
+                        style: TextStyle(color: AppColors.inkMutedOf(context)),
                       ),
                     )
                   : ListView.builder(
@@ -112,7 +116,7 @@ class _SupplierProfileRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -133,8 +137,8 @@ class _SupplierProfileRow extends StatelessWidget {
                     details.join(' • '),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
+                    style: TextStyle(
+                      color: AppColors.inkMutedOf(context),
                       fontSize: 12,
                     ),
                   ),

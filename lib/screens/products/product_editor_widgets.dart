@@ -9,10 +9,10 @@ class _ProductSheetHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(bottom: BorderSide(color: AppColors.creamDark)),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceOf(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(bottom: BorderSide(color: AppColors.borderOf(context))),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
@@ -22,7 +22,7 @@ class _ProductSheetHeader extends StatelessWidget {
               width: 38,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColors.creamDark,
+                color: AppColors.borderStrongOf(context),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -43,8 +43,8 @@ class _ProductSheetHeader extends StatelessWidget {
                   tooltip: 'Close',
                   icon: const Icon(Icons.close_rounded),
                   style: IconButton.styleFrom(
-                    backgroundColor: AppColors.cream,
-                    foregroundColor: AppColors.textDark,
+                    backgroundColor: AppColors.softBgOf(context),
+                    foregroundColor: AppColors.inkOf(context),
                     minimumSize: const Size(38, 38),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -72,16 +72,16 @@ class _PurchaseContextBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.creamDark),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.receipt_long_outlined,
             size: 16,
-            color: AppColors.navy,
+            color: AppColors.brandOf(context),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -89,10 +89,10 @@ class _PurchaseContextBar extends StatelessWidget {
               '${_formatFullDate(date)}  ·  $supplierLabel',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
-                color: AppColors.navy,
+                color: AppColors.brandOf(context),
               ),
             ),
           ),
@@ -120,8 +120,8 @@ class _EditorSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.surfaceOf(context),
+        border: Border.all(color: AppColors.borderOf(context)),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -132,10 +132,10 @@ class _EditorSection extends StatelessWidget {
                 width: 30,
                 height: 30,
                 decoration: BoxDecoration(
-                  color: AppColors.navy.withValues(alpha: 0.08),
+                  color: AppColors.brandOf(context).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(icon, size: 17, color: AppColors.navy),
+                child: Icon(icon, size: 17, color: AppColors.brandOf(context)),
               ),
               const SizedBox(width: 9),
               Expanded(
@@ -206,7 +206,7 @@ class _DirectPriceControl extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -257,8 +257,9 @@ class _PriceModeSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
     return Material(
-      color: selected ? Colors.white : Colors.transparent,
+      color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -269,7 +270,7 @@ class _PriceModeSegment extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: selected
-                ? Border.all(color: AppColors.navy.withValues(alpha: 0.18))
+                ? Border.all(color: brand.withValues(alpha: 0.18))
                 : null,
           ),
           child: Row(
@@ -277,7 +278,7 @@ class _PriceModeSegment extends StatelessWidget {
               Icon(
                 icon,
                 size: 19,
-                color: selected ? AppColors.navy : AppColors.textMuted,
+                color: selected ? brand : AppColors.inkMutedOf(context),
               ),
               const SizedBox(width: 7),
               Expanded(
@@ -290,7 +291,7 @@ class _PriceModeSegment extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: selected ? AppColors.navy : AppColors.textDark,
+                        color: selected ? brand : AppColors.inkOf(context),
                         fontSize: 13,
                         fontWeight: FontWeight.w900,
                       ),
@@ -338,9 +339,9 @@ class _ProductSheetActionBar extends StatelessWidget {
     final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     return Container(
       padding: EdgeInsets.fromLTRB(16, 10, 16, 14 + bottomPadding),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.creamDark)),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceOf(context),
+        border: Border(top: BorderSide(color: AppColors.borderOf(context))),
       ),
       child: Row(
         children: [
@@ -354,10 +355,10 @@ class _ProductSheetActionBar extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Selling Price',
                     style: TextStyle(
-                      color: AppColors.textMuted,
+                      color: AppColors.inkMutedOf(context),
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
@@ -367,8 +368,8 @@ class _ProductSheetActionBar extends StatelessWidget {
                     '₹${sellingPrice.toStringAsFixed(2)}$unitText',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.navy,
+                    style: TextStyle(
+                      color: AppColors.brandOf(context),
                       fontWeight: FontWeight.w900,
                       fontSize: 15,
                     ),
@@ -395,7 +396,10 @@ class _ProductSheetActionBar extends StatelessWidget {
                   : 'Add',
             ),
             style: FilledButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -452,8 +456,8 @@ class _PricingCalculationTable extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.cream.withValues(alpha: 0.65),
-        border: Border.all(color: AppColors.creamDark),
+        color: AppColors.softBgOf(context),
+        border: Border.all(color: AppColors.borderOf(context)),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -462,7 +466,7 @@ class _PricingCalculationTable extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surfaceOf(context),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -653,8 +657,10 @@ class _PricingInputRow extends StatelessWidget {
                     isDense: true,
                     filled: true,
                     fillColor: readOnly
-                        ? AppColors.creamDark.withValues(alpha: 0.7)
-                        : Colors.white,
+                        ? AppColors.borderStrongOf(
+                            context,
+                          ).withValues(alpha: 0.7)
+                        : AppColors.raisedSurfaceOf(context),
                     prefixText: prefixText,
                     suffixText: suffixText,
                     contentPadding: const EdgeInsets.symmetric(
@@ -859,12 +865,13 @@ class _SourcePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: AppColors.navy.withValues(alpha: 0.08),
+          color: brand.withValues(alpha: AppColors.isDark(context) ? 0.16 : 0.08),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
@@ -875,7 +882,7 @@ class _SourcePill extends StatelessWidget {
                   ? Icons.upload_file_rounded
                   : Icons.phone_android_rounded,
               size: 12,
-              color: AppColors.navy,
+              color: brand,
             ),
             const SizedBox(width: 4),
             Flexible(
@@ -883,8 +890,8 @@ class _SourcePill extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.navy,
+                style: TextStyle(
+                  color: brand,
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                 ),

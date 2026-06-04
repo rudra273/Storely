@@ -146,7 +146,6 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
             width: double.infinity,
             child: FilledButton(
               onPressed: _save,
-              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
               child: const Text('Save Defaults'),
             ),
           ),
@@ -237,7 +236,6 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
             width: double.infinity,
             child: FilledButton(
               onPressed: _save,
-              style: FilledButton.styleFrom(backgroundColor: AppColors.navy),
               child: const Text('Save Category Pricing'),
             ),
           ),
@@ -255,6 +253,7 @@ class _SettingsSheetFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
     return SafeArea(
       top: false,
       child: Container(
@@ -269,8 +268,11 @@ class _SettingsSheetFrame extends StatelessWidget {
           MediaQuery.viewInsetsOf(context).bottom + 20,
         ),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surfaceOf(context),
           borderRadius: BorderRadius.circular(24),
+          border: isDark
+              ? Border.all(color: AppColors.borderOf(context))
+              : Border.all(color: Colors.transparent),
         ),
         child: SingleChildScrollView(
           child: Column(
@@ -282,7 +284,7 @@ class _SettingsSheetFrame extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.creamDark,
+                    color: AppColors.borderStrongOf(context),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -290,8 +292,8 @@ class _SettingsSheetFrame extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 title,
-                style: const TextStyle(
-                  color: AppColors.navy,
+                style: TextStyle(
+                  color: AppColors.brandOf(context),
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),

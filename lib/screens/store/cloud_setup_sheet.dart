@@ -106,6 +106,7 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final isDark = AppColors.isDark(context);
     return ValueListenableBuilder<CloudState>(
       valueListenable: CloudService.instance.state,
       builder: (context, state, _) {
@@ -114,9 +115,14 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
           child: Padding(
             padding: EdgeInsets.only(bottom: bottom),
             child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceOf(context),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+                border: isDark
+                    ? Border.all(color: AppColors.borderOf(context))
+                    : null,
               ),
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
               child: SingleChildScrollView(
@@ -129,7 +135,7 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
                         height: 4,
                         width: 42,
                         decoration: BoxDecoration(
-                          color: AppColors.creamDark,
+                          color: AppColors.borderStrongOf(context),
                           borderRadius: BorderRadius.circular(99),
                         ),
                       ),
@@ -283,9 +289,9 @@ class _CloudConfiguredSummary extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.creamDark),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Row(
         children: [

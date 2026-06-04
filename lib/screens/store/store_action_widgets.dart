@@ -74,7 +74,7 @@ class _ShopPanel extends StatelessWidget {
               message: 'Only admin or owner can edit',
               child: Icon(
                 Icons.lock_outline_rounded,
-                color: AppColors.textMuted.withValues(alpha: 0.5),
+                color: AppColors.inkMutedOf(context).withValues(alpha: 0.5),
                 size: 22,
               ),
             ),
@@ -131,7 +131,7 @@ class _StoreActionRow extends StatelessWidget {
           ),
           Icon(
             Icons.chevron_right_rounded,
-            color: AppColors.inkFaint,
+            color: AppColors.inkFaintOf(context),
             size: 20,
           ),
         ],

@@ -62,8 +62,8 @@ Future<void> showAppInfoDialog(
             if (intro != null && intro.trim().isNotEmpty) ...[
               Text(
                 intro,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
+                style: TextStyle(
+                  color: AppColors.inkMutedOf(ctx),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -97,8 +97,8 @@ class _InfoSectionView extends StatelessWidget {
         children: [
           Text(
             section.title,
-            style: const TextStyle(
-              color: AppColors.textDark,
+            style: TextStyle(
+              color: AppColors.inkOf(context),
               fontSize: 13,
               fontWeight: FontWeight.w900,
             ),
@@ -122,8 +122,8 @@ class _InfoSectionView extends StatelessWidget {
                   Expanded(
                     child: Text(
                       point,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
+                      style: TextStyle(
+                        color: AppColors.inkMutedOf(context),
                         height: 1.35,
                       ),
                     ),

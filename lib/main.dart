@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'db/database_helper.dart';
+import 'screens/app_lock_gate.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
 import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
+import 'services/home_section_prefs.dart';
 import 'theme/app_theme.dart';
+import 'utils/test_keys.dart';
 
 export 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppSettingsService.instance.load();
+  await HomeSectionPrefs.instance.load();
   await CloudService.instance.initialize();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -29,143 +35,16 @@ class StorelyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Storely',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: AppColors.bg,
-        textTheme: AppText.textTheme,
-        colorScheme: const ColorScheme(
-          brightness: Brightness.light,
-          primary: AppColors.navy,
-          onPrimary: Colors.white,
-          primaryContainer: AppColors.navyLight,
-          onPrimaryContainer: Colors.white,
-          secondary: AppColors.amber,
-          onSecondary: AppColors.navy,
-          secondaryContainer: Color(0xFFFFF3D6),
-          onSecondaryContainer: Color(0xFF6B4D00),
-          tertiary: Color(0xFF0D9488),
-          onTertiary: Colors.white,
-          tertiaryContainer: Color(0xFFCCFBF1),
-          onTertiaryContainer: Color(0xFF0D5549),
-          error: AppColors.error,
-          onError: Colors.white,
-          surface: AppColors.surface,
-          onSurface: AppColors.ink,
-          onSurfaceVariant: AppColors.inkMuted,
-          outline: AppColors.borderStrong,
-          outlineVariant: AppColors.border,
-        ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: false,
-          backgroundColor: AppColors.navy,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          titleTextStyle: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 20,
-            color: Colors.white,
-          ),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: AppColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: AppRadius.mdRadius,
-            side: const BorderSide(color: AppColors.border),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: AppColors.surface,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.md,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.navy, width: 1.5),
-          ),
-          hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 14),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.navy,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.md,
-            ),
-            textStyle: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.navy,
-            side: const BorderSide(color: AppColors.borderStrong),
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.md,
-            ),
-            textStyle: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.amber,
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: AppColors.navy,
-          foregroundColor: Colors.white,
-          elevation: 4,
-        ),
-        dividerTheme: const DividerThemeData(
-          color: AppColors.border,
-          thickness: 1,
-          space: 1,
-        ),
-        chipTheme: ChipThemeData(
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.smRadius),
-          side: BorderSide.none,
-        ),
-        snackBarTheme: SnackBarThemeData(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: AppColors.navy,
-          contentTextStyle: const TextStyle(color: Colors.white),
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-        ),
-        dialogTheme: DialogThemeData(
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
-          backgroundColor: AppColors.surface,
-          titleTextStyle: AppText.title,
-        ),
+    return AnimatedBuilder(
+      animation: AppSettingsService.instance,
+      builder: (context, _) => MaterialApp(
+        title: 'Storely',
+        debugShowCheckedModeBanner: false,
+        theme: StorelyTheme.light(),
+        darkTheme: StorelyTheme.dark(),
+        themeMode: AppSettingsService.instance.themeMode,
+        home: const AppGate(),
       ),
-      home: const AppGate(),
     );
   }
 }
@@ -211,10 +90,14 @@ class _AppGateState extends State<AppGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(backgroundColor: AppColors.bg);
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      );
+    }
     return _isFirstLaunch
         ? WelcomeScreen(onComplete: _completeWelcome)
-        : const AppShell();
+        : const AppLockGate(child: AppShell());
   }
 }
 
@@ -231,6 +114,7 @@ class _AppShellState extends State<AppShell> {
   int _productsRefreshToken = 0;
   int _billsRefreshToken = 0;
   int _storeRefreshToken = 0;
+  int _productPurchaseRequestToken = 0;
 
   void _switchTab(int index) {
     setState(() {
@@ -255,6 +139,25 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _goHomeFromBack() {
+    if (_currentIndex == 0) return;
+    _switchTab(0);
+  }
+
+  void _openProductPurchaseFlow() {
+    setState(() {
+      _productPurchaseRequestToken++;
+    });
+  }
+
+  void _refreshAfterProductPurchaseFlow() {
+    if (!mounted) return;
+    setState(() {
+      _homeRefreshToken++;
+      _productsRefreshToken++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -262,18 +165,32 @@ class _AppShellState extends State<AppShell> {
         refreshToken: _homeRefreshToken,
         onNavigate: _switchTab,
         onScan: _openScanner,
+        onAddProduct: _openProductPurchaseFlow,
       ),
-      ProductsScreen(refreshToken: _productsRefreshToken),
+      ProductsScreen(
+        refreshToken: _productsRefreshToken,
+        isActiveMainTab: _currentIndex == 1,
+        openPurchaseFlowToken: _productPurchaseRequestToken,
+        onPurchaseFlowComplete: _refreshAfterProductPurchaseFlow,
+        onBackToHome: _goHomeFromBack,
+      ),
       BillsScreen(refreshToken: _billsRefreshToken),
       StoreScreen(refreshToken: _storeRefreshToken),
     ];
 
-    return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: pages),
-      bottomNavigationBar: _BottomNavBar(
-        currentIndex: _currentIndex,
-        onTabTap: _switchTab,
-        onScanTap: _openScanner,
+    return PopScope(
+      canPop: _currentIndex == 0 || _currentIndex == 1,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || _currentIndex == 1) return;
+        _goHomeFromBack();
+      },
+      child: Scaffold(
+        body: IndexedStack(index: _currentIndex, children: pages),
+        bottomNavigationBar: _BottomNavBar(
+          currentIndex: _currentIndex,
+          onTabTap: _switchTab,
+          onScanTap: _openScanner,
+        ),
       ),
     );
   }
@@ -293,10 +210,21 @@ class _BottomNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
+    final surface = AppColors.surfaceOf(context);
+    final shadowColor = isDark ? Colors.black : AppColors.navy;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: AppShadows.navBar,
+        color: surface,
+        border: Border(top: BorderSide(color: AppColors.borderOf(context))),
+        boxShadow: [
+          BoxShadow(
+            color: shadowColor.withValues(alpha: isDark ? 0.5 : 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
       child: SafeArea(
         child: Padding(
@@ -304,57 +232,78 @@ class _BottomNavBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _NavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home,
-                label: 'Home',
-                isActive: currentIndex == 0,
-                onTap: () => onTabTap(0),
+              TestKeys.tag(
+                TestKeys.navHome,
+                _NavItem(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  label: 'Home',
+                  isActive: currentIndex == 0,
+                  onTap: () => onTabTap(0),
+                ),
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.inventory_2_outlined,
-                activeIcon: Icons.inventory_2,
-                label: 'Products',
-                isActive: currentIndex == 1,
-                onTap: () => onTabTap(1),
+              TestKeys.tag(
+                TestKeys.navProducts,
+                _NavItem(
+                  icon: Icons.inventory_2_outlined,
+                  activeIcon: Icons.inventory_2,
+                  label: 'Products',
+                  isActive: currentIndex == 1,
+                  onTap: () => onTabTap(1),
+                ),
+                button: true,
               ),
-              GestureDetector(
-                onTap: onScanTap,
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  margin: const EdgeInsets.only(bottom: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.amber,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.amber.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.qr_code_scanner_rounded,
-                    color: Colors.white,
-                    size: 28,
+              TestKeys.tag(
+                TestKeys.navScan,
+                GestureDetector(
+                  onTap: onScanTap,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    margin: const EdgeInsets.only(bottom: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.amber,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.amber.withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.qr_code_scanner_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
                   ),
                 ),
+                label: 'Scan',
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.receipt_long_outlined,
-                activeIcon: Icons.receipt_long,
-                label: 'Bills',
-                isActive: currentIndex == 2,
-                onTap: () => onTabTap(2),
+              TestKeys.tag(
+                TestKeys.navBills,
+                _NavItem(
+                  icon: Icons.receipt_long_outlined,
+                  activeIcon: Icons.receipt_long,
+                  label: 'Bills',
+                  isActive: currentIndex == 2,
+                  onTap: () => onTabTap(2),
+                ),
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.storefront_outlined,
-                activeIcon: Icons.storefront,
-                label: 'Store',
-                isActive: currentIndex == 3,
-                onTap: () => onTabTap(3),
+              TestKeys.tag(
+                TestKeys.navStore,
+                _NavItem(
+                  icon: Icons.storefront_outlined,
+                  activeIcon: Icons.storefront,
+                  label: 'Store',
+                  isActive: currentIndex == 3,
+                  onTap: () => onTabTap(3),
+                ),
+                button: true,
               ),
             ],
           ),
@@ -380,6 +329,9 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final activeColor = AppColors.brandOf(context);
+    final inactiveColor = AppColors.inkMutedOf(context);
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -390,7 +342,7 @@ class _NavItem extends StatelessWidget {
           children: [
             Icon(
               isActive ? activeIcon : icon,
-              color: isActive ? AppColors.navy : AppColors.inkMuted,
+              color: isActive ? activeColor : inactiveColor,
               size: 24,
             ),
             const SizedBox(height: 4),
@@ -399,7 +351,7 @@ class _NavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? AppColors.navy : AppColors.inkMuted,
+                color: isActive ? activeColor : inactiveColor,
               ),
             ),
           ],

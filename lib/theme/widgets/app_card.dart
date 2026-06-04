@@ -29,9 +29,9 @@ class AppCard extends StatelessWidget {
     final box = Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: color ?? AppColors.surface,
+        color: color ?? AppColors.surfaceOf(context),
         borderRadius: radius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       clipBehavior: Clip.antiAlias,
       child: onTap != null

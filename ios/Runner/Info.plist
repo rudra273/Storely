@@ -68,6 +68,8 @@
 		</array>
 		<key>NSCameraUsageDescription</key>
 		<string>Storely needs camera access to scan QR codes on products</string>
+		<key>NSFaceIDUsageDescription</key>
+		<string>Storely uses Face ID to protect access to your store data when App Lock is enabled.</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

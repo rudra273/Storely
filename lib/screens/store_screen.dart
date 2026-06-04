@@ -4,13 +4,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../models/bill_settings.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
+import '../services/app_lock_service.dart';
 import '../services/cloud_service.dart';
+import '../services/app_settings_service.dart';
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -24,6 +27,7 @@ part 'store/bill_settings_sheet.dart';
 part 'store/profile_sheets.dart';
 part 'store/store_dialogs.dart';
 part 'store/customer_sheets.dart';
+part 'store/app_settings_sheet.dart';
 
 class StoreScreen extends StatefulWidget {
   final int refreshToken;
@@ -227,6 +231,15 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  Future<void> _showAppSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AppSettingsSheet(),
+    );
+  }
+
   Future<void> _showCustomerTable() async {
     var customers = await DatabaseHelper.instance.getAllCustomers();
     if (!mounted) return;
@@ -390,6 +403,7 @@ class _StoreScreenState extends State<StoreScreen> {
             await refreshSheet();
           }
 
+          final isDark = AppColors.isDark(ctx);
           return SafeArea(
             top: false,
             child: Container(
@@ -399,8 +413,11 @@ class _StoreScreenState extends State<StoreScreen> {
               margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surfaceOf(ctx),
                 borderRadius: BorderRadius.circular(24),
+                border: isDark
+                    ? Border.all(color: AppColors.borderOf(ctx))
+                    : null,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -409,7 +426,7 @@ class _StoreScreenState extends State<StoreScreen> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: AppColors.creamDark,
+                      color: AppColors.borderStrongOf(ctx),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -421,8 +438,8 @@ class _StoreScreenState extends State<StoreScreen> {
                       Expanded(
                         child: Text(
                           title,
-                          style: const TextStyle(
-                            color: AppColors.navy,
+                          style: TextStyle(
+                            color: AppColors.brandOf(ctx),
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                           ),
@@ -441,8 +458,8 @@ class _StoreScreenState extends State<StoreScreen> {
                         ? Center(
                             child: Text(
                               emptyText,
-                              style: const TextStyle(
-                                color: AppColors.textMuted,
+                              style: TextStyle(
+                                color: AppColors.inkMutedOf(ctx),
                               ),
                             ),
                           )
@@ -529,7 +546,7 @@ class _StoreScreenState extends State<StoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Store'),
         actions: const [
@@ -636,6 +653,17 @@ class _StoreScreenState extends State<StoreScreen> {
                     subtitle: 'Revenue, profit, GST and unit volume',
                     icon: Icons.analytics_outlined,
                     onTap: _openAnalytics,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AnimatedBuilder(
+                    animation: AppSettingsService.instance,
+                    builder: (context, _) => _StoreActionRow(
+                      title: 'App Settings',
+                      subtitle:
+                          'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'}',
+                      icon: Icons.settings_outlined,
+                      onTap: _showAppSettings,
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Advanced'),

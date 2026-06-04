@@ -4,6 +4,8 @@ class Bill {
   static const statusUnpaid = 'unpaid';
   static const statusPartial = 'partial';
   static const statusPaid = 'paid';
+  static const lifecycleFinalized = 'finalized';
+  static const lifecycleCancelled = 'cancelled';
 
   final int? id;
   final String uuid;
@@ -35,6 +37,10 @@ class Bill {
   final double paidAmount;
   final double balanceDue;
   final String paymentStatus;
+  final String lifecycleStatus;
+  final DateTime? cancelledAt;
+  final String? cancelReason;
+  final String? duplicatedFromBillUuid;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -72,6 +78,10 @@ class Bill {
     double? paidAmount,
     double? balanceDue,
     String? paymentStatus,
+    this.lifecycleStatus = lifecycleFinalized,
+    this.cancelledAt,
+    String? cancelReason,
+    String? duplicatedFromBillUuid,
     this.deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -96,6 +106,8 @@ class Bill {
              totalAmount,
              paidAmount ?? (isPaid ? totalAmount : 0),
            ),
+       cancelReason = _cleanOptional(cancelReason),
+       duplicatedFromBillUuid = _cleanOptional(duplicatedFromBillUuid),
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
@@ -130,6 +142,10 @@ class Bill {
     'paid_amount': paidAmount,
     'balance_due': balanceDue,
     'payment_status': paymentStatus,
+    'lifecycle_status': lifecycleStatus,
+    'cancelled_at': cancelledAt?.toIso8601String(),
+    'cancel_reason': cancelReason,
+    'duplicated_from_bill_uuid': duplicatedFromBillUuid,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
@@ -187,6 +203,12 @@ class Bill {
       paymentStatus:
           map['payment_status'] as String? ??
           _paymentStatus(totalAmount, paidAmount),
+      lifecycleStatus: map['lifecycle_status'] as String? ?? lifecycleFinalized,
+      cancelledAt: map['cancelled_at'] == null
+          ? null
+          : DateTime.tryParse(map['cancelled_at'] as String),
+      cancelReason: map['cancel_reason'] as String?,
+      duplicatedFromBillUuid: map['duplicated_from_bill_uuid'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

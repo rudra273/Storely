@@ -16,16 +16,16 @@ class _ProductSuggestionList extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(maxHeight: 220),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.creamDark),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: products.length,
         separatorBuilder: (_, index) =>
-            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+            Divider(height: 1, indent: 56, color: AppColors.borderOf(context)),
         itemBuilder: (_, index) {
           final product = products[index];
           final summary = product.id == null ? null : summaries[product.id];
@@ -34,11 +34,13 @@ class _ProductSuggestionList extends StatelessWidget {
               : 'Last ${_formatFullDate(summary!.lastPurchaseDate!)}';
           return ListTile(
             dense: true,
-            leading: const CircleAvatar(
+            leading: CircleAvatar(
               radius: 17,
-              backgroundColor: AppColors.navy,
-              foregroundColor: Colors.white,
-              child: Icon(Icons.inventory_2_outlined, size: 17),
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
+              child: const Icon(Icons.inventory_2_outlined, size: 17),
             ),
             title: Text(
               product.name,

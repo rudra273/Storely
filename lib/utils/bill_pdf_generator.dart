@@ -39,9 +39,11 @@ class BillPdfGenerator {
         margin: const pw.EdgeInsets.all(28),
         build: (context) => [
           _header(bill, shop, billSettings),
-          pw.SizedBox(height: 14),
+          if (_showHeader(billSettings)) pw.SizedBox(height: 10),
           _partyBlock(bill, shop, billSettings),
-          pw.SizedBox(height: 18),
+          pw.SizedBox(height: 10),
+          _invoiceMeta(bill, shop, billSettings),
+          pw.SizedBox(height: 16),
           _itemsTable(
             bill,
             gstRegistered: gstRegistered,
@@ -50,7 +52,7 @@ class BillPdfGenerator {
           pw.SizedBox(height: 14),
           _totals(bill, gstRegistered: gstRegistered, settings: billSettings),
           pw.SizedBox(height: 20),
-          _footer(gstRegistered, billSettings),
+          _footer(billSettings),
         ],
       ),
     );
@@ -69,70 +71,52 @@ class BillPdfGenerator {
     ShopProfile? shop,
     BillSettings settings,
   ) {
+    if (!_showHeader(settings)) return pw.SizedBox();
+    final title = settings.invoiceTitle.trim().isEmpty
+        ? BillSettings.defaultInvoiceTitle
+        : settings.invoiceTitle.trim().toUpperCase();
     final logo = settings.showShopLogo
         ? _imageProvider(settings.shopLogoBase64)
         : null;
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        if (logo != null) ...[
-          pw.Container(
-            width: 58,
-            height: 58,
-            margin: const pw.EdgeInsets.only(right: 12),
-            child: pw.Image(logo, fit: pw.BoxFit.contain),
+    return pw.Container(
+      padding: const pw.EdgeInsets.only(bottom: 10),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey500)),
+      ),
+      child: pw.Row(
+        children: [
+          pw.SizedBox(
+            width: 64,
+            child: logo == null
+                ? pw.SizedBox()
+                : pw.SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: pw.Image(logo, fit: pw.BoxFit.contain),
+                  ),
           ),
+          pw.Expanded(
+            child: settings.showInvoiceTitle
+                ? pw.Text(
+                    title,
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 18,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  )
+                : pw.SizedBox(),
+          ),
+          pw.SizedBox(width: 64),
         ],
-        pw.Expanded(
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                shop?.name ?? 'Storely',
-                style: pw.TextStyle(
-                  fontSize: 22,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              if (settings.showShopAddress && shop?.address != null)
-                _muted(shop!.address!),
-              if (settings.showShopPhone && shop?.phone != null)
-                _muted('Phone: ${shop!.phone}'),
-              if (settings.showShopEmail && shop?.email != null)
-                _muted('Email: ${shop!.email}'),
-              if (settings.showShopGstin && shop?.gstin != null)
-                _muted('GSTIN: ${shop!.gstin}'),
-            ],
-          ),
-        ),
-        pw.Container(
-          padding: const pw.EdgeInsets.all(10),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey400),
-            borderRadius: pw.BorderRadius.circular(4),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              pw.Text(
-                settings.invoiceTitle.trim().isEmpty
-                    ? BillSettings.defaultInvoiceTitle
-                    : settings.invoiceTitle.trim().toUpperCase(),
-                style: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              pw.SizedBox(height: 4),
-              pw.Text(_billTitle(bill)),
-              pw.Text(
-                DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt),
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
+  }
+
+  static bool _showHeader(BillSettings settings) {
+    return settings.showInvoiceTitle ||
+        (settings.showShopLogo &&
+            _imageProvider(settings.shopLogoBase64) != null);
   }
 
   static pw.Widget _partyBlock(
@@ -140,45 +124,84 @@ class BillPdfGenerator {
     ShopProfile? shop,
     BillSettings settings,
   ) {
+    final sellerLines = _sellerLines(shop, settings);
+    final buyerLines = _buyerLines(bill, settings);
+    final showSeller = sellerLines.any((line) => line.trim().isNotEmpty);
+    final showBuyer = buyerLines.any((line) => line.trim().isNotEmpty);
+    if (!showSeller && !showBuyer) return pw.SizedBox();
+
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Expanded(
-          child: _infoBox(
-            title: 'Bill To',
-            lines: [
-              bill.customerName,
-              if (bill.customerGstin != null) 'GSTIN: ${bill.customerGstin}',
-              if (bill.customerGstLegalName != null)
-                'Legal Name: ${bill.customerGstLegalName}',
-              if (bill.customerGstTradeName != null)
-                'Trade Name: ${bill.customerGstTradeName}',
-              if (settings.showCustomerPhone && bill.customerPhone != null)
-                'Phone: ${bill.customerPhone}',
-              if (settings.showCustomerAddress &&
-                  bill.customerAddressSnapshot != null)
-                bill.customerAddressSnapshot!,
-            ],
-          ),
-        ),
-        if (settings.showPaymentDetails) ...[
-          pw.SizedBox(width: 10),
+        if (showSeller)
           pw.Expanded(
-            child: _infoBox(
-              title: 'Payment',
-              lines: [
-                'Status: ${_paymentStatusLabel(bill.paymentStatus)}',
-                if (bill.paidAmount > 0)
-                  'Method: ${bill.paymentMethod == 'online' ? 'Online' : 'Cash'}',
-                if (bill.paidAmount > 0) 'Paid: ${_money(bill.paidAmount)}',
-                if (bill.balanceDue > 0) 'Balance: ${_money(bill.balanceDue)}',
-                if (shop?.gstRegistered == true) 'GST: Registered',
-                if (shop?.gstRegistered != true) 'GST: Not registered',
-              ],
-            ),
+            child: _infoBox(title: 'Seller / From', lines: sellerLines),
+          ),
+        if (showSeller && showBuyer) pw.SizedBox(width: 10),
+        if (showBuyer)
+          pw.Expanded(
+            child: _infoBox(title: 'Buyer / Bill To', lines: buyerLines),
+          ),
+      ],
+    );
+  }
+
+  static pw.Widget _invoiceMeta(
+    Bill bill,
+    ShopProfile? shop,
+    BillSettings settings,
+  ) {
+    final supplyState = _cleanStateCode(
+      bill.placeOfSupplyStateCode ?? bill.customerGstin,
+    );
+    final shopState = _cleanStateCode(shop?.gstin);
+    final supplyType = shopState == null || supplyState == null
+        ? null
+        : shopState == supplyState
+        ? 'Intrastate'
+        : 'Interstate';
+
+    final cells = [
+      if (settings.showInvoiceNumber) _metaCell('Invoice No', _billTitle(bill)),
+      if (settings.showInvoiceDate)
+        _metaCell(
+          'Date',
+          DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt),
+        ),
+      if (settings.showInvoicePlaceOfSupply)
+        _metaCell('Place of Supply', supplyState ?? '-'),
+      if (settings.showInvoiceSupplyType)
+        _metaCell('Supply Type', supplyType ?? '-'),
+    ];
+    if (cells.isEmpty) return pw.SizedBox();
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Row(children: cells),
+    );
+  }
+
+  static pw.Widget _metaCell(String label, String value) {
+    return pw.Expanded(
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            label.toUpperCase(),
+            style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey700),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            value,
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
           ),
         ],
-      ],
+      ),
     );
   }
 
@@ -192,32 +215,70 @@ class BillPdfGenerator {
         settings.showHsnColumn &&
         (gstRegistered ||
             bill.items.any((item) => item.hsnCodeSnapshot != null));
-    final headers = [
-      '#',
-      'Item',
-      if (showHsn) 'HSN',
-      'Rate',
-      'Qty',
-      if (showGst) 'Net Amount',
-      if (showGst) 'GST',
-      'Amount',
+    final columns = [
+      if (settings.showItemSerialColumn)
+        _BillTableColumn(
+          label: '#',
+          width: const pw.FixedColumnWidth(24),
+          alignment: pw.Alignment.center,
+          value: (index, _) => '$index',
+        ),
+      if (settings.showItemNameColumn)
+        _BillTableColumn(
+          label: 'Item',
+          width: const pw.FlexColumnWidth(2.6),
+          alignment: pw.Alignment.centerLeft,
+          value: (_, item) => item.productName,
+        ),
+      if (showHsn)
+        _BillTableColumn(
+          label: 'HSN',
+          width: const pw.FlexColumnWidth(0.8),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => item.hsnCodeSnapshot ?? '-',
+        ),
+      if (settings.showQuantityColumn)
+        _BillTableColumn(
+          label: 'Qty',
+          width: const pw.FlexColumnWidth(0.75),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => item.quantityLabel,
+        ),
+      if (settings.showRateColumn)
+        _BillTableColumn(
+          label: 'Rate',
+          width: const pw.FlexColumnWidth(0.9),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => _money(_lineRate(item, showGst: showGst)),
+        ),
+      if (showGst && settings.showGstPercentColumn)
+        _BillTableColumn(
+          label: 'GST %',
+          width: const pw.FlexColumnWidth(0.65),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => _taxLabel(item.gstPercentSnapshot),
+        ),
+      if (showGst && settings.showGstAmountColumn)
+        _BillTableColumn(
+          label: 'GST',
+          width: const pw.FlexColumnWidth(0.85),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => _money(item.totalGst),
+        ),
+      if (settings.showAmountColumn)
+        _BillTableColumn(
+          label: 'Amount',
+          width: const pw.FlexColumnWidth(0.95),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => _money(_lineAmount(item, showGst: showGst)),
+        ),
     ];
+    if (columns.isEmpty) return pw.SizedBox();
 
+    final headers = columns.map((column) => column.label).toList();
     final data = bill.items.asMap().entries.map((entry) {
       final index = entry.key + 1;
-      final item = entry.value;
-      final gst = showGst ? item.totalGst : 0.0;
-      final taxable = showGst ? item.totalTaxableValue : item.subtotal;
-      return [
-        '$index',
-        item.productName,
-        if (showHsn) item.hsnCodeSnapshot ?? '-',
-        _money(item.sellingPriceSnapshot),
-        item.quantityLabel,
-        if (showGst) _money(taxable),
-        if (showGst) _money(gst),
-        _money(item.subtotal),
-      ];
+      return columns.map((column) => column.value(index, entry.value)).toList();
     }).toList();
 
     return pw.TableHelper.fromTextArray(
@@ -230,18 +291,12 @@ class BillPdfGenerator {
       cellAlignment: pw.Alignment.centerLeft,
       headerAlignment: pw.Alignment.centerLeft,
       cellAlignments: {
-        0: pw.Alignment.center,
-        for (var i = 2; i < headers.length; i++) i: pw.Alignment.centerRight,
+        for (final entry in columns.asMap().entries)
+          entry.key: entry.value.alignment,
       },
       columnWidths: {
-        0: const pw.FixedColumnWidth(24),
-        1: const pw.FlexColumnWidth(2.4),
-        2: const pw.FlexColumnWidth(0.9),
-        3: const pw.FlexColumnWidth(0.9),
-        if (showGst) 4: const pw.FlexColumnWidth(1),
-        if (showGst) 5: const pw.FlexColumnWidth(0.9),
-        if (showGst) 6: const pw.FlexColumnWidth(1),
-        if (!showGst) 4: const pw.FlexColumnWidth(1),
+        for (final entry in columns.asMap().entries)
+          entry.key: entry.value.width,
       },
       cellPadding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
     );
@@ -256,54 +311,53 @@ class BillPdfGenerator {
     final gstTotal = showGst
         ? bill.cgstAmount + bill.sgstAmount + bill.igstAmount
         : 0.0;
-    final taxableTotal = showGst ? bill.taxableAmount : bill.subtotalAmount;
+    final rows = [
+      if (settings.showSubtotal) _totalRow('Subtotal', bill.subtotalAmount),
+      if (settings.showDiscount && bill.discountAmount > 0)
+        _totalRow(
+          'Discount (${bill.discountPercent.toStringAsFixed(2)}%)',
+          -bill.discountAmount,
+        ),
+      if (showGst && settings.showTaxableAmount)
+        _totalRow('Taxable Amount', bill.taxableAmount),
+      if (showGst && settings.showCgstSgstIgst && bill.cgstAmount > 0)
+        _totalRow('CGST', bill.cgstAmount),
+      if (showGst && settings.showCgstSgstIgst && bill.sgstAmount > 0)
+        _totalRow('SGST', bill.sgstAmount),
+      if (showGst && settings.showCgstSgstIgst && bill.igstAmount > 0)
+        _totalRow('IGST', bill.igstAmount),
+      if (showGst && settings.showGstTotal && gstTotal > 0)
+        _totalRow('GST Total', gstTotal),
+      if (settings.showGrandTotal) ...[
+        pw.Divider(),
+        _totalRow('Grand total', bill.totalAmount, bold: true),
+      ],
+    ];
+    if (rows.isEmpty) return pw.SizedBox();
 
     return pw.Align(
       alignment: pw.Alignment.centerRight,
-      child: pw.SizedBox(
-        width: 240,
-        child: pw.Column(
-          children: [
-            if (showGst) _totalRow('Net Amount', taxableTotal),
-            if (showGst) _totalRow('GST total', gstTotal),
-            _totalRow('Subtotal', bill.subtotalAmount),
-            if (bill.discountAmount > 0)
-              _totalRow(
-                'Discount (${bill.discountPercent.toStringAsFixed(2)}%)',
-                -bill.discountAmount,
-              ),
-            pw.Divider(),
-            _totalRow('Grand total', bill.totalAmount, bold: true),
-            if (settings.showPaymentDetails) ...[
-              if (bill.paidAmount > 0) _totalRow('Paid', bill.paidAmount),
-              if (bill.balanceDue > 0)
-                _totalRow('Balance due', bill.balanceDue, bold: true),
-            ],
-          ],
-        ),
-      ),
+      child: pw.SizedBox(width: 260, child: pw.Column(children: rows)),
     );
   }
 
-  static pw.Widget _footer(bool gstRegistered, BillSettings settings) {
+  static pw.Widget _footer(BillSettings settings) {
     final signature = settings.showDigitalSignature
         ? _imageProvider(settings.digitalSignatureBase64)
         : null;
+    final footerText = settings.showFooterText
+        ? settings.footerText.trim()
+        : '';
+    if (footerText.isEmpty && signature == null) return pw.SizedBox();
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Divider(color: PdfColors.grey400),
-        if (settings.showGstBreakdown)
-          pw.Text(
-            gstRegistered
-                ? 'GST shown above is calculated from item price snapshots at billing time.'
-                : 'This shop is not marked GST registered; GST is not shown as collected on this invoice.',
-            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
-          ),
-        if (settings.footerText.trim().isNotEmpty) ...[
+        if (footerText.isNotEmpty) ...[
           pw.SizedBox(height: 8),
           pw.Text(
-            settings.footerText.trim(),
+            footerText,
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
           ),
         ],
@@ -336,6 +390,10 @@ class BillPdfGenerator {
     required String title,
     required List<String> lines,
   }) {
+    final visibleLines = lines
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
     return pw.Container(
       padding: const pw.EdgeInsets.all(10),
       decoration: pw.BoxDecoration(
@@ -350,12 +408,79 @@ class BillPdfGenerator {
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
           ),
           pw.SizedBox(height: 5),
-          ...lines.map(
+          ...visibleLines.map(
             (line) => pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
           ),
         ],
       ),
     );
+  }
+
+  static List<String> _sellerLines(ShopProfile? shop, BillSettings settings) {
+    final name = _cleanText(shop?.name) ?? 'Storely';
+    final address = _cleanText(shop?.address);
+    final phone = _cleanText(shop?.phone);
+    final email = _cleanText(shop?.email);
+    final gstin = _cleanGstin(shop?.gstin);
+
+    return [
+      if (settings.showShopName) name,
+      if (address != null && settings.showShopAddress) address,
+      if (phone != null && settings.showShopPhone) 'Phone: $phone',
+      if (email != null && settings.showShopEmail) 'Email: $email',
+      if (gstin != null && settings.showShopGstin) 'GSTIN: $gstin',
+    ];
+  }
+
+  static double _lineRate(BillItem item, {required bool showGst}) {
+    if (!showGst) return item.sellingPriceSnapshot;
+    return item.taxableValueSnapshot;
+  }
+
+  static double _lineAmount(BillItem item, {required bool showGst}) {
+    if (!showGst) return item.subtotal;
+    return item.totalTaxableValue + item.totalGst;
+  }
+
+  static String _taxLabel(double? percent) {
+    if (percent == null || percent <= 0) return '-';
+    final isWhole = percent == percent.roundToDouble();
+    return '${percent.toStringAsFixed(isWhole ? 0 : 2)}%';
+  }
+
+  static List<String> _buyerLines(Bill bill, BillSettings settings) {
+    final customerName = _cleanText(bill.customerName) ?? 'Walk-in Customer';
+    final legalName = _cleanText(bill.customerGstLegalName);
+    final tradeName = _cleanText(bill.customerGstTradeName);
+    final gstin = _cleanGstin(bill.customerGstin);
+    final address = _cleanText(bill.customerAddressSnapshot);
+    final phone = _cleanText(bill.customerPhone);
+    final supplyState = _cleanStateCode(bill.placeOfSupplyStateCode ?? gstin);
+    final isB2b = bill.billType == Bill.typeB2b || gstin != null;
+    final displayName = isB2b
+        ? legalName ?? tradeName ?? customerName
+        : customerName;
+
+    return [
+      if (settings.showCustomerName) displayName,
+      if (settings.showCustomerTradeName &&
+          isB2b &&
+          tradeName != null &&
+          tradeName != displayName)
+        'Trade Name: $tradeName',
+      if (settings.showCustomerLegalName &&
+          isB2b &&
+          legalName != null &&
+          legalName != displayName)
+        'Legal Name: $legalName',
+      if (settings.showCustomerName && isB2b && customerName != displayName)
+        'Contact: $customerName',
+      if (settings.showCustomerGstin && isB2b && gstin != null) 'GSTIN: $gstin',
+      if (phone != null && settings.showCustomerPhone) 'Phone: $phone',
+      if (address != null && settings.showCustomerAddress) 'Address: $address',
+      if (settings.showCustomerPlaceOfSupply && isB2b && supplyState != null)
+        'Place of Supply: $supplyState',
+    ];
   }
 
   static pw.Widget _totalRow(String label, double value, {bool bold = false}) {
@@ -374,16 +499,6 @@ class BillPdfGenerator {
     );
   }
 
-  static pw.Widget _muted(String text) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.only(top: 2),
-      child: pw.Text(
-        text,
-        style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
-      ),
-    );
-  }
-
   static String _billTitle(Bill bill) {
     if (bill.billNumber.startsWith('SHOP-LOCAL-')) {
       return 'Bill #${bill.id ?? ''}';
@@ -398,12 +513,20 @@ class BillPdfGenerator {
     return '${sign}Rs. ${value.abs().toStringAsFixed(2)}';
   }
 
-  static String _paymentStatusLabel(String status) {
-    return switch (status) {
-      Bill.statusPaid => 'Paid',
-      Bill.statusPartial => 'Partial',
-      _ => 'Unpaid',
-    };
+  static String? _cleanText(String? value) {
+    final trimmed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  static String? _cleanGstin(String? value) {
+    final trimmed = value?.trim().replaceAll(RegExp(r'\s+'), '').toUpperCase();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  static String? _cleanStateCode(String? value) {
+    final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits == null || digits.isEmpty) return null;
+    return digits.padLeft(2, '0').substring(0, 2);
   }
 
   static pw.MemoryImage? _imageProvider(String? base64Value) {
@@ -415,4 +538,18 @@ class BillPdfGenerator {
       return null;
     }
   }
+}
+
+class _BillTableColumn {
+  final String label;
+  final pw.TableColumnWidth width;
+  final pw.Alignment alignment;
+  final String Function(int index, BillItem item) value;
+
+  const _BillTableColumn({
+    required this.label,
+    required this.width,
+    required this.alignment,
+    required this.value,
+  });
 }

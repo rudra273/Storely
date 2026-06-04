@@ -27,6 +27,7 @@ class _ProductCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLowStock = product.quantity <= lowStockThreshold;
     final isOutOfStock = product.quantity == 0;
+    final brand = AppColors.brandOf(context);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -34,8 +35,8 @@ class _ProductCard extends StatelessWidget {
         onTap: onTap,
         padding: const EdgeInsets.all(AppSpacing.md),
         color: isSelected
-            ? AppColors.navy.withValues(alpha: 0.05)
-            : AppColors.surface,
+            ? brand.withValues(alpha: AppColors.isDark(context) ? 0.22 : 0.05)
+            : null,
         borderRadius: isSelected
             ? AppRadius.mdRadius
             : isOutOfStock
@@ -54,7 +55,7 @@ class _ProductCard extends StatelessWidget {
                           ? Icons.check_circle_rounded
                           : Icons.radio_button_unchecked_rounded,
                       size: 20,
-                      color: isSelected ? AppColors.navy : AppColors.inkFaint,
+                      color: isSelected ? brand : AppColors.inkFaintOf(context),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -83,7 +84,7 @@ class _ProductCard extends StatelessWidget {
                       child: Icon(
                         Icons.history_rounded,
                         size: 16,
-                        color: AppColors.inkFaint,
+                        color: AppColors.inkFaintOf(context),
                       ),
                     ),
                   ),
@@ -95,7 +96,7 @@ class _ProductCard extends StatelessWidget {
                       child: Icon(
                         Icons.delete_outline,
                         size: 16,
-                        color: AppColors.inkFaint,
+                        color: AppColors.inkFaintOf(context),
                       ),
                     ),
                   ),
@@ -126,7 +127,7 @@ class _ProductCard extends StatelessWidget {
                   Icon(
                     Icons.event_available_outlined,
                     size: 12,
-                    color: AppColors.inkFaint,
+                    color: AppColors.inkFaintOf(context),
                   ),
                   const SizedBox(width: AppSpacing.xs),
                   Text(
@@ -147,13 +148,15 @@ class _ProductCard extends StatelessWidget {
                 Icon(
                   Icons.inventory_2_outlined,
                   size: 13,
-                  color: AppColors.inkFaint,
+                  color: AppColors.inkFaintOf(context),
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
                   product.quantityLabel,
                   style: AppText.caption.copyWith(
-                    color: isLowStock ? AppColors.error : AppColors.inkMuted,
+                    color: isLowStock
+                        ? AppColors.error
+                        : AppColors.inkMutedOf(context),
                     fontWeight: isLowStock ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
@@ -186,13 +189,13 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.bg,
+        color: AppColors.softBgOf(context),
         borderRadius: AppRadius.smRadius,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppColors.inkMuted),
+          Icon(icon, size: 12, color: AppColors.inkMutedOf(context)),
           const SizedBox(width: 4),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 150),
@@ -217,7 +220,7 @@ class _SourceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = highlighted ? AppColors.amber : AppColors.navy;
+    final color = highlighted ? AppColors.amber : AppColors.brandOf(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
