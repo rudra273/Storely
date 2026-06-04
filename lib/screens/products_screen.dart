@@ -2176,10 +2176,19 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return PopScope(
       canPop:
           !widget.isActiveMainTab ||
-          (!_selectionMode && widget.onBackToHome == null),
+          (!_selectionMode &&
+              !_searchOpen &&
+              widget.onBackToHome == null),
       onPopInvokedWithResult: (didPop, result) {
         if (!widget.isActiveMainTab) return;
         if (didPop) return;
+        if (_searchOpen) {
+          setState(() {
+            _searchOpen = false;
+            _searchCtrl.clear();
+          });
+          return;
+        }
         if (_selectionMode) {
           _clearProductSelection();
           return;
@@ -2196,13 +2205,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   controller: _searchCtrl,
                   autofocus: true,
                   style: const TextStyle(color: Colors.white, fontSize: 16),
+                  cursorColor: AppColors.amber,
                   decoration: InputDecoration(
+                    isCollapsed: true,
                     hintText: 'Search products...',
                     hintStyle: TextStyle(
                       color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 16,
                     ),
-                    border: InputBorder.none,
                     filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
                   ),
                 )
               : const Text('Products'),

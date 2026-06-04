@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _shopName;
   final _homeSearchCtrl = TextEditingController();
   String _homeSearchQuery = '';
+  bool _searchOpen = false;
 
   @override
   void initState() {
@@ -91,35 +92,77 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _toggleSearch() {
+    setState(() {
+      _searchOpen = !_searchOpen;
+      if (!_searchOpen) {
+        _homeSearchCtrl.clear();
+        _homeSearchQuery = '';
+        FocusScope.of(context).unfocus();
+      }
+    });
+  }
+
+  void _closeSearch() {
+    _homeSearchCtrl.clear();
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searchOpen = false;
+      _homeSearchQuery = '';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
-        color: AppColors.amber,
-        onRefresh: _loadData,
-        child: CustomScrollView(
-          slivers: [
-            SliverPersistentHeader(
+    return PopScope(
+      canPop: !_searchOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_searchOpen) _closeSearch();
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: RefreshIndicator(
+          color: AppColors.amber,
+          onRefresh: _loadData,
+          child: CustomScrollView(
+            slivers: [
+              SliverPersistentHeader(
               pinned: true,
               delegate: AppScreenHeaderDelegate(
                 title: 'Storely',
                 subtitle: _shopName,
                 topPadding: MediaQuery.paddingOf(context).top,
+                titleOverride: _searchOpen
+                    ? _HomeSearchField(
+                        controller: _homeSearchCtrl,
+                        onChanged: (value) =>
+                            setState(() => _homeSearchQuery = value.trim()),
+                      )
+                    : null,
                 actions: [
                   IconButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen(),
-                      ),
-                    ),
-                    icon: const Icon(
-                      Icons.notifications_outlined,
+                    onPressed: _toggleSearch,
+                    icon: Icon(
+                      _searchOpen ? Icons.close_rounded : Icons.search_rounded,
                       color: Colors.white,
                       size: 22,
                     ),
                   ),
+                  if (!_searchOpen)
+                    IconButton(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen(),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.notifications_outlined,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -129,6 +172,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (_searchOpen && _homeSearchQuery.isNotEmpty) ...[
+                      _HomeSearchResults(results: _searchResults),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
                     _SalesHero(
                       sales: _todaySales,
                       collected: _todayCollected,
@@ -138,18 +185,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     _StatsRow(
                       productCount: _productCount,
                       billCount: _todayBillCount,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _HomeSearchSection(
-                      controller: _homeSearchCtrl,
-                      query: _homeSearchQuery,
-                      results: _searchResults,
-                      onChanged: (value) =>
-                          setState(() => _homeSearchQuery = value.trim()),
-                      onClear: () {
-                        _homeSearchCtrl.clear();
-                        setState(() => _homeSearchQuery = '');
-                      },
                     ),
                     const SizedBox(height: AppSpacing.xxl),
                     _QuickActionsSection(
@@ -187,7 +222,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -316,71 +352,76 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // ── Home Search ───────────────────────────────────────────────────────────────
 
-class _HomeSearchSection extends StatelessWidget {
+/// Inline, borderless search field shown in the header after tapping search.
+class _HomeSearchField extends StatelessWidget {
   final TextEditingController controller;
-  final String query;
-  final List<_HomeSearchResult> results;
   final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
 
-  const _HomeSearchSection({
+  const _HomeSearchField({
     required this.controller,
-    required this.query,
-    required this.results,
     required this.onChanged,
-    required this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TextField(
-          controller: controller,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            hintText: 'Search products, bills, customers...',
-            prefixIcon: const Icon(Icons.search_rounded, size: 20),
-            suffixIcon: query.isEmpty
-                ? null
-                : IconButton(
-                    onPressed: onClear,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                  ),
-          ),
-          onChanged: onChanged,
+    return TextField(
+      controller: controller,
+      autofocus: true,
+      textInputAction: TextInputAction.search,
+      style: const TextStyle(color: Colors.white, fontSize: 16),
+      cursorColor: AppColors.amber,
+      decoration: InputDecoration(
+        isCollapsed: true,
+        filled: false,
+        hintText: 'Search products, bills, customers...',
+        hintStyle: TextStyle(
+          color: Colors.white.withValues(alpha: 0.5),
+          fontSize: 16,
         ),
-        if (query.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.sm),
-          results.isEmpty
-              ? _EmptyState(
-                  icon: Icons.search_off_rounded,
-                  message: 'No matching products, bills, or customers',
-                )
-              : CompactListCard(
-                  rows: results
-                      .map(
-                        (result) => CompactListRow(
-                          leading: LeadingIconChip(
-                            icon: result.icon,
-                            color: result.color,
-                          ),
-                          title: result.title,
-                          subtitle: result.subtitle,
-                          trailing: Text(
-                            result.trailing,
-                            style: AppText.caption.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.inkOf(context),
-                            ),
-                          ),
-                          onTap: result.onTap,
-                        ),
-                      )
-                      .toList(),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+      ),
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Search results list shown in the body when a query is active.
+class _HomeSearchResults extends StatelessWidget {
+  final List<_HomeSearchResult> results;
+
+  const _HomeSearchResults({required this.results});
+
+  @override
+  Widget build(BuildContext context) {
+    if (results.isEmpty) {
+      return _EmptyState(
+        icon: Icons.search_off_rounded,
+        message: 'No matching products, bills, or customers',
+      );
+    }
+    return CompactListCard(
+      rows: results
+          .map(
+            (result) => CompactListRow(
+              leading: LeadingIconChip(
+                icon: result.icon,
+                color: result.color,
+              ),
+              title: result.title,
+              subtitle: result.subtitle,
+              trailing: Text(
+                result.trailing,
+                style: AppText.caption.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.inkOf(context),
                 ),
-        ],
-      ],
+              ),
+              onTap: result.onTap,
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -427,7 +468,7 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
               icon: Icons.people_outline_rounded,
               label: 'Customers',
               subtitle: '$customerCount saved',
-              color: AppColors.success,
+              color: AppColors.inkMutedOf(context),
               onTap: onCustomers,
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -435,21 +476,21 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
               icon: Icons.handshake_outlined,
               label: 'Suppliers',
               subtitle: 'Soon',
-              color: AppColors.brandOf(context),
+              color: AppColors.inkMutedOf(context),
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
               icon: Icons.account_balance_wallet_outlined,
               label: 'Expenses',
               subtitle: 'Soon',
-              color: AppColors.brandOf(context),
+              color: AppColors.inkMutedOf(context),
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
               icon: Icons.group_work_outlined,
               label: 'Staff',
               subtitle: 'Soon',
-              color: AppColors.brandOf(context),
+              color: AppColors.inkMutedOf(context),
             ),
           ],
         ),
@@ -901,22 +942,22 @@ class _QuickActionsSection extends StatelessWidget {
               icon: Icons.qr_code_scanner_rounded,
               label: 'Scan & Bill',
               color: AppColors.amber,
-              filled: true,
+              filled: false,
               onTap: onScan,
             ),
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
               icon: Icons.add_rounded,
               label: 'Add Product',
-              color: AppColors.brandOf(context),
-              filled: true,
+              color: AppColors.amber,
+              filled: false,
               onTap: onAddProduct,
             ),
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
               icon: Icons.grid_view_rounded,
               label: 'Labels',
-              color: AppColors.brandOf(context),
+              color: AppColors.amber,
               filled: false,
               onTap: onQrSheet,
             ),
@@ -924,7 +965,7 @@ class _QuickActionsSection extends StatelessWidget {
             _QuickActionTile(
               icon: Icons.bar_chart_rounded,
               label: 'Reports',
-              color: AppColors.brandOf(context),
+              color: AppColors.amber,
               filled: false,
               onTap: onReports,
             ),

@@ -12,11 +12,16 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
   final double topPadding;
   final List<Widget>? actions;
 
+  /// When provided, replaces the title/subtitle area — e.g. an inline,
+  /// borderless search field shown after tapping the header search icon.
+  final Widget? titleOverride;
+
   const AppScreenHeaderDelegate({
     required this.title,
     this.subtitle,
     required this.topPadding,
     this.actions,
+    this.titleOverride,
   });
 
   @override
@@ -45,37 +50,38 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: _lerp(20, 16, collapsed),
-                        fontWeight: FontWeight.w700,
-                        height: 1.15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (subtitle != null)
-                      Opacity(
-                        opacity: expanded,
-                        child: Text(
-                          subtitle!,
-                          style: const TextStyle(
-                            color: Colors.white60,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                child: titleOverride ??
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: _lerp(20, 16, collapsed),
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                  ],
-                ),
+                        if (subtitle != null)
+                          Opacity(
+                            opacity: expanded,
+                            child: Text(
+                              subtitle!,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                    ),
               ),
               if (actions != null) ...actions!,
             ],
@@ -91,7 +97,8 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant AppScreenHeaderDelegate old) =>
       old.title != title ||
       old.subtitle != subtitle ||
-      old.topPadding != topPadding;
+      old.topPadding != topPadding ||
+      old.titleOverride != titleOverride;
 }
 
 /// Simple navy AppBar for secondary/modal screens (not collapsing).
