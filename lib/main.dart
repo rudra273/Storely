@@ -9,6 +9,7 @@ import 'screens/scan_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
+import 'services/home_section_prefs.dart';
 import 'theme/app_theme.dart';
 
 export 'theme/app_colors.dart';
@@ -16,6 +17,7 @@ export 'theme/app_colors.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppSettingsService.instance.load();
+  await HomeSectionPrefs.instance.load();
   await CloudService.instance.initialize();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -245,8 +247,8 @@ class _BottomNavBar extends StatelessWidget {
               GestureDetector(
                 onTap: onScanTap,
                 child: Container(
-                  width: 56,
-                  height: 56,
+                  width: 48,
+                  height: 48,
                   margin: const EdgeInsets.only(bottom: 4),
                   decoration: BoxDecoration(
                     color: AppColors.amber,
@@ -262,7 +264,7 @@ class _BottomNavBar extends StatelessWidget {
                   child: const Icon(
                     Icons.qr_code_scanner_rounded,
                     color: Colors.white,
-                    size: 28,
+                    size: 24,
                   ),
                 ),
               ),

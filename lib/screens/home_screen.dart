@@ -7,6 +7,8 @@ import '../models/product.dart';
 import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
+import 'home/home_section_settings.dart';
+import '../services/home_section_prefs.dart';
 
 class HomeScreen extends StatefulWidget {
   final int refreshToken;
@@ -38,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _todayBillCount = 0;
   double _todaySales = 0;
   double _todayCollected = 0;
+  int _lowStockThreshold = 5;
   String? _shopName;
   final _homeSearchCtrl = TextEditingController();
   String _homeSearchQuery = '';
@@ -47,7 +50,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _homeSearchCtrl.addListener(_onSearchChanged);
+    HomeSectionPrefs.instance.addListener(_onPrefsChanged);
     _loadData();
+  }
+
+  void _onPrefsChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onSearchChanged() {
@@ -66,9 +74,27 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _homeSearchCtrl.removeListener(_onSearchChanged);
+    HomeSectionPrefs.instance.removeListener(_onPrefsChanged);
     _homeSearchCtrl.dispose();
     super.dispose();
   }
+
+  List<Bill> get _displayedUnpaidBills {
+    final prefs = HomeSectionPrefs.instance;
+    final list = [..._unpaidBills];
+    switch (prefs.unpaidSort) {
+      case UnpaidBillsSort.newest:
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      case UnpaidBillsSort.oldest:
+        list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      case UnpaidBillsSort.highest:
+        list.sort((a, b) => b.balanceDue.compareTo(a.balanceDue));
+    }
+    return list.take(prefs.unpaidCount).toList();
+  }
+
+  List<Product> get _displayedLowStock =>
+      _lowStockProducts.take(HomeSectionPrefs.instance.attentionCount).toList();
 
   Future<void> _loadData() async {
     final db = DatabaseHelper.instance;
@@ -80,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final todaySales = await db.getTodaySales();
     final todayCollected = await db.getTodayCollected();
     final todayBillCount = await db.getTodayBillCount();
-    final unpaidBills = bills.where((bill) => bill.balanceDue > 0).take(3);
+    final unpaidBills = bills.where((bill) => bill.balanceDue > 0).toList();
     final pending = _buildCustomerPendingMaps(bills);
     if (!mounted) return;
     setState(() {
@@ -89,12 +115,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _todaySales = todaySales;
       _todayCollected = todayCollected;
       _todayBillCount = todayBillCount;
-      _unpaidBills = unpaidBills.toList();
+      _unpaidBills = unpaidBills;
       _bills = bills;
       _customers = customers;
       _pendingByCustomerId = pending.byCustomerId;
       _pendingByPhone = pending.byPhone;
       _shopName = shopName;
+      _lowStockThreshold = lowStockThreshold;
       _lowStockProducts = products
           .where((p) => p.quantity <= lowStockThreshold)
           .toList();
@@ -204,25 +231,41 @@ class _HomeScreenState extends State<HomeScreen> {
                               customerCount: _customers.length,
                               onCustomers: _openCustomersSheet,
                             ),
-                            const SizedBox(height: AppSpacing.xxl),
-                            SectionHeader(
-                              title: 'Unpaid Bills',
-                              actionLabel: 'View All →',
-                              onAction: () => widget.onNavigate(2),
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            _UnpaidBillsSection(bills: _unpaidBills),
-                            const SizedBox(height: AppSpacing.xxl),
-                            SectionHeader(
-                              title: 'Needs Attention',
-                              actionLabel: 'View All →',
-                              onAction: () => widget.onNavigate(1),
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            _NeedsAttentionSection(
-                              products: _lowStockProducts,
-                              onUpdate: _loadData,
-                            ),
+                            if (!HomeSectionPrefs.instance.unpaidHidden) ...[
+                              const SizedBox(height: AppSpacing.xxl),
+                              SectionHeader(
+                                title: 'Unpaid Bills',
+                                actionLabel: 'View All →',
+                                onAction: () => widget.onNavigate(2),
+                                onMenu: () => showUnpaidBillsSettings(context),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              _UnpaidBillsSection(bills: _displayedUnpaidBills),
+                            ],
+                            if (!HomeSectionPrefs
+                                .instance
+                                .attentionHidden) ...[
+                              const SizedBox(height: AppSpacing.xxl),
+                              SectionHeader(
+                                title: 'Needs Attention',
+                                actionLabel: 'View All →',
+                                onAction: () => widget.onNavigate(1),
+                                onMenu: () => showNeedsAttentionSettings(
+                                  context,
+                                  threshold: _lowStockThreshold,
+                                  onThreshold: (v) async {
+                                    await DatabaseHelper.instance
+                                        .saveLowStockThreshold(v);
+                                    await _loadData();
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              _NeedsAttentionSection(
+                                products: _displayedLowStock,
+                                onUpdate: _loadData,
+                              ),
+                            ],
                             const SizedBox(height: 80),
                           ],
                   ),
