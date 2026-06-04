@@ -46,7 +46,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _homeSearchCtrl.addListener(_onSearchChanged);
     _loadData();
+  }
+
+  void _onSearchChanged() {
+    final q = _homeSearchCtrl.text.trim();
+    if (q != _homeSearchQuery) {
+      setState(() => _homeSearchQuery = q);
+    }
   }
 
   @override
@@ -57,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _homeSearchCtrl.removeListener(_onSearchChanged);
     _homeSearchCtrl.dispose();
     super.dispose();
   }
@@ -134,11 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 subtitle: _shopName,
                 topPadding: MediaQuery.paddingOf(context).top,
                 titleOverride: _searchOpen
-                    ? _HomeSearchField(
-                        controller: _homeSearchCtrl,
-                        onChanged: (value) =>
-                            setState(() => _homeSearchQuery = value.trim()),
-                      )
+                    ? _HomeSearchField(controller: _homeSearchCtrl)
                     : null,
                 actions: [
                   IconButton(
@@ -149,20 +154,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       size: 22,
                     ),
                   ),
-                  if (!_searchOpen)
-                    IconButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen(),
-                        ),
-                      ),
-                      icon: const Icon(
-                        Icons.notifications_outlined,
-                        color: Colors.white,
-                        size: 22,
+                  IconButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
                       ),
                     ),
+                    icon: const Icon(
+                      Icons.notifications_outlined,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -355,34 +359,32 @@ class _HomeScreenState extends State<HomeScreen> {
 /// Inline, borderless search field shown in the header after tapping search.
 class _HomeSearchField extends StatelessWidget {
   final TextEditingController controller;
-  final ValueChanged<String> onChanged;
 
-  const _HomeSearchField({
-    required this.controller,
-    required this.onChanged,
-  });
+  const _HomeSearchField({required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      autofocus: true,
-      textInputAction: TextInputAction.search,
-      style: const TextStyle(color: Colors.white, fontSize: 16),
-      cursorColor: AppColors.amber,
-      decoration: InputDecoration(
-        isCollapsed: true,
-        filled: false,
-        hintText: 'Search products, bills, customers...',
-        hintStyle: TextStyle(
-          color: Colors.white.withValues(alpha: 0.5),
-          fontSize: 16,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextField(
+        controller: controller,
+        autofocus: true,
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+        cursorColor: AppColors.amber,
+        decoration: InputDecoration(
+          isCollapsed: true,
+          filled: false,
+          hintText: 'Search products, bills, customers...',
+          hintStyle: TextStyle(
+            color: Colors.white.withValues(alpha: 0.5),
+            fontSize: 16,
+          ),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
         ),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
       ),
-      onChanged: onChanged,
     );
   }
 }
