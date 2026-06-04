@@ -133,14 +133,13 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
                     : 'Purchase GST is included in cost',
               ),
               value: _gstRegistered,
-              activeThumbColor: AppColors.navy,
+              activeThumbColor: AppColors.brandOf(context),
               onChanged: (value) => setState(() => _gstRegistered = value),
             ),
             const SizedBox(height: 14),
             FilledButton(
               onPressed: _submit,
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.navy,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: const Text('Save Shop'),
@@ -294,7 +293,6 @@ class _SupplierProfileSheetState extends State<_SupplierProfileSheet> {
             FilledButton(
               onPressed: _submit,
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.navy,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text(isEditing ? 'Update Supplier' : 'Add Supplier'),

@@ -57,8 +57,8 @@ class _CloudSyncPanel extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           lastSync == null ? subtitle : '$subtitle • $lastSync',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
+                          style: TextStyle(
+                            color: AppColors.inkMutedOf(context),
                             fontSize: 13,
                           ),
                         ),
@@ -98,8 +98,8 @@ class _CloudSyncPanel extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   state.message!,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
+                  style: TextStyle(
+                    color: AppColors.inkMutedOf(context),
                     fontSize: 12,
                   ),
                 ),

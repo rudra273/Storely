@@ -427,9 +427,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               Container(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
-                  color: AppColors.bg,
+                  color: AppColors.softBgOf(context),
                   borderRadius: AppRadius.mdRadius,
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.borderOf(context)),
                 ),
                 child: Column(
                   children: [

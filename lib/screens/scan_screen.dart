@@ -410,7 +410,7 @@ class _ScanScreenState extends State<ScanScreen> {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surfaceOf(context),
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
@@ -662,9 +662,9 @@ class _ScanScreenState extends State<ScanScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceOf(context),
         borderRadius: AppRadius.lgRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Column(
         children: [
@@ -808,7 +808,7 @@ class _ScanScreenState extends State<ScanScreen> {
       // ── Bottom Total + Complete Button ──
       bottomNavigationBar: _items.isNotEmpty
           ? Container(
-              color: AppColors.bg,
+              color: AppColors.bgOf(context),
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.lg,
                 AppSpacing.sm,
@@ -879,9 +879,11 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Widget _buildBillItemsPanel() {
     return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.lg),
+        ),
       ),
       child: _items.isEmpty
           ? Center(
@@ -910,9 +912,9 @@ class _ScanScreenState extends State<ScanScreen> {
                   margin: const EdgeInsets.only(bottom: AppSpacing.sm),
                   padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
+                    color: AppColors.surfaceOf(context),
                     borderRadius: AppRadius.mdRadius,
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: AppColors.borderOf(context)),
                   ),
                   child: Row(
                     children: [
@@ -931,7 +933,7 @@ class _ScanScreenState extends State<ScanScreen> {
                             Text(
                               item.priceLabel,
                               style: TextStyle(
-                                color: AppColors.textMuted,
+                                color: AppColors.inkMutedOf(context),
                                 fontSize: 12,
                               ),
                             ),
@@ -941,7 +943,7 @@ class _ScanScreenState extends State<ScanScreen> {
                       // Qty controls
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.bg,
+                          color: AppColors.softBgOf(context),
                           borderRadius: AppRadius.smRadius,
                         ),
                         child: Row(

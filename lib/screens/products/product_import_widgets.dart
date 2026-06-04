@@ -16,16 +16,16 @@ class _ProductSuggestionList extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(maxHeight: 220),
       decoration: BoxDecoration(
-        color: AppColors.cream,
+        color: AppColors.softBgOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.creamDark),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: products.length,
         separatorBuilder: (_, index) =>
-            Divider(height: 1, indent: 56, color: AppColors.creamDark),
+            Divider(height: 1, indent: 56, color: AppColors.borderOf(context)),
         itemBuilder: (_, index) {
           final product = products[index];
           final summary = product.id == null ? null : summaries[product.id];

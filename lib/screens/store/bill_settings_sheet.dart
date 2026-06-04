@@ -157,14 +157,18 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
   Widget build(BuildContext context) {
     final height = MediaQuery.sizeOf(context).height * 0.88;
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final isDark = AppColors.isDark(context);
     return SafeArea(
       top: false,
       child: Container(
         height: height,
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surfaceOf(context),
           borderRadius: BorderRadius.circular(24),
+          border: isDark
+              ? Border.all(color: AppColors.borderOf(context))
+              : null,
         ),
         child: Column(
           children: [
@@ -174,11 +178,11 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
                 children: [
                   const _PanelIcon(icon: Icons.receipt_long_outlined),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Bill Settings',
                       style: TextStyle(
-                        color: AppColors.navy,
+                        color: AppColors.brandOf(context),
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                       ),
@@ -611,9 +615,9 @@ class _ToggleGroup extends StatelessWidget {
         AppSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: AppColors.bg,
+        color: AppColors.softBgOf(context),
         borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -623,7 +627,7 @@ class _ToggleGroup extends StatelessWidget {
             child: Text(
               title,
               style: AppText.caption.copyWith(
-                color: AppColors.inkMuted,
+                color: AppColors.inkMutedOf(context),
                 fontWeight: FontWeight.w800,
               ),
             ),

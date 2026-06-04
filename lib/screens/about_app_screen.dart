@@ -8,7 +8,7 @@ class AboutAppScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('About')),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),

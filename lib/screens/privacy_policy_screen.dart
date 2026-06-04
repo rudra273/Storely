@@ -66,7 +66,7 @@ rosmoxx@gmail.com
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Privacy Policy'),
         actions: [

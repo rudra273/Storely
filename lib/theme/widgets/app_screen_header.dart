@@ -36,7 +36,7 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
     final expanded = 1.0 - collapsed;
 
     return Container(
-      color: AppColors.navy,
+      color: AppColors.isDark(context) ? Colors.black : AppColors.navy,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -105,8 +105,6 @@ PreferredSizeWidget navyAppBar({
       title,
       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
     ),
-    backgroundColor: AppColors.navy,
-    foregroundColor: Colors.white,
     elevation: 0,
     scrolledUnderElevation: 0,
     automaticallyImplyLeading: showBack,

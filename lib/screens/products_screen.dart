@@ -853,9 +853,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
             top: false,
             child: Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceOf(ctx),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+                border: AppColors.isDark(ctx)
+                    ? Border.all(color: AppColors.borderOf(ctx))
+                    : null,
               ),
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(ctx).viewInsets.bottom,
@@ -1475,11 +1480,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     constraints: BoxConstraints(
                       maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
                     ),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceOf(ctx),
+                      borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(24),
                       ),
+                      border: AppColors.isDark(ctx)
+                          ? Border.all(color: AppColors.borderOf(ctx))
+                          : null,
                     ),
                     padding: EdgeInsets.only(
                       bottom: MediaQuery.of(ctx).viewInsets.bottom,
@@ -2176,7 +2184,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         widget.onBackToHome?.call();
       },
       child: Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: _selectionMode
               ? Text('${_selectedProductIds.length} selected')

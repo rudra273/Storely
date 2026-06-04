@@ -14,24 +14,26 @@ class _CustomerSuggestionList extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(maxHeight: 220),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceOf(context),
         borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: ListView.separated(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: customers.length,
         separatorBuilder: (_, index) =>
-            Divider(height: 1, indent: 56, color: AppColors.border),
+            Divider(height: 1, indent: 56, color: AppColors.borderOf(context)),
         itemBuilder: (_, index) {
           final customer = customers[index];
           return ListTile(
             dense: true,
             leading: CircleAvatar(
               radius: 17,
-              backgroundColor: AppColors.navy,
-              foregroundColor: Colors.white,
+              backgroundColor: AppColors.brandOf(context),
+              foregroundColor: AppColors.isDark(context)
+                  ? Colors.black
+                  : Colors.white,
               child: Text(
                 customer.name.trim().isEmpty
                     ? '?'

@@ -25,7 +25,7 @@ class CompactListRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
+      color: AppColors.surfaceOf(context),
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -74,12 +74,14 @@ class CompactListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final border = AppColors.borderOf(context);
+
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceOf(context),
         borderRadius: AppRadius.mdRadius,
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: border),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -88,7 +90,7 @@ class CompactListCard extends StatelessWidget {
           for (int i = 0; i < rows.length; i++) ...[
             rows[i],
             if (i < rows.length - 1)
-              const Divider(height: 1, thickness: 1, color: AppColors.border),
+              Divider(height: 1, thickness: 1, color: border),
           ],
         ],
       ),

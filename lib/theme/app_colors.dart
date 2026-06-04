@@ -29,4 +29,35 @@ class AppColors {
   static const success = Color(0xFF16A34A);
   static const error = Color(0xFFEF4444);
   static const warning = amber;
+
+  // Dark mode: pure dark/grey base with the same yellow accent.
+  static const darkBg = Color(0xFF000000);
+  static const darkSurface = navy;
+  static const darkSurfaceRaised = navyLight;
+  static const darkInk = Color(0xFFF5F5F5);
+  static const darkInkMuted = Color(0xFFB8B8B8);
+  static const darkInkFaint = Color(0xFF7A7A7A);
+  static const darkBorder = Color(0xFF2A2A2A);
+  static const darkBorderStrong = Color(0xFF3A3A3A);
+
+  static bool isDark(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark;
+
+  static Color bgOf(BuildContext context) => isDark(context) ? darkBg : bg;
+  static Color surfaceOf(BuildContext context) =>
+      isDark(context) ? darkSurface : surface;
+  static Color raisedSurfaceOf(BuildContext context) =>
+      isDark(context) ? darkSurfaceRaised : surface;
+  static Color inkOf(BuildContext context) => isDark(context) ? darkInk : ink;
+  static Color inkMutedOf(BuildContext context) =>
+      isDark(context) ? darkInkMuted : inkMuted;
+  static Color inkFaintOf(BuildContext context) =>
+      isDark(context) ? darkInkFaint : inkFaint;
+  static Color borderOf(BuildContext context) =>
+      isDark(context) ? darkBorder : border;
+  static Color borderStrongOf(BuildContext context) =>
+      isDark(context) ? darkBorderStrong : borderStrong;
+  static Color brandOf(BuildContext context) => isDark(context) ? amber : navy;
+  static Color softBgOf(BuildContext context) =>
+      isDark(context) ? darkSurfaceRaised : bg;
 }

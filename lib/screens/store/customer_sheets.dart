@@ -39,6 +39,7 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
   @override
   Widget build(BuildContext context) {
     final customers = _filtered;
+    final isDark = AppColors.isDark(context);
     return SafeArea(
       top: false,
       child: Container(
@@ -48,8 +49,11 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surfaceOf(context),
           borderRadius: BorderRadius.circular(24),
+          border: isDark
+              ? Border.all(color: AppColors.borderOf(context))
+              : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -58,7 +62,7 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColors.creamDark,
+                color: AppColors.borderStrongOf(context),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -67,11 +71,11 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
               children: [
                 const _PanelIcon(icon: Icons.people_outline_rounded),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Customers',
                     style: TextStyle(
-                      color: AppColors.navy,
+                      color: AppColors.brandOf(context),
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                     ),
@@ -96,10 +100,10 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
             const SizedBox(height: 12),
             Flexible(
               child: customers.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'No matching customers',
-                        style: TextStyle(color: AppColors.textMuted),
+                        style: TextStyle(color: AppColors.inkMutedOf(context)),
                       ),
                     )
                   : SingleChildScrollView(
@@ -369,7 +373,6 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
             FilledButton(
               onPressed: _submit,
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.navy,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text(isEditing ? 'Update Customer' : 'Add Customer'),

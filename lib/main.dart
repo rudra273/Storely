@@ -7,6 +7,7 @@ import 'screens/bills_screen.dart';
 import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
 import 'theme/app_theme.dart';
 
@@ -14,6 +15,7 @@ export 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppSettingsService.instance.load();
   await CloudService.instance.initialize();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -29,143 +31,16 @@ class StorelyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Storely',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: AppColors.bg,
-        textTheme: AppText.textTheme,
-        colorScheme: const ColorScheme(
-          brightness: Brightness.light,
-          primary: AppColors.navy,
-          onPrimary: Colors.white,
-          primaryContainer: AppColors.navyLight,
-          onPrimaryContainer: Colors.white,
-          secondary: AppColors.amber,
-          onSecondary: AppColors.navy,
-          secondaryContainer: Color(0xFFFFF3D6),
-          onSecondaryContainer: Color(0xFF6B4D00),
-          tertiary: Color(0xFF0D9488),
-          onTertiary: Colors.white,
-          tertiaryContainer: Color(0xFFCCFBF1),
-          onTertiaryContainer: Color(0xFF0D5549),
-          error: AppColors.error,
-          onError: Colors.white,
-          surface: AppColors.surface,
-          onSurface: AppColors.ink,
-          onSurfaceVariant: AppColors.inkMuted,
-          outline: AppColors.borderStrong,
-          outlineVariant: AppColors.border,
-        ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: false,
-          backgroundColor: AppColors.navy,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          titleTextStyle: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 20,
-            color: Colors.white,
-          ),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: AppColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: AppRadius.mdRadius,
-            side: const BorderSide(color: AppColors.border),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: AppColors.surface,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.md,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: AppRadius.mdRadius,
-            borderSide: const BorderSide(color: AppColors.navy, width: 1.5),
-          ),
-          hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 14),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.navy,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.md,
-            ),
-            textStyle: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.navy,
-            side: const BorderSide(color: AppColors.borderStrong),
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.md,
-            ),
-            textStyle: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.amber,
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: AppColors.navy,
-          foregroundColor: Colors.white,
-          elevation: 4,
-        ),
-        dividerTheme: const DividerThemeData(
-          color: AppColors.border,
-          thickness: 1,
-          space: 1,
-        ),
-        chipTheme: ChipThemeData(
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.smRadius),
-          side: BorderSide.none,
-        ),
-        snackBarTheme: SnackBarThemeData(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: AppColors.navy,
-          contentTextStyle: const TextStyle(color: Colors.white),
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.mdRadius),
-        ),
-        dialogTheme: DialogThemeData(
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
-          backgroundColor: AppColors.surface,
-          titleTextStyle: AppText.title,
-        ),
+    return AnimatedBuilder(
+      animation: AppSettingsService.instance,
+      builder: (context, _) => MaterialApp(
+        title: 'Storely',
+        debugShowCheckedModeBanner: false,
+        theme: StorelyTheme.light(),
+        darkTheme: StorelyTheme.dark(),
+        themeMode: AppSettingsService.instance.themeMode,
+        home: const AppGate(),
       ),
-      home: const AppGate(),
     );
   }
 }
@@ -211,7 +86,11 @@ class _AppGateState extends State<AppGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(backgroundColor: AppColors.bg);
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      );
+    }
     return _isFirstLaunch
         ? WelcomeScreen(onComplete: _completeWelcome)
         : const AppShell();
@@ -327,10 +206,21 @@ class _BottomNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = AppColors.isDark(context);
+    final surface = AppColors.surfaceOf(context);
+    final shadowColor = isDark ? Colors.black : AppColors.navy;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: AppShadows.navBar,
+        color: surface,
+        border: Border(top: BorderSide(color: AppColors.borderOf(context))),
+        boxShadow: [
+          BoxShadow(
+            color: shadowColor.withValues(alpha: isDark ? 0.5 : 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
       child: SafeArea(
         child: Padding(
@@ -414,6 +304,9 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final activeColor = AppColors.brandOf(context);
+    final inactiveColor = AppColors.inkMutedOf(context);
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -424,7 +317,7 @@ class _NavItem extends StatelessWidget {
           children: [
             Icon(
               isActive ? activeIcon : icon,
-              color: isActive ? AppColors.navy : AppColors.inkMuted,
+              color: isActive ? activeColor : inactiveColor,
               size: 24,
             ),
             const SizedBox(height: 4),
@@ -433,7 +326,7 @@ class _NavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                color: isActive ? AppColors.navy : AppColors.inkMuted,
+                color: isActive ? activeColor : inactiveColor,
               ),
             ),
           ],
