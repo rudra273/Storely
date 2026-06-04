@@ -149,13 +149,21 @@ class _CustomerTableSheetState extends State<_CustomerTableSheet> {
                                     ),
                                   ),
                                   DataCell(
-                                    IconButton(
-                                      onPressed: () => widget.onEdit(customer),
-                                      icon: const Icon(
-                                        Icons.edit_outlined,
-                                        size: 19,
+                                    TestKeys.tag(
+                                      TestKeys.customerRow(
+                                        customer.id ?? customer.name,
                                       ),
-                                      tooltip: 'Edit customer',
+                                      IconButton(
+                                        onPressed: () =>
+                                            widget.onEdit(customer),
+                                        icon: const Icon(
+                                          Icons.edit_outlined,
+                                          size: 19,
+                                        ),
+                                        tooltip: 'Edit customer',
+                                      ),
+                                      label: 'Edit customer',
+                                      button: true,
                                     ),
                                   ),
                                 ],
@@ -370,12 +378,16 @@ class _CustomerProfileSheetState extends State<_CustomerProfileSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _submit,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            TestKeys.tag(
+              TestKeys.saveBtn,
+              FilledButton(
+                onPressed: _submit,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(isEditing ? 'Update Customer' : 'Add Customer'),
               ),
-              child: Text(isEditing ? 'Update Customer' : 'Add Customer'),
+              button: true,
             ),
           ],
         ),

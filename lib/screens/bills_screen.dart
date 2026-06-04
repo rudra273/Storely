@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/shop_profile.dart';
@@ -91,10 +92,14 @@ class _BillsScreenState extends State<BillsScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Keep Bill'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, reasonCtrl.text),
-              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-              child: const Text('Cancel Bill'),
+            TestKeys.tag(
+              TestKeys.confirmBtn,
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, reasonCtrl.text),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+                child: const Text('Cancel Bill'),
+              ),
+              button: true,
             ),
           ],
         ),
@@ -176,12 +181,16 @@ class _BillsScreenState extends State<BillsScreen> {
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancel'),
               ),
-              FilledButton(
-                onPressed: () {
-                  final value = double.tryParse(amountCtrl.text) ?? 0;
-                  Navigator.pop(ctx, value);
-                },
-                child: const Text('Save'),
+              TestKeys.tag(
+                TestKeys.saveBtn,
+                FilledButton(
+                  onPressed: () {
+                    final value = double.tryParse(amountCtrl.text) ?? 0;
+                    Navigator.pop(ctx, value);
+                  },
+                  child: const Text('Save'),
+                ),
+                button: true,
               ),
             ],
           ),
@@ -355,16 +364,20 @@ class _BillsScreenState extends State<BillsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _SearchBar(
-                        controller: _searchCtrl,
-                        query: _searchQuery,
-                        onChanged: (val) => setState(
-                          () => _searchQuery = val.trim().toLowerCase(),
+                      TestKeys.tag(
+                        TestKeys.billSearchField,
+                        _SearchBar(
+                          controller: _searchCtrl,
+                          query: _searchQuery,
+                          onChanged: (val) => setState(
+                            () => _searchQuery = val.trim().toLowerCase(),
+                          ),
+                          onClear: () {
+                            _searchCtrl.clear();
+                            setState(() => _searchQuery = '');
+                          },
                         ),
-                        onClear: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                        },
+                        textField: true,
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (_searchQuery.isEmpty) ...[
@@ -380,10 +393,14 @@ class _BillsScreenState extends State<BillsScreen> {
       ),
       floatingActionButton: _isLoading || _bills.isEmpty
           ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _openBillCreator(BillingEntryMode.manual),
-              icon: const Icon(Icons.receipt_long_rounded),
-              label: const Text('New Bill'),
+          : TestKeys.tag(
+              TestKeys.createBillBtn,
+              FloatingActionButton.extended(
+                onPressed: () => _openBillCreator(BillingEntryMode.manual),
+                icon: const Icon(Icons.receipt_long_rounded),
+                label: const Text('New Bill'),
+              ),
+              button: true,
             ),
     );
   }
@@ -413,15 +430,18 @@ class _BillsScreenState extends State<BillsScreen> {
         widgets.add(const SizedBox(height: AppSpacing.sm));
       }
       widgets.add(
-        _BillCard(
-          bill: bill,
-          onCancel: () => _cancelBill(bill),
-          onDuplicate: () => _duplicateBill(bill),
-          onStatusChanged: (isPaid, method) =>
-              _updateBillStatus(bill, isPaid, paymentMethod: method),
-          onRecordPayment: () => _recordPayment(bill),
-          onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
-          onSharePdf: () => _shareBillPdf(bill),
+        TestKeys.tag(
+          TestKeys.billRow(bill.id ?? bill.billNumber),
+          _BillCard(
+            bill: bill,
+            onCancel: () => _cancelBill(bill),
+            onDuplicate: () => _duplicateBill(bill),
+            onStatusChanged: (isPaid, method) =>
+                _updateBillStatus(bill, isPaid, paymentMethod: method),
+            onRecordPayment: () => _recordPayment(bill),
+            onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
+            onSharePdf: () => _shareBillPdf(bill),
+          ),
         ),
       );
     }
@@ -467,10 +487,14 @@ class _BillsScreenState extends State<BillsScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.xl),
-            FilledButton.icon(
-              onPressed: () => _openBillCreator(BillingEntryMode.manual),
-              icon: const Icon(Icons.receipt_long_rounded),
-              label: const Text('Create Bill'),
+            TestKeys.tag(
+              TestKeys.createBillBtn,
+              FilledButton.icon(
+                onPressed: () => _openBillCreator(BillingEntryMode.manual),
+                icon: const Icon(Icons.receipt_long_rounded),
+                label: const Text('Create Bill'),
+              ),
+              button: true,
             ),
           ],
         ),

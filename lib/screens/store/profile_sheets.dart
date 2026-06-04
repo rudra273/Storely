@@ -137,12 +137,16 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
               onChanged: (value) => setState(() => _gstRegistered = value),
             ),
             const SizedBox(height: 14),
-            FilledButton(
-              onPressed: _submit,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            TestKeys.tag(
+              TestKeys.saveBtn,
+              FilledButton(
+                onPressed: _submit,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Save Shop'),
               ),
-              child: const Text('Save Shop'),
+              button: true,
             ),
           ],
         ),
@@ -290,12 +294,16 @@ class _SupplierProfileSheetState extends State<_SupplierProfileSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _submit,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            TestKeys.tag(
+              TestKeys.saveBtn,
+              FilledButton(
+                onPressed: _submit,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(isEditing ? 'Update Supplier' : 'Add Supplier'),
               ),
-              child: Text(isEditing ? 'Update Supplier' : 'Add Supplier'),
+              button: true,
             ),
           ],
         ),

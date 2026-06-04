@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
@@ -1542,34 +1543,40 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           ),
                                     child: Column(
                                       children: [
-                                        TextFormField(
-                                          controller: nameCtrl,
-                                          textCapitalization:
-                                              TextCapitalization.words,
-                                          decoration: InputDecoration(
-                                            labelText: 'Product Name *',
-                                            errorText: nameError,
-                                            prefixIcon: const Icon(
-                                              Icons.label_outline_rounded,
-                                              size: 18,
+                                        TestKeys.tag(
+                                          TestKeys.productNameField,
+                                          TextFormField(
+                                            controller: nameCtrl,
+                                            textCapitalization:
+                                                TextCapitalization.words,
+                                            decoration: InputDecoration(
+                                              labelText: 'Product Name *',
+                                              errorText: nameError,
+                                              prefixIcon: const Icon(
+                                                Icons.label_outline_rounded,
+                                                size: 18,
+                                              ),
                                             ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              hideProductSuggestions = false;
+                                              if (!lockedRestockTarget) {
+                                                selectedExistingProduct = null;
+                                              }
+                                              if (nameError != null) {
+                                                setSheet(
+                                                  () => nameError = null,
+                                                );
+                                              } else {
+                                                setSheet(() {});
+                                              }
+                                            },
+                                            validator: (v) =>
+                                                (v == null || v.trim().isEmpty)
+                                                ? 'Required'
+                                                : null,
                                           ),
-                                          onChanged: (_) {
-                                            markEdited();
-                                            hideProductSuggestions = false;
-                                            if (!lockedRestockTarget) {
-                                              selectedExistingProduct = null;
-                                            }
-                                            if (nameError != null) {
-                                              setSheet(() => nameError = null);
-                                            } else {
-                                              setSheet(() {});
-                                            }
-                                          },
-                                          validator: (v) =>
-                                              (v == null || v.trim().isEmpty)
-                                              ? 'Required'
-                                              : null,
+                                          textField: true,
                                         ),
                                         if (!isEditing &&
                                             !hideProductSuggestions &&
@@ -1675,52 +1682,57 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             ),
                                             const SizedBox(width: 10),
                                             Expanded(
-                                              child: TextFormField(
-                                                controller: barcodeCtrl,
-                                                keyboardType:
-                                                    TextInputType.text,
-                                                decoration: InputDecoration(
-                                                  labelText: 'Barcode',
-                                                  prefixIcon: const Icon(
-                                                    Icons
-                                                        .qr_code_scanner_rounded,
-                                                    size: 18,
-                                                  ),
-                                                  suffixIcon: IconButton(
-                                                    tooltip: 'Scan barcode',
-                                                    icon: const Icon(
-                                                      Icons.center_focus_strong,
+                                              child: TestKeys.tag(
+                                                TestKeys.productBarcodeField,
+                                                TextFormField(
+                                                  controller: barcodeCtrl,
+                                                  keyboardType:
+                                                      TextInputType.text,
+                                                  decoration: InputDecoration(
+                                                    labelText: 'Barcode',
+                                                    prefixIcon: const Icon(
+                                                      Icons
+                                                          .qr_code_scanner_rounded,
+                                                      size: 18,
                                                     ),
-                                                    onPressed: () async {
-                                                      final value =
-                                                          await _scanBarcodeValue(
-                                                            ctx,
-                                                          );
-                                                      if (value == null ||
-                                                          !ctx.mounted) {
-                                                        return;
-                                                      }
-                                                      markEdited();
-                                                      setFieldText(
-                                                        barcodeCtrl,
-                                                        value,
-                                                      );
-                                                      setSheet(() {});
-                                                    },
+                                                    suffixIcon: IconButton(
+                                                      tooltip: 'Scan barcode',
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .center_focus_strong,
+                                                      ),
+                                                      onPressed: () async {
+                                                        final value =
+                                                            await _scanBarcodeValue(
+                                                              ctx,
+                                                            );
+                                                        if (value == null ||
+                                                            !ctx.mounted) {
+                                                          return;
+                                                        }
+                                                        markEdited();
+                                                        setFieldText(
+                                                          barcodeCtrl,
+                                                          value,
+                                                        );
+                                                        setSheet(() {});
+                                                      },
+                                                    ),
                                                   ),
+                                                  onTapOutside: (_) =>
+                                                      FocusScope.of(
+                                                        ctx,
+                                                      ).unfocus(),
+                                                  onChanged: (_) {
+                                                    markEdited();
+                                                    setSheet(() {});
+                                                  },
+                                                  onFieldSubmitted: (_) =>
+                                                      FocusScope.of(
+                                                        ctx,
+                                                      ).unfocus(),
                                                 ),
-                                                onTapOutside: (_) =>
-                                                    FocusScope.of(
-                                                      ctx,
-                                                    ).unfocus(),
-                                                onChanged: (_) {
-                                                  markEdited();
-                                                  setSheet(() {});
-                                                },
-                                                onFieldSubmitted: (_) =>
-                                                    FocusScope.of(
-                                                      ctx,
-                                                    ).unfocus(),
+                                                textField: true,
                                               ),
                                             ),
                                           ],
@@ -1789,38 +1801,43 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           },
                                         ),
                                         const SizedBox(height: 10),
-                                        TextFormField(
-                                          controller: purchaseCtrl,
-                                          keyboardType:
-                                              const TextInputType.numberWithOptions(
-                                                decimal: true,
+                                        TestKeys.tag(
+                                          TestKeys.productCostField,
+                                          TextFormField(
+                                            controller: purchaseCtrl,
+                                            keyboardType:
+                                                const TextInputType.numberWithOptions(
+                                                  decimal: true,
+                                                ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'^\d*\.?\d{0,2}'),
                                               ),
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter.allow(
-                                              RegExp(r'^\d*\.?\d{0,2}'),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'Purchase Price *',
+                                              prefixText: '₹',
+                                              prefixIcon: Icon(
+                                                Icons.inventory_2_outlined,
+                                                size: 18,
+                                              ),
                                             ),
-                                          ],
-                                          decoration: const InputDecoration(
-                                            labelText: 'Purchase Price *',
-                                            prefixText: '₹',
-                                            prefixIcon: Icon(
-                                              Icons.inventory_2_outlined,
-                                              size: 18,
-                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              updateMarginFromDirectPrice();
+                                              setSheet(() {});
+                                            },
+                                            validator: (value) {
+                                              final number = double.tryParse(
+                                                value ?? '',
+                                              );
+                                              return number == null ||
+                                                      number <= 0
+                                                  ? 'Invalid'
+                                                  : null;
+                                            },
                                           ),
-                                          onChanged: (_) {
-                                            markEdited();
-                                            updateMarginFromDirectPrice();
-                                            setSheet(() {});
-                                          },
-                                          validator: (value) {
-                                            final number = double.tryParse(
-                                              value ?? '',
-                                            );
-                                            return number == null || number <= 0
-                                                ? 'Invalid'
-                                                : null;
-                                          },
+                                          textField: true,
                                         ),
                                         const SizedBox(height: 10),
                                         _OptionDropdown(
@@ -1875,38 +1892,45 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         Row(
                                           children: [
                                             Expanded(
-                                              child: TextFormField(
-                                                controller: qtyCtrl,
-                                                keyboardType:
-                                                    const TextInputType.numberWithOptions(
-                                                      decimal: true,
-                                                    ),
-                                                inputFormatters: [
-                                                  FilteringTextInputFormatter.allow(
-                                                    RegExp(r'^\d*\.?\d{0,3}'),
-                                                  ),
-                                                ],
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Quantity *',
-                                                      prefixIcon: Icon(
-                                                        Icons.layers_outlined,
-                                                        size: 18,
+                                              child: TestKeys.tag(
+                                                TestKeys.productQtyField,
+                                                TextFormField(
+                                                  controller: qtyCtrl,
+                                                  keyboardType:
+                                                      const TextInputType.numberWithOptions(
+                                                        decimal: true,
                                                       ),
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter.allow(
+                                                      RegExp(r'^\d*\.?\d{0,3}'),
                                                     ),
-                                                onChanged: (_) {
-                                                  markEdited();
-                                                  setSheet(() {});
-                                                },
-                                                validator: (v) {
-                                                  if (v == null || v.isEmpty) {
-                                                    return 'Required';
-                                                  }
-                                                  final n = double.tryParse(v);
-                                                  return (n == null || n < 0)
-                                                      ? 'Invalid'
-                                                      : null;
-                                                },
+                                                  ],
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        labelText: 'Quantity *',
+                                                        prefixIcon: Icon(
+                                                          Icons.layers_outlined,
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                  onChanged: (_) {
+                                                    markEdited();
+                                                    setSheet(() {});
+                                                  },
+                                                  validator: (v) {
+                                                    if (v == null ||
+                                                        v.isEmpty) {
+                                                      return 'Required';
+                                                    }
+                                                    final n = double.tryParse(
+                                                      v,
+                                                    );
+                                                    return (n == null || n < 0)
+                                                        ? 'Invalid'
+                                                        : null;
+                                                  },
+                                                ),
+                                                textField: true,
                                               ),
                                             ),
                                             const SizedBox(width: 10),
@@ -2111,12 +2135,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               ),
                             ),
                           ),
-                          _ProductSheetActionBar(
-                            sellingPrice: preview.sellingPrice,
-                            unit: selectedUnit,
-                            isEditing: isEditing,
-                            isSaving: isSaving,
-                            onPressed: saveProduct,
+                          TestKeys.tag(
+                            TestKeys.saveBtn,
+                            _ProductSheetActionBar(
+                              sellingPrice: preview.sellingPrice,
+                              unit: selectedUnit,
+                              isEditing: isEditing,
+                              isSaving: isSaving,
+                              onPressed: saveProduct,
+                            ),
+                            button: true,
                           ),
                         ],
                       ),
@@ -2176,9 +2204,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return PopScope(
       canPop:
           !widget.isActiveMainTab ||
-          (!_selectionMode &&
-              !_searchOpen &&
-              widget.onBackToHome == null),
+          (!_selectionMode && !_searchOpen && widget.onBackToHome == null),
       onPopInvokedWithResult: (didPop, result) {
         if (!widget.isActiveMainTab) return;
         if (didPop) return;
@@ -2201,23 +2227,27 @@ class _ProductsScreenState extends State<ProductsScreen> {
           title: _selectionMode
               ? Text('${_selectedProductIds.length} selected')
               : _searchOpen
-              ? TextField(
-                  controller: _searchCtrl,
-                  autofocus: true,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                  cursorColor: AppColors.amber,
-                  decoration: InputDecoration(
-                    isCollapsed: true,
-                    hintText: 'Search products...',
-                    hintStyle: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontSize: 16,
+              ? TestKeys.tag(
+                  TestKeys.productSearchField,
+                  TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    cursorColor: AppColors.amber,
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      hintText: 'Search products...',
+                      hintStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 16,
+                      ),
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                     ),
-                    filled: false,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
                   ),
+                  textField: true,
                 )
               : const Text('Products'),
           actions: [
@@ -2289,10 +2319,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
           children: _selectionMode
               ? []
               : [
-                  FloatingActionButton(
-                    heroTag: 'add',
-                    onPressed: _showNewPurchaseFlow,
-                    child: const Icon(Icons.add_rounded),
+                  TestKeys.tag(
+                    TestKeys.addProductBtn,
+                    FloatingActionButton(
+                      heroTag: 'add',
+                      onPressed: _showNewPurchaseFlow,
+                      child: const Icon(Icons.add_rounded),
+                    ),
+                    label: 'Add product',
+                    button: true,
                   ),
                 ],
         ),
@@ -2353,16 +2388,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
           child: Row(
             children: [
               Expanded(
-                child: _ProductFilterButton(
-                  count: _activeFilterCount,
-                  onTap: _showProductFilters,
+                child: TestKeys.tag(
+                  TestKeys.productFilterBtn,
+                  _ProductFilterButton(
+                    count: _activeFilterCount,
+                    onTap: _showProductFilters,
+                  ),
+                  button: true,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: _SortDropdownButton(
-                  label: 'Sort: ${_sortMode.label}',
-                  onTap: _showSortOptions,
+                child: TestKeys.tag(
+                  TestKeys.productSortBtn,
+                  _SortDropdownButton(
+                    label: 'Sort: ${_sortMode.label}',
+                    onTap: _showSortOptions,
+                  ),
+                  button: true,
                 ),
               ),
             ],
@@ -2479,22 +2522,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     120,
                   ),
                   itemCount: _filtered.length,
-                  itemBuilder: (_, i) => _ProductCard(
-                    product: _filtered[i],
-                    purchaseSummary: _filtered[i].id == null
-                        ? null
-                        : _purchaseSummaries[_filtered[i].id],
-                    lowStockThreshold: _lowStockThreshold,
-                    selectionMode: _selectionMode,
-                    isSelected:
-                        _filtered[i].id != null &&
-                        _selectedProductIds.contains(_filtered[i].id),
-                    onTap: () => _selectionMode
-                        ? _toggleProductSelection(_filtered[i])
-                        : _showAddEditSheet(product: _filtered[i]),
-                    onLongPress: () => _toggleProductSelection(_filtered[i]),
-                    onHistory: () => _showStockHistory(_filtered[i]),
-                    onDelete: () => _deleteProduct(_filtered[i]),
+                  itemBuilder: (_, i) => TestKeys.tag(
+                    TestKeys.productRow(_filtered[i].id ?? i),
+                    _ProductCard(
+                      product: _filtered[i],
+                      purchaseSummary: _filtered[i].id == null
+                          ? null
+                          : _purchaseSummaries[_filtered[i].id],
+                      lowStockThreshold: _lowStockThreshold,
+                      selectionMode: _selectionMode,
+                      isSelected:
+                          _filtered[i].id != null &&
+                          _selectedProductIds.contains(_filtered[i].id),
+                      onTap: () => _selectionMode
+                          ? _toggleProductSelection(_filtered[i])
+                          : _showAddEditSheet(product: _filtered[i]),
+                      onLongPress: () => _toggleProductSelection(_filtered[i]),
+                      onHistory: () => _showStockHistory(_filtered[i]),
+                      onDelete: () => _deleteProduct(_filtered[i]),
+                    ),
                   ),
                 ),
         ),

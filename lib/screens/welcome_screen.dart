@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../services/cloud_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 
 enum _WelcomeMode { choice, createShop, joinCloud }
 
@@ -158,7 +159,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 Text(
                   'Welcome to Storely',
                   textAlign: TextAlign.center,
-                  style: AppText.display.copyWith(color: AppColors.inkOf(context)),
+                  style: AppText.display.copyWith(
+                    color: AppColors.inkOf(context),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
@@ -217,28 +220,36 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       children: [
         Form(
           key: _formKey,
-          child: TextFormField(
-            controller: _shopNameCtrl,
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              labelText: 'Shop Name',
-              prefixIcon: Icon(Icons.store_mall_directory_outlined),
+          child: TestKeys.tag(
+            TestKeys.welcomeShopNameField,
+            TextFormField(
+              controller: _shopNameCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Shop Name',
+                prefixIcon: Icon(Icons.store_mall_directory_outlined),
+              ),
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? 'Required' : null,
+              onFieldSubmitted: (_) => _saveShopName(),
             ),
-            validator: (value) =>
-                value == null || value.trim().isEmpty ? 'Required' : null,
-            onFieldSubmitted: (_) => _saveShopName(),
+            textField: true,
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        FilledButton.icon(
-          onPressed: _isSaving ? null : _saveShopName,
-          icon: _busyIcon(Icons.arrow_forward_rounded),
-          label: const Text('Continue'),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+        TestKeys.tag(
+          TestKeys.welcomeContinueBtn,
+          FilledButton.icon(
+            onPressed: _isSaving ? null : _saveShopName,
+            icon: _busyIcon(Icons.arrow_forward_rounded),
+            label: const Text('Continue'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+            ),
           ),
+          button: true,
         ),
         TextButton(
           onPressed: _isSaving

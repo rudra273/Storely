@@ -12,6 +12,7 @@ import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
 import 'services/home_section_prefs.dart';
 import 'theme/app_theme.dart';
+import 'utils/test_keys.dart';
 
 export 'theme/app_colors.dart';
 
@@ -231,57 +232,78 @@ class _BottomNavBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _NavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home,
-                label: 'Home',
-                isActive: currentIndex == 0,
-                onTap: () => onTabTap(0),
+              TestKeys.tag(
+                TestKeys.navHome,
+                _NavItem(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  label: 'Home',
+                  isActive: currentIndex == 0,
+                  onTap: () => onTabTap(0),
+                ),
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.inventory_2_outlined,
-                activeIcon: Icons.inventory_2,
-                label: 'Products',
-                isActive: currentIndex == 1,
-                onTap: () => onTabTap(1),
+              TestKeys.tag(
+                TestKeys.navProducts,
+                _NavItem(
+                  icon: Icons.inventory_2_outlined,
+                  activeIcon: Icons.inventory_2,
+                  label: 'Products',
+                  isActive: currentIndex == 1,
+                  onTap: () => onTabTap(1),
+                ),
+                button: true,
               ),
-              GestureDetector(
-                onTap: onScanTap,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  margin: const EdgeInsets.only(bottom: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.amber,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.amber.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.qr_code_scanner_rounded,
-                    color: Colors.white,
-                    size: 24,
+              TestKeys.tag(
+                TestKeys.navScan,
+                GestureDetector(
+                  onTap: onScanTap,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    margin: const EdgeInsets.only(bottom: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.amber,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.amber.withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.qr_code_scanner_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
                   ),
                 ),
+                label: 'Scan',
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.receipt_long_outlined,
-                activeIcon: Icons.receipt_long,
-                label: 'Bills',
-                isActive: currentIndex == 2,
-                onTap: () => onTabTap(2),
+              TestKeys.tag(
+                TestKeys.navBills,
+                _NavItem(
+                  icon: Icons.receipt_long_outlined,
+                  activeIcon: Icons.receipt_long,
+                  label: 'Bills',
+                  isActive: currentIndex == 2,
+                  onTap: () => onTabTap(2),
+                ),
+                button: true,
               ),
-              _NavItem(
-                icon: Icons.storefront_outlined,
-                activeIcon: Icons.storefront,
-                label: 'Store',
-                isActive: currentIndex == 3,
-                onTap: () => onTabTap(3),
+              TestKeys.tag(
+                TestKeys.navStore,
+                _NavItem(
+                  icon: Icons.storefront_outlined,
+                  activeIcon: Icons.storefront,
+                  label: 'Store',
+                  isActive: currentIndex == 3,
+                  onTap: () => onTabTap(3),
+                ),
+                button: true,
               ),
             ],
           ),

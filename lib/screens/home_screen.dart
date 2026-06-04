@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
@@ -185,18 +186,23 @@ class _HomeScreenState extends State<HomeScreen> {
                         size: 22,
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen(),
+                    TestKeys.tag(
+                      TestKeys.homeNotificationsBtn,
+                      IconButton(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const NotificationsScreen(),
+                          ),
+                        ),
+                        icon: const Icon(
+                          Icons.notifications_outlined,
+                          color: Colors.white,
+                          size: 22,
                         ),
                       ),
-                      icon: const Icon(
-                        Icons.notifications_outlined,
-                        color: Colors.white,
-                        size: 22,
-                      ),
+                      label: 'Notifications',
+                      button: true,
                     ),
                   ],
                 ),
@@ -242,9 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               const SizedBox(height: AppSpacing.md),
                               _UnpaidBillsSection(bills: _displayedUnpaidBills),
                             ],
-                            if (!HomeSectionPrefs
-                                .instance
-                                .attentionHidden) ...[
+                            if (!HomeSectionPrefs.instance.attentionHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
                               SectionHeader(
                                 title: 'Needs Attention',
@@ -987,6 +991,7 @@ class _QuickActionsSection extends StatelessWidget {
         Row(
           children: [
             _QuickActionTile(
+              testId: TestKeys.homeScanBillBtn,
               icon: Icons.qr_code_scanner_rounded,
               label: 'Scan & Bill',
               color: AppColors.amber,
@@ -995,6 +1000,7 @@ class _QuickActionsSection extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
+              testId: TestKeys.homeAddProductBtn,
               icon: Icons.add_rounded,
               label: 'Add Product',
               color: AppColors.amber,
@@ -1030,6 +1036,7 @@ class _QuickActionTile extends StatelessWidget {
   final Color color;
   final bool filled;
   final VoidCallback onTap;
+  final String? testId;
 
   const _QuickActionTile({
     required this.icon,
@@ -1037,42 +1044,51 @@ class _QuickActionTile extends StatelessWidget {
     required this.color,
     required this.filled,
     required this.onTap,
+    this.testId,
   });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Column(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: filled ? color : AppColors.surfaceOf(context),
-                borderRadius: AppRadius.mdRadius,
-                border: Border.all(
-                  color: filled
-                      ? Colors.transparent
-                      : AppColors.borderOf(context),
+      child: TestKeys.tag(
+        testId ?? 'btn_quick_${label.toLowerCase().replaceAll(' ', '_')}',
+        GestureDetector(
+          onTap: onTap,
+          child: Column(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: filled ? color : AppColors.surfaceOf(context),
+                  borderRadius: AppRadius.mdRadius,
+                  border: Border.all(
+                    color: filled
+                        ? Colors.transparent
+                        : AppColors.borderOf(context),
+                  ),
+                ),
+                child: Icon(
+                  icon,
+                  color: filled ? Colors.white : color,
+                  size: 24,
                 ),
               ),
-              child: Icon(icon, color: filled ? Colors.white : color, size: 24),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              label,
-              style: AppText.caption.copyWith(
-                fontWeight: FontWeight.w600,
-                color: AppColors.inkOf(context),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                label,
+                style: AppText.caption.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.inkOf(context),
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+            ],
+          ),
         ),
+        button: true,
       ),
     );
   }

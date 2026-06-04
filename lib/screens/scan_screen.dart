@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
+import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
@@ -860,24 +861,28 @@ class _ScanScreenState extends State<ScanScreen> {
                         ],
                       ),
                       const Spacer(),
-                      FilledButton.icon(
-                        onPressed: _openBillSheet,
-                        icon: const Icon(Icons.receipt_long_rounded),
-                        label: const Text(
-                          'Bill',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.amber,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
+                      TestKeys.tag(
+                        TestKeys.scanBillBtn,
+                        FilledButton.icon(
+                          onPressed: _openBillSheet,
+                          icon: const Icon(Icons.receipt_long_rounded),
+                          label: const Text(
+                            'Bill',
+                            style: TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.amber,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
+                        button: true,
                       ),
                     ],
                   ),
