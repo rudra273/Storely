@@ -10,6 +10,9 @@
     <!-- Network state — required by connectivity_plus to detect online/offline -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
+    <!-- Biometric/device credential prompt for App Lock -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+
     <!-- Camera — required by mobile_scanner for QR / barcode scanning -->
     <uses-permission android:name="android.permission.CAMERA"/>
 

@@ -10,6 +10,7 @@ import '../models/product.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
+import '../services/app_lock_service.dart';
 import '../services/cloud_service.dart';
 import '../services/app_settings_service.dart';
 import 'analytics_screen.dart';
@@ -652,16 +653,14 @@ class _StoreScreenState extends State<StoreScreen> {
                     icon: Icons.analytics_outlined,
                     onTap: _openAnalytics,
                   ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'App Settings'),
                   const SizedBox(height: AppSpacing.sm),
                   AnimatedBuilder(
                     animation: AppSettingsService.instance,
                     builder: (context, _) => _StoreActionRow(
-                      title: 'Appearance',
+                      title: 'App Settings',
                       subtitle:
-                          'Theme: ${AppSettingsService.instance.themePreference.label}',
-                      icon: Icons.palette_outlined,
+                          'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'}',
+                      icon: Icons.settings_outlined,
                       onTap: _showAppSettings,
                     ),
                   ),

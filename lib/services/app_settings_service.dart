@@ -22,20 +22,24 @@ enum AppThemePreference {
 
 class AppSettingsService extends ChangeNotifier {
   static const _themePreferenceKey = 'app_theme_preference';
+  static const _appLockEnabledKey = 'app_lock_enabled';
   static final AppSettingsService instance = AppSettingsService._();
 
   AppSettingsService._();
 
   AppThemePreference _themePreference = AppThemePreference.system;
+  bool _appLockEnabled = false;
 
   AppThemePreference get themePreference => _themePreference;
   ThemeMode get themeMode => _themePreference.themeMode;
+  bool get appLockEnabled => _appLockEnabled;
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     _themePreference = AppThemePreference.fromStorage(
       prefs.getString(_themePreferenceKey),
     );
+    _appLockEnabled = prefs.getBool(_appLockEnabledKey) ?? false;
   }
 
   Future<void> setThemePreference(AppThemePreference value) async {
@@ -45,5 +49,14 @@ class AppSettingsService extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themePreferenceKey, value.storageValue);
+  }
+
+  Future<void> setAppLockEnabled(bool value) async {
+    if (_appLockEnabled == value) return;
+    _appLockEnabled = value;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_appLockEnabledKey, value);
   }
 }

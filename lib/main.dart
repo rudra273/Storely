@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'db/database_helper.dart';
+import 'screens/app_lock_gate.dart';
 import 'screens/home_screen.dart';
 import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
@@ -95,7 +96,7 @@ class _AppGateState extends State<AppGate> {
     }
     return _isFirstLaunch
         ? WelcomeScreen(onComplete: _completeWelcome)
-        : const AppShell();
+        : const AppLockGate(child: AppShell());
   }
 }
 

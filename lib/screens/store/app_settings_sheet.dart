@@ -10,10 +10,62 @@ class _AppSettingsSheet extends StatefulWidget {
 class _AppSettingsSheetState extends State<_AppSettingsSheet> {
   AppThemePreference _themePreference =
       AppSettingsService.instance.themePreference;
+  bool _appLockEnabled = AppSettingsService.instance.appLockEnabled;
+  bool _checkingAppLock = false;
+  String? _appLockMessage;
 
   Future<void> _setTheme(AppThemePreference value) async {
     setState(() => _themePreference = value);
     await AppSettingsService.instance.setThemePreference(value);
+  }
+
+  Future<void> _setAppLock(bool value) async {
+    if (value == _appLockEnabled || _checkingAppLock) return;
+
+    if (!value) {
+      setState(() {
+        _appLockEnabled = false;
+        _appLockMessage = null;
+      });
+      await AppSettingsService.instance.setAppLockEnabled(false);
+      return;
+    }
+
+    setState(() {
+      _checkingAppLock = true;
+      _appLockMessage = null;
+    });
+
+    final supported = await AppLockService.instance.isSupported();
+    if (!mounted) return;
+    if (!supported) {
+      setState(() {
+        _checkingAppLock = false;
+        _appLockMessage =
+            'Set a device PIN, pattern, password, or biometric first.';
+      });
+      return;
+    }
+
+    final result = await AppLockService.instance.authenticate(
+      reason: 'Confirm your device lock to enable Storely App Lock',
+    );
+    if (!mounted) return;
+
+    if (!result.success) {
+      setState(() {
+        _checkingAppLock = false;
+        _appLockMessage = result.message;
+      });
+      return;
+    }
+
+    setState(() {
+      _appLockEnabled = true;
+      _checkingAppLock = false;
+      _appLockMessage = null;
+    });
+    await AppSettingsService.instance.setAppLockEnabled(true);
   }
 
   @override
@@ -65,6 +117,34 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
             selected: {_themePreference},
             onSelectionChanged: (selection) => _setTheme(selection.first),
           ),
+          const SizedBox(height: AppSpacing.lg),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            secondary: const _PanelIcon(icon: Icons.lock_outline_rounded),
+            title: const Text('App Lock'),
+            subtitle: Text(
+              _appLockEnabled
+                  ? 'Fingerprint or device lock is required.'
+                  : 'Use fingerprint, PIN, pattern, or passcode.',
+              style: AppText.caption,
+            ),
+            value: _appLockEnabled,
+            activeThumbColor: AppColors.brandOf(context),
+            onChanged: _checkingAppLock ? null : _setAppLock,
+          ),
+          if (_checkingAppLock) ...[
+            const SizedBox(height: AppSpacing.xs),
+            const LinearProgressIndicator(minHeight: 2),
+          ],
+          if (_appLockMessage != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _appLockMessage!,
+              style: AppText.caption.copyWith(color: AppColors.error),
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           SizedBox(
             width: double.infinity,
