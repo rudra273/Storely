@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Brand
-  static const navy = Color(0xFF1B2838);
-  static const navyLight = Color(0xFF243447);
+  // Brand — charcoal (no navy anywhere, light or dark)
+  static const navy = Color(0xFF1F1F1F);
+  static const navyLight = Color(0xFF2A2A2A);
   static const amber = Color(0xFFF5A623);
 
   // Text

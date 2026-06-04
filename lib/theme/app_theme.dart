@@ -113,7 +113,7 @@ class StorelyTheme {
       ),
       appBarTheme: AppBarTheme(
         centerTitle: false,
-        backgroundColor: isDark ? AppColors.darkBg : AppColors.navy,
+        backgroundColor: AppColors.darkBg,
         foregroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,

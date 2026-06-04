@@ -36,7 +36,7 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
     final expanded = 1.0 - collapsed;
 
     return Container(
-      color: AppColors.isDark(context) ? AppColors.darkBg : AppColors.navy,
+      color: AppColors.darkBg,
       child: SafeArea(
         bottom: false,
         child: Padding(
