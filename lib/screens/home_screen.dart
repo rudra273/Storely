@@ -247,6 +247,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               const SizedBox(height: AppSpacing.md),
                               _UnpaidBillsSection(bills: _displayedUnpaidBills),
+                            ] else ...[
+                              const SizedBox(height: AppSpacing.xxl),
+                              _HiddenSectionStrip(
+                                title: 'Unpaid Bills',
+                                onShow: () => HomeSectionPrefs.instance
+                                    .setUnpaidHidden(false),
+                              ),
                             ],
                             if (!HomeSectionPrefs.instance.attentionHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
@@ -268,6 +275,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               _NeedsAttentionSection(
                                 products: _displayedLowStock,
                                 onUpdate: _loadData,
+                              ),
+                            ] else ...[
+                              const SizedBox(height: AppSpacing.xxl),
+                              _HiddenSectionStrip(
+                                title: 'Needs Attention',
+                                onShow: () => HomeSectionPrefs.instance
+                                    .setAttentionHidden(false),
                               ),
                             ],
                             const SizedBox(height: 80),
@@ -490,6 +504,59 @@ class _HomeSearchResult {
     required this.trailing,
     required this.onTap,
   });
+}
+
+// ── Hidden section strip ──────────────────────────────────────────────────────
+
+/// Slim placeholder shown in place of a hidden home section so the user always
+/// has a way to bring it back. Replaces the previous behaviour where hiding a
+/// section also removed its only "unhide" control.
+class _HiddenSectionStrip extends StatelessWidget {
+  final String title;
+  final VoidCallback onShow;
+
+  const _HiddenSectionStrip({required this.title, required this.onShow});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.sm,
+        AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.visibility_off_outlined,
+            size: 18,
+            color: AppColors.inkMutedOf(context),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              '$title hidden',
+              style: AppText.body.copyWith(
+                color: AppColors.inkMutedOf(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onShow,
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            label: const Text('Show'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Workspace Shortcuts ───────────────────────────────────────────────────────

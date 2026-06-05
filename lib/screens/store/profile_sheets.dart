@@ -42,6 +42,14 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    if (_gstRegistered && _cleanOptional(_gstinCtrl.text) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add a GSTIN to mark the shop as GST registered'),
+        ),
+      );
+      return;
+    }
     final current = widget.profile;
     Navigator.pop(
       context,
@@ -111,6 +119,12 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
                 labelText: 'GSTIN',
                 prefixIcon: Icon(Icons.receipt_long_outlined, size: 18),
               ),
+              onChanged: (value) {
+                final hasGstin = _cleanOptional(value) != null;
+                setState(() {
+                  if (!hasGstin) _gstRegistered = false;
+                });
+              },
             ),
             const SizedBox(height: 10),
             TextFormField(
@@ -124,17 +138,26 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Shop is GST registered'),
-              subtitle: Text(
-                _gstRegistered
-                    ? 'GST is added on selling price'
-                    : 'Purchase GST is included in cost',
-              ),
-              value: _gstRegistered,
-              activeThumbColor: AppColors.brandOf(context),
-              onChanged: (value) => setState(() => _gstRegistered = value),
+            Builder(
+              builder: (context) {
+                final hasGstin = _cleanOptional(_gstinCtrl.text) != null;
+                return SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Shop is GST registered'),
+                  subtitle: Text(
+                    !hasGstin
+                        ? 'Add a GSTIN above to enable GST'
+                        : _gstRegistered
+                        ? 'GST is added on selling price'
+                        : 'Purchase GST is included in cost',
+                  ),
+                  value: _gstRegistered,
+                  activeThumbColor: AppColors.brandOf(context),
+                  onChanged: hasGstin
+                      ? (value) => setState(() => _gstRegistered = value)
+                      : null,
+                );
+              },
             ),
             const SizedBox(height: 14),
             TestKeys.tag(

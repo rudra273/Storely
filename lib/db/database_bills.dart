@@ -94,6 +94,30 @@ mixin DatabaseBills {
     return bills;
   }
 
+  /// Cancelled bills are soft-deleted (deleted_at is set) so they stay out of
+  /// every sales/KPI/ledger aggregate, but their lifecycle record is preserved.
+  /// This surfaces them for reference/audit, newest first.
+  Future<List<Bill>> getCancelledBills() async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where: 'lifecycle_status = ?',
+      whereArgs: [Bill.lifecycleCancelled],
+      orderBy: 'cancelled_at DESC, created_at DESC',
+    );
+    final bills = <Bill>[];
+    for (final map in billMaps) {
+      final itemMaps = await db.query(
+        'bill_items',
+        where: 'bill_id = ?',
+        whereArgs: [map['id']],
+      );
+      final items = itemMaps.map((m) => BillItem.fromMap(m)).toList();
+      bills.add(Bill.fromMap(map, items));
+    }
+    return bills;
+  }
+
   Future<List<Customer>> getAllCustomers() async {
     final db = await database;
     await syncCustomersFromBills(db);

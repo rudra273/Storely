@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../app_colors.dart';
 import '../app_radius.dart';
 
-enum PillVariant { low, out, paid, unpaid, success, warning, info }
+enum PillVariant { low, out, paid, unpaid, success, warning, info, neutral }
 
 class StatusPill extends StatelessWidget {
   final String label;
@@ -67,6 +67,10 @@ class StatusPill extends StatelessWidget {
     PillVariant.info => (
       AppColors.navy.withValues(alpha: 0.08),
       AppColors.navy,
+    ),
+    PillVariant.neutral => (
+      AppColors.inkMuted.withValues(alpha: 0.12),
+      AppColors.inkMuted,
     ),
   };
 }

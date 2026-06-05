@@ -27,6 +27,8 @@ class BillsScreen extends StatefulWidget {
 
 class _BillsScreenState extends State<BillsScreen> {
   List<Bill> _bills = [];
+  List<Bill> _cancelledBills = [];
+  bool _showCancelled = false;
   bool _isLoading = true;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
@@ -50,10 +52,13 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   Future<void> _loadBills() async {
-    final bills = await DatabaseHelper.instance.getAllBills();
+    final db = DatabaseHelper.instance;
+    final bills = await db.getAllBills();
+    final cancelled = await db.getCancelledBills();
     if (mounted) {
       setState(() {
         _bills = bills;
+        _cancelledBills = cancelled;
         _isLoading = false;
       });
     }
@@ -350,7 +355,7 @@ class _BillsScreenState extends State<BillsScreen> {
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),
               )
-            else if (_bills.isEmpty)
+            else if (_bills.isEmpty && _cancelledBills.isEmpty)
               SliverFillRemaining(child: _buildEmpty())
             else
               SliverPadding(
@@ -380,10 +385,25 @@ class _BillsScreenState extends State<BillsScreen> {
                         textField: true,
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      if (_searchQuery.isEmpty) ...[
-                        _UnpaidSummary(bills: _bills),
+                      if (_cancelledBills.isNotEmpty) ...[
+                        _BillFilterTabs(
+                          showCancelled: _showCancelled,
+                          activeCount: _bills.length,
+                          cancelledCount: _cancelledBills.length,
+                          onChanged: (showCancelled) => setState(
+                            () => _showCancelled = showCancelled,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
                       ],
-                      ..._buildGroupedBillCards(),
+                      if (_showCancelled) ...[
+                        ..._buildCancelledBillCards(),
+                      ] else ...[
+                        if (_searchQuery.isEmpty) ...[
+                          _UnpaidSummary(bills: _bills),
+                        ],
+                        ..._buildGroupedBillCards(),
+                      ],
                     ],
                   ),
                 ),
@@ -446,6 +466,44 @@ class _BillsScreenState extends State<BillsScreen> {
       );
     }
     return widgets;
+  }
+
+  List<Widget> _buildCancelledBillCards() {
+    final filtered = _cancelledBills.where((b) {
+      if (_searchQuery.isEmpty) return true;
+      final nameMatches = b.customerName.toLowerCase().contains(_searchQuery);
+      final numMatches = b.billNumber.toLowerCase().contains(_searchQuery);
+      final reasonMatches =
+          b.cancelReason?.toLowerCase().contains(_searchQuery) ?? false;
+      return nameMatches || numMatches || reasonMatches;
+    }).toList();
+
+    if (filtered.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+          child: Center(
+            child: Text(
+              _searchQuery.isEmpty
+                  ? 'No cancelled bills'
+                  : 'No cancelled bills match your search',
+              style: AppText.body.copyWith(color: AppColors.inkMuted),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return [
+      for (final bill in filtered)
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: _CancelledBillCard(
+            bill: bill,
+            onDuplicate: () => _duplicateBill(bill),
+          ),
+        ),
+    ];
   }
 
   String _dateGroupTitle(DateTime date) {

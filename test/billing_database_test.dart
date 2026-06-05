@@ -420,6 +420,28 @@ void main() {
     );
 
     test(
+      'cancelled bills stay traceable via getCancelledBills',
+      () async {
+        final billId = await db.insertBill(
+          Bill(customerName: 'Customer', totalAmount: 120, itemCount: 1),
+          [BillItem(productName: 'Item A', mrp: 120)],
+        );
+
+        await db.cancelBill(billId, reason: 'Customer returned');
+
+        // Absent from active bills, but recoverable for reference/audit.
+        expect(await db.getAllBills(), isEmpty);
+        final cancelled = await db.getCancelledBills();
+        expect(cancelled, hasLength(1));
+        expect(cancelled.single.id, billId);
+        expect(cancelled.single.cancelReason, 'Customer returned');
+        expect(cancelled.single.lifecycleStatus, Bill.lifecycleCancelled);
+        // Line items are preserved on the cancelled record.
+        expect(cancelled.single.items, hasLength(1));
+      },
+    );
+
+    test(
       'saved bill customer snapshots are not changed by customer edit',
       () async {
         await db.insertBill(
