@@ -175,9 +175,20 @@ class _CustomerProfileSheetState extends State<CustomerProfileSheet> {
                       controller: _phoneCtrl,
                       keyboardType: TextInputType.phone,
                       decoration: const InputDecoration(
-                        labelText: 'Phone',
+                        labelText: 'Phone *',
                         prefixIcon: Icon(Icons.phone_outlined, size: 18),
                       ),
+                      validator: (value) {
+                        final digits = (value ?? '').replaceAll(
+                          RegExp(r'[^0-9]'),
+                          '',
+                        );
+                        if (digits.isEmpty) return 'Required';
+                        if (digits.length < 10 || digits.length > 12) {
+                          return 'Enter a valid phone number';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 10),
                     TextFormField(

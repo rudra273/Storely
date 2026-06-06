@@ -263,7 +263,20 @@ class _StoreScreenState extends State<StoreScreen> {
               builder: (_) => CustomerProfileSheet(customer: current),
             );
             if (result == null) return;
-            await DatabaseHelper.instance.saveCustomerProfile(result);
+            try {
+              await DatabaseHelper.instance.saveCustomerProfile(result);
+            } on ArgumentError catch (e) {
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    e.message?.toString() ??
+                        'A customer with this phone already exists',
+                  ),
+                ),
+              );
+              return;
+            }
             await refreshSheet();
             await _loadStoreData();
           }
