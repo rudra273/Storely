@@ -343,6 +343,10 @@ class CloudService with WidgetsBindingObserver {
     await prefs.remove(_urlKey);
     await prefs.remove(_anonKeyKey);
     await prefs.remove(_modeKey);
+    // Reset the first-sync watermark so reconnecting cloud is a true fresh
+    // start: the upload-vs-fresh choice will be offered again, instead of the
+    // device assuming everything was already synced.
+    await DatabaseHelper.instance.clearCloudSyncState(_lastSyncStateKey);
     await _authSubscription?.cancel();
     _authSubscription = null;
     if (_clientReady) {
@@ -436,6 +440,22 @@ class CloudService with WidgetsBindingObserver {
       clearError: true,
     );
     await syncNow(reason: 'Shop registered');
+  }
+
+  /// Lets an existing owner/admin member re-offer the first-sync data choice.
+  ///
+  /// Resets the local sync baseline so the next sync is treated as a first sync.
+  /// Use this when a device already belongs to a cloud shop but local data was
+  /// never uploaded (e.g. an earlier sync finalized without pushing). Re-running
+  /// sync will surface the "upload existing vs start fresh" prompt again.
+  Future<void> resyncExistingData() async {
+    await DatabaseHelper.instance.clearCloudSyncState(_lastSyncStateKey);
+    state.value = state.value.copyWith(
+      clearLastSyncedAt: true,
+      message: 'Checking existing data…',
+      clearError: true,
+    );
+    await syncNow(reason: 'Re-checking existing data');
   }
 
   /// Resolve the first-sync data choice: upload existing local data, or start
@@ -560,9 +580,17 @@ class CloudService with WidgetsBindingObserver {
       clearError: true,
     );
     try {
+      // When we already know the user's role locally (e.g. right after they
+      // registered their own shop), pass it through so the engine doesn't depend
+      // on a racy is_shop_admin round-trip to decide the first-sync upload.
+      final knownRole = state.value.shopRole;
+      final knownIsAdmin = knownRole == null
+          ? null
+          : (knownRole == 'owner' || knownRole == 'admin');
       final result = await CloudSyncEngine(
         client: activeClient,
         database: DatabaseHelper.instance,
+        knownIsAdmin: knownIsAdmin,
       ).sync(firstSyncMode: firstSyncMode);
 
       if (result.needsRegistration) {
@@ -687,7 +715,18 @@ class CloudSyncEngine {
   final SupabaseClient client;
   final DatabaseHelper database;
 
-  CloudSyncEngine({required this.client, required this.database});
+  /// Locally-known admin status, set when the caller already knows the user is
+  /// an owner/admin (e.g. immediately after registering their own shop). When
+  /// non-null it takes precedence over the [_isShopAdmin] cloud round-trip,
+  /// which can momentarily return false right after registration (RLS / role
+  /// propagation) and would otherwise wrongly skip the first-sync upload.
+  final bool? knownIsAdmin;
+
+  CloudSyncEngine({
+    required this.client,
+    required this.database,
+    this.knownIsAdmin,
+  });
 
   static const _adminManagedTables = {
     'app_settings',
@@ -726,7 +765,10 @@ class CloudSyncEngine {
       CloudService._lastSyncStateKey,
     );
 
-    final canPushAdminTables = await _isShopAdmin(shopId);
+    // Prefer the locally-known role; only fall back to the cloud check when we
+    // don't already know (avoids the post-registration race that skipped the
+    // first-sync upload).
+    final canPushAdminTables = knownIsAdmin ?? await _isShopAdmin(shopId);
     final pullFirst = lastSync == null;
 
     // First sync on a device that already has local data: the user must decide

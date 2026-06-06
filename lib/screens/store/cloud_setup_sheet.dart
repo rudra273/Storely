@@ -112,6 +112,11 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
         : 'Starting fresh — only new data will sync.',
   );
 
+  Future<void> _resyncExistingData() => _run(
+    CloudService.instance.resyncExistingData,
+    successMessage: 'Checking your existing data…',
+  );
+
   Future<void> _disableCloud() => _run(
     CloudService.instance.clearConfig,
     successMessage: 'Cloud sync disabled',
@@ -318,6 +323,26 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
                                     _chooseFirstSync(FirstSyncMode.startFresh),
                           icon: const Icon(Icons.fiber_new_outlined),
                           label: const Text('Start Fresh (new data only)'),
+                        ),
+                      ),
+                    ],
+                    // Existing owner/admin members can re-offer the upload-vs-
+                    // fresh choice on demand — for when local data was never
+                    // pushed to the cloud (e.g. an earlier first sync finalized
+                    // without uploading). Hidden while the prompt is already
+                    // showing or the user still needs to register.
+                    if (state.isSignedIn &&
+                        state.membership == CloudMembership.member &&
+                        !state.firstSyncChoicePending &&
+                        (state.shopRole == 'owner' ||
+                            state.shopRole == 'admin')) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _isBusy ? null : _resyncExistingData,
+                          icon: const Icon(Icons.cloud_upload_outlined),
+                          label: const Text('Upload Local Data to Cloud'),
                         ),
                       ),
                     ],
