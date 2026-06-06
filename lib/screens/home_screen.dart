@@ -6,9 +6,10 @@ import '../models/bill.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 import 'analytics_screen.dart';
-import 'customer_profile_sheet.dart';
 import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
+import 'suppliers_screen.dart';
+import 'customers_screen.dart';
 import 'home/home_section_settings.dart';
 import '../services/home_section_prefs.dart';
 
@@ -39,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<int, double> _pendingByCustomerId = {};
   Map<String, double> _pendingByPhone = {};
   int _productCount = 0;
+  int _supplierCount = 0;
   int _todayBillCount = 0;
   double _todaySales = 0;
   double _todayCollected = 0;
@@ -102,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final db = DatabaseHelper.instance;
     final products = await db.getAllProducts();
     final customers = await db.getAllCustomers();
+    final suppliers = await db.getSupplierProfiles();
     final bills = await db.getAllBills();
     final shopName = await db.getShopName();
     final lowStockThreshold = await db.getLowStockThreshold();
@@ -114,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _products = products;
       _productCount = products.length;
+      _supplierCount = suppliers.length;
       _todaySales = todaySales;
       _todayCollected = todayCollected;
       _todayBillCount = todayBillCount;
@@ -236,7 +240,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             const SizedBox(height: AppSpacing.xxl),
                             _WorkspaceShortcutsSection(
                               customerCount: _customers.length,
-                              onCustomers: _openCustomersSheet,
+                              onCustomers: _openCustomers,
+                              supplierCount: _supplierCount,
+                              onSuppliers: _openSuppliers,
                             ),
                             if (!HomeSectionPrefs.instance.unpaidHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
@@ -362,7 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
           subtitle:
               'Customer · ${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
           trailing: pending > 0 ? 'Due ₹${pending.toStringAsFixed(0)}' : 'Paid',
-          onTap: _openCustomersSheet,
+          onTap: _openCustomers,
         ),
       );
     }
@@ -392,44 +398,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openCustomersSheet() async {
-    var customers = await DatabaseHelper.instance.getAllCustomers();
-    var bills = await DatabaseHelper.instance.getAllBills();
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          final pending = _buildCustomerPendingMaps(bills);
-
-          Future<void> addCustomer() async {
-            final result = await showModalBottomSheet<Customer>(
-              context: ctx,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (_) => const CustomerProfileSheet(),
-            );
-            if (result == null) return;
-            await DatabaseHelper.instance.saveCustomerProfile(result);
-            customers = await DatabaseHelper.instance.getAllCustomers();
-            bills = await DatabaseHelper.instance.getAllBills();
-            if (ctx.mounted) setSheet(() {});
-          }
-
-          return _HomeCustomersSheet(
-            customers: customers,
-            bills: bills,
-            pendingByCustomerId: pending.byCustomerId,
-            pendingByPhone: pending.byPhone,
-            onAdd: addCustomer,
-          );
-        },
-      ),
+  Future<void> _openSuppliers() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
     );
-    await _loadData();
+    // Refresh the supplier count after returning (a supplier may be added).
+    if (mounted) _loadData();
+  }
+
+  Future<void> _openCustomers() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
+    );
+    if (mounted) _loadData();
   }
 
   double _pendingAmount(Customer customer) {
@@ -586,10 +567,14 @@ class _HiddenSectionStrip extends StatelessWidget {
 class _WorkspaceShortcutsSection extends StatelessWidget {
   final int customerCount;
   final VoidCallback onCustomers;
+  final int supplierCount;
+  final VoidCallback onSuppliers;
 
   const _WorkspaceShortcutsSection({
     required this.customerCount,
     required this.onCustomers,
+    required this.supplierCount,
+    required this.onSuppliers,
   });
 
   @override
@@ -612,8 +597,9 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
             _WorkspaceTile(
               icon: Icons.handshake_outlined,
               label: 'Suppliers',
-              subtitle: 'Soon',
+              subtitle: '$supplierCount saved',
               color: AppColors.inkMutedOf(context),
+              onTap: onSuppliers,
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
@@ -692,501 +678,6 @@ class _WorkspaceTile extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Customers Sheet ───────────────────────────────────────────────────────────
-
-class _HomeCustomersSheet extends StatefulWidget {
-  final List<Customer> customers;
-  final List<Bill> bills;
-  final Map<int, double> pendingByCustomerId;
-  final Map<String, double> pendingByPhone;
-  final Future<void> Function() onAdd;
-
-  const _HomeCustomersSheet({
-    required this.customers,
-    required this.bills,
-    required this.pendingByCustomerId,
-    required this.pendingByPhone,
-    required this.onAdd,
-  });
-
-  @override
-  State<_HomeCustomersSheet> createState() => _HomeCustomersSheetState();
-}
-
-class _HomeCustomersSheetState extends State<_HomeCustomersSheet> {
-  final _searchCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  List<Customer> get _filtered {
-    final query = _searchCtrl.text.trim().toLowerCase();
-    if (query.isEmpty) return widget.customers;
-    final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
-    return widget.customers.where((customer) {
-      return customer.name.toLowerCase().contains(query) ||
-          customer.phone.contains(digits.isEmpty ? query : digits) ||
-          (customer.gstin?.toLowerCase().contains(query) ?? false) ||
-          (customer.address?.toLowerCase().contains(query) ?? false);
-    }).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final customers = _filtered;
-    return SafeArea(
-      top: false,
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.84,
-        ),
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.borderStrongOf(context),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const LeadingIconChip(
-                  icon: Icons.people_outline_rounded,
-                  color: AppColors.success,
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    'Customers',
-                    style: AppText.title.copyWith(
-                      color: AppColors.inkOf(context),
-                    ),
-                  ),
-                ),
-                Text(
-                  '${widget.customers.length}',
-                  style: AppText.subtitle.copyWith(color: AppColors.inkMuted),
-                ),
-                IconButton(
-                  onPressed: widget.onAdd,
-                  icon: Icon(
-                    Icons.add_rounded,
-                    color: AppColors.inkOf(context),
-                    size: 22,
-                  ),
-                  tooltip: 'Add customer',
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _searchCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Search customers',
-                prefixIcon: Icon(Icons.search_rounded),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Flexible(
-              child: customers.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No matching customers',
-                        style: TextStyle(color: AppColors.textMuted),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: customers.length,
-                      separatorBuilder: (_, index) =>
-                          const SizedBox(height: AppSpacing.sm),
-                      itemBuilder: (_, index) {
-                        final customer = customers[index];
-                        return _CustomerSummaryRow(
-                          customer: customer,
-                          pendingAmount: _pendingAmount(customer),
-                          onTap: () => _openCustomerDetail(customer),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  double _pendingAmount(Customer customer) {
-    final byId = customer.id == null
-        ? null
-        : widget.pendingByCustomerId[customer.id];
-    if (byId != null) return byId;
-    return widget.pendingByPhone[customer.phone] ?? 0;
-  }
-
-  List<Bill> _billsFor(Customer customer) {
-    final phone = _normaliseHomePhone(customer.phone);
-    final matched = widget.bills.where((bill) {
-      if (bill.lifecycleStatus == Bill.lifecycleCancelled) return false;
-      if (customer.id != null && bill.customerId == customer.id) return true;
-      if (phone == null) return false;
-      return _normaliseHomePhone(bill.customerPhone) == phone;
-    }).toList();
-    matched.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return matched;
-  }
-
-  Future<void> _openCustomerDetail(Customer customer) async {
-    final bills = _billsFor(customer);
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _CustomerDetailSheet(
-        customer: customer,
-        bills: bills,
-        pendingAmount: _pendingAmount(customer),
-      ),
-    );
-  }
-}
-
-class _CustomerSummaryRow extends StatelessWidget {
-  final Customer customer;
-  final double pendingAmount;
-  final VoidCallback? onTap;
-
-  const _CustomerSummaryRow({
-    required this.customer,
-    required this.pendingAmount,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      onTap: onTap,
-      child: Row(
-        children: [
-          const LeadingIconChip(
-            icon: Icons.person_outline_rounded,
-            color: AppColors.success,
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  customer.name,
-                  style: AppText.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    if (customer.phone.isNotEmpty)
-                      _displayPhone(customer.phone),
-                    '${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
-                  ].join(' · '),
-                  style: AppText.caption,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '₹${customer.totalPurchaseAmount.toStringAsFixed(0)}',
-                style: AppText.subtitle.copyWith(fontSize: 14),
-              ),
-              Text(
-                pendingAmount > 0
-                    ? 'Due ₹${pendingAmount.toStringAsFixed(0)}'
-                    : 'No due',
-                style: AppText.caption.copyWith(
-                  color: pendingAmount > 0
-                      ? AppColors.error
-                      : AppColors.success,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Customer Detail Sheet ─────────────────────────────────────────────────────
-
-class _CustomerDetailSheet extends StatelessWidget {
-  final Customer customer;
-  final List<Bill> bills;
-  final double pendingAmount;
-
-  const _CustomerDetailSheet({
-    required this.customer,
-    required this.bills,
-    required this.pendingAmount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final totalBilled = bills.fold<double>(0, (sum, b) => sum + b.totalAmount);
-    return SafeArea(
-      top: false,
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.84,
-        ),
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.borderStrongOf(context),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const LeadingIconChip(
-                  icon: Icons.person_outline_rounded,
-                  color: AppColors.success,
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        customer.name,
-                        style: AppText.title.copyWith(
-                          color: AppColors.inkOf(context),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (customer.phone.isNotEmpty)
-                        Text(
-                          _displayPhone(customer.phone),
-                          style: AppText.caption,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (_detailLines.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.md),
-              ..._detailLines.map(
-                (line) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(line.$1, size: 15, color: AppColors.inkFaint),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(line.$2, style: AppText.caption),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Total billed',
-                    value: '₹${totalBilled.toStringAsFixed(0)}',
-                    color: AppColors.inkOf(context),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Pending',
-                    value: pendingAmount > 0
-                        ? '₹${pendingAmount.toStringAsFixed(0)}'
-                        : '₹0',
-                    color: pendingAmount > 0
-                        ? AppColors.error
-                        : AppColors.success,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            SectionHeader(title: 'Bills (${bills.length})'),
-            const SizedBox(height: AppSpacing.sm),
-            Flexible(
-              child: bills.isEmpty
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Text(
-                          'No bills for this customer yet',
-                          style: TextStyle(color: AppColors.textMuted),
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      itemCount: bills.length,
-                      separatorBuilder: (_, _) =>
-                          const SizedBox(height: AppSpacing.sm),
-                      itemBuilder: (_, index) => _CustomerBillRow(
-                        bill: bills[index],
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<(IconData, String)> get _detailLines {
-    final lines = <(IconData, String)>[];
-    if (customer.gstin != null && customer.gstin!.isNotEmpty) {
-      lines.add((Icons.badge_outlined, 'GSTIN ${customer.gstin}'));
-    }
-    if (customer.email != null && customer.email!.isNotEmpty) {
-      lines.add((Icons.email_outlined, customer.email!));
-    }
-    if (customer.address != null && customer.address!.isNotEmpty) {
-      lines.add((Icons.location_on_outlined, customer.address!));
-    }
-    return lines;
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const _MiniStat({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: AppText.caption),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: AppText.subtitle.copyWith(color: color, fontSize: 15),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CustomerBillRow extends StatelessWidget {
-  final Bill bill;
-
-  const _CustomerBillRow({required this.bill});
-
-  StatusPill get _statusPill => switch (bill.paymentStatus) {
-    Bill.statusPaid => StatusPill.paid(),
-    Bill.statusPartial => StatusPill.partial(),
-    _ => StatusPill.unpaid(),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final date = bill.createdAt;
-    final dateLabel =
-        '${date.day.toString().padLeft(2, '0')}/'
-        '${date.month.toString().padLeft(2, '0')}/${date.year}';
-    return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  bill.billNumber.isNotEmpty ? bill.billNumber : 'No number',
-                  style: AppText.subtitle.copyWith(fontSize: 14),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$dateLabel · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
-                  style: AppText.caption,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '₹${bill.totalAmount.toStringAsFixed(0)}',
-                style: AppText.subtitle.copyWith(fontSize: 14),
-              ),
-              const SizedBox(height: 4),
-              _statusPill,
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -1712,13 +1203,6 @@ String? _normaliseHomePhone(String? value) {
   if (digits == null || digits.isEmpty || digits == '91') return null;
   if (digits.length == 10) return '91$digits';
   return digits;
-}
-
-String _displayPhone(String phone) {
-  if (phone.length == 12 && phone.startsWith('91')) {
-    return '+91 ${phone.substring(2, 7)} ${phone.substring(7)}';
-  }
-  return phone;
 }
 
 class _CustomerPendingMaps {

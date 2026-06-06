@@ -176,7 +176,10 @@ class _AppShellState extends State<AppShell> {
         onPurchaseFlowComplete: _refreshAfterProductPurchaseFlow,
         onBackToHome: _goHomeFromBack,
       ),
-      BillsScreen(refreshToken: _billsRefreshToken),
+      BillsScreen(
+        refreshToken: _billsRefreshToken,
+        isActiveMainTab: _currentIndex == 2,
+      ),
       StoreScreen(refreshToken: _storeRefreshToken),
     ];
 

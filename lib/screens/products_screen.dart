@@ -2359,7 +2359,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             : _buildContent(),
         floatingActionButton: Column(
           mainAxisSize: MainAxisSize.min,
-          children: _selectionMode
+          children: _selectionMode || !widget.isActiveMainTab
               ? []
               : [
                   TestKeys.tag(

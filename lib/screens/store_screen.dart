@@ -17,18 +17,17 @@ import '../services/app_settings_service.dart';
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
-import 'customer_profile_sheet.dart';
+import 'customers_screen.dart';
+import 'suppliers_screen.dart';
 
 part 'store/store_panels.dart';
 part 'store/cloud_setup_sheet.dart';
 part 'store/members_sheet.dart';
 part 'store/store_action_widgets.dart';
-part 'store/supplier_manager_sheet.dart';
 part 'store/pricing_settings_sheets.dart';
 part 'store/bill_settings_sheet.dart';
 part 'store/profile_sheets.dart';
 part 'store/store_dialogs.dart';
-part 'store/customer_sheets.dart';
 part 'store/app_settings_sheet.dart';
 
 class StoreScreen extends StatefulWidget {
@@ -156,47 +155,6 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  Future<void> _addSupplier() async {
-    final value = await showModalBottomSheet<SupplierProfile>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _SupplierProfileSheet(),
-    );
-    if (value == null) return;
-    await _runStoreAction(
-      () => DatabaseHelper.instance.saveSupplierProfile(value),
-    );
-  }
-
-  Future<void> _editSupplier(String currentName) async {
-    final current =
-        await DatabaseHelper.instance.getSupplierProfile(currentName) ??
-        SupplierProfile(name: currentName);
-    if (!mounted) return;
-    final value = await showModalBottomSheet<SupplierProfile>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _SupplierProfileSheet(supplier: current),
-    );
-    if (value == null) return;
-    await _runStoreAction(
-      () => DatabaseHelper.instance.saveSupplierProfile(
-        value,
-        oldName: currentName,
-      ),
-    );
-  }
-
-  Future<void> _deleteSupplier(String name) async {
-    final confirmed = await _confirmDelete('Supplier', name);
-    if (!confirmed) return;
-    await _runStoreAction(
-      () => DatabaseHelper.instance.deleteSupplierOption(name),
-    );
-  }
-
   Future<void> _editLowStockThreshold() async {
     final value = await showDialog<int>(
       context: context,
@@ -243,53 +201,10 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showCustomerTable() async {
-    var customers = await DatabaseHelper.instance.getAllCustomers();
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Future<void> refreshSheet() async {
-            customers = await DatabaseHelper.instance.getAllCustomers();
-            if (ctx.mounted) setSheet(() {});
-          }
-
-          Future<void> saveCustomer(Customer? current) async {
-            final result = await showModalBottomSheet<Customer>(
-              context: ctx,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (_) => CustomerProfileSheet(customer: current),
-            );
-            if (result == null) return;
-            try {
-              await DatabaseHelper.instance.saveCustomerProfile(result);
-            } on ArgumentError catch (e) {
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    e.message?.toString() ??
-                        'A customer with this phone already exists',
-                  ),
-                ),
-              );
-              return;
-            }
-            await refreshSheet();
-            await _loadStoreData();
-          }
-
-          return _CustomerTableSheet(
-            customers: customers,
-            onAdd: () => saveCustomer(null),
-            onEdit: saveCustomer,
-          );
-        },
-      ),
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
     );
+    if (mounted) await _loadStoreData();
   }
 
   Future<void> _showCategoryManager() {
@@ -358,36 +273,10 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showSupplierManager() async {
-    var suppliers = await DatabaseHelper.instance.getSupplierProfiles();
-    if (!mounted) return;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Future<void> refreshSheet() async {
-            suppliers = await DatabaseHelper.instance.getSupplierProfiles();
-            if (ctx.mounted) setSheet(() {});
-          }
-
-          Future<void> runAndRefresh(Future<void> Function() action) async {
-            await action();
-            await refreshSheet();
-          }
-
-          return _SupplierManagerSheet(
-            suppliers: suppliers,
-            onAdd: () => runAndRefresh(_addSupplier),
-            onEdit: (supplier) =>
-                runAndRefresh(() => _editSupplier(supplier.name)),
-            onDelete: (supplier) =>
-                runAndRefresh(() => _deleteSupplier(supplier.name)),
-          );
-        },
-      ),
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
     );
+    if (mounted) await _loadStoreData();
   }
 
   Future<void> _showOptionManager({
