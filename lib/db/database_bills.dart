@@ -63,6 +63,7 @@ mixin DatabaseBills {
           'bill_uuid': billUuid,
           'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
           'payment_method': bill.paymentMethod,
+          'payment_reference': _normaliseName(bill.transactionReference),
           'received_at': bill.createdAt.toIso8601String(),
           'created_at': bill.createdAt.toIso8601String(),
           'updated_at': _nowIso(),
@@ -81,17 +82,120 @@ mixin DatabaseBills {
       where: 'deleted_at IS NULL',
       orderBy: 'created_at DESC',
     );
-    final bills = <Bill>[];
-    for (final map in billMaps) {
-      final itemMaps = await db.query(
-        'bill_items',
-        where: 'deleted_at IS NULL AND bill_id = ?',
-        whereArgs: [map['id']],
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: false,
+    );
+    final refByBillUuid = await _latestPaymentRefByBillUuid(db, billMaps);
+    return [
+      for (final map in billMaps)
+        Bill.fromMap({
+          ...map,
+          'transaction_reference': refByBillUuid[map['uuid']],
+        }, itemsByBillId[map['id']] ?? const []),
+    ];
+  }
+
+  /// Cancelled bills are soft-deleted (deleted_at is set) so they stay out of
+  /// every sales/KPI/ledger aggregate, but their lifecycle record is preserved.
+  /// This surfaces them for reference/audit, newest first.
+  Future<List<Bill>> getCancelledBills() async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where: 'lifecycle_status = ?',
+      whereArgs: [Bill.lifecycleCancelled],
+      orderBy: 'cancelled_at DESC, created_at DESC',
+    );
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: true,
+    );
+    final refByBillUuid = await _latestPaymentRefByBillUuid(db, billMaps);
+    return [
+      for (final map in billMaps)
+        Bill.fromMap({
+          ...map,
+          'transaction_reference': refByBillUuid[map['uuid']],
+        }, itemsByBillId[map['id']] ?? const []),
+    ];
+  }
+
+  /// Loads the most recent non-empty `payment_reference` for each bill in
+  /// [billMaps], keyed by bill uuid. Batched (chunked IN-list) to avoid N+1
+  /// queries, mirroring [_itemsByBillId].
+  Future<Map<String, String>> _latestPaymentRefByBillUuid(
+    DatabaseExecutor executor,
+    List<Map<String, Object?>> billMaps,
+  ) async {
+    final uuids = [
+      for (final map in billMaps)
+        if ((map['uuid'] as String?)?.isNotEmpty == true) map['uuid'] as String,
+    ];
+    if (uuids.isEmpty) return const {};
+    final result = <String, String>{};
+    const chunkSize = 500;
+    for (var start = 0; start < uuids.length; start += chunkSize) {
+      final chunk = uuids.sublist(
+        start,
+        start + chunkSize > uuids.length ? uuids.length : start + chunkSize,
       );
-      final items = itemMaps.map((m) => BillItem.fromMap(m)).toList();
-      bills.add(Bill.fromMap(map, items));
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'bill_payments',
+        columns: ['bill_uuid', 'payment_reference'],
+        where:
+            'bill_uuid IN ($placeholders) AND deleted_at IS NULL '
+            "AND payment_reference IS NOT NULL AND payment_reference != ''",
+        whereArgs: chunk,
+        orderBy: 'received_at DESC, id DESC',
+      );
+      for (final row in rows) {
+        final uuid = row['bill_uuid'] as String;
+        // First row per bill wins (ordered newest-first), so don't overwrite.
+        result.putIfAbsent(uuid, () => row['payment_reference'] as String);
+      }
     }
-    return bills;
+    return result;
+  }
+
+  /// Loads the bill_items for every bill in [billMaps] in a single batched query
+  /// (grouped by bill_id in memory) instead of one query per bill. Avoids the
+  /// N+1 round-trips that made bill lists scale linearly with bill count.
+  Future<Map<int, List<BillItem>>> _itemsByBillId(
+    DatabaseExecutor executor,
+    List<Map<String, Object?>> billMaps, {
+    required bool includeDeleted,
+  }) async {
+    final billIds = [
+      for (final map in billMaps)
+        if (map['id'] != null) map['id'] as int,
+    ];
+    if (billIds.isEmpty) return const {};
+    final deletedClause = includeDeleted ? '' : 'deleted_at IS NULL AND ';
+    final grouped = <int, List<BillItem>>{};
+    // Chunk the IN-list so we never exceed SQLite's bound-variable limit
+    // (~999) on shops with very large bill counts.
+    const chunkSize = 500;
+    for (var start = 0; start < billIds.length; start += chunkSize) {
+      final chunk = billIds.sublist(
+        start,
+        start + chunkSize > billIds.length ? billIds.length : start + chunkSize,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final itemMaps = await executor.query(
+        'bill_items',
+        where: '${deletedClause}bill_id IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final m in itemMaps) {
+        final billId = m['bill_id'] as int;
+        (grouped[billId] ??= <BillItem>[]).add(BillItem.fromMap(m));
+      }
+    }
+    return grouped;
   }
 
   Future<List<Customer>> getAllCustomers() async {
@@ -247,6 +351,7 @@ mixin DatabaseBills {
     int id,
     bool isPaid, {
     String? paymentMethod,
+    String? paymentReference,
   }) async {
     final db = await database;
     return db.transaction((txn) async {
@@ -278,6 +383,7 @@ mixin DatabaseBills {
           'bill_uuid': billUuid,
           'amount': balance,
           'payment_method': paymentMethod ?? 'cash',
+          'payment_reference': _normaliseName(paymentReference),
           'received_at': now,
           'created_at': now,
           'updated_at': now,
@@ -345,6 +451,55 @@ mixin DatabaseBills {
         'profit_commission_percent': percent.clamp(0, 100).toDouble(),
         'updated_at': _nowIso(),
       },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    notifyDatabaseChanged();
+    return count;
+  }
+
+  /// Updates only the buyer/customer snapshot fields on a finalized bill.
+  /// Amounts, items, GST, and totals are intentionally left untouched — those
+  /// snapshots are immutable. GST fields are ignored for non-B2B bills.
+  Future<int> updateBillCustomerDetails(
+    int id, {
+    required String customerName,
+    String? customerPhone,
+    String? customerGstin,
+    String? customerGstLegalName,
+    String? customerGstTradeName,
+    String? customerAddressSnapshot,
+    String? placeOfSupplyStateCode,
+    required bool isB2b,
+  }) async {
+    await _requireAdminMutation();
+    final db = await database;
+    final values = <String, Object?>{
+      'customer_name': _normaliseName(customerName) ?? 'Walk-in Customer',
+      'customer_phone': _normaliseCustomerPhone(customerPhone),
+      'updated_at': _nowIso(),
+    };
+    if (isB2b) {
+      // Reuse the Bill constructor's canonical cleaning for the GST snapshot
+      // fields (GSTIN upper-casing, state-code padding, whitespace collapse).
+      final cleaned = Bill(
+        totalAmount: 0,
+        itemCount: 0,
+        customerGstin: customerGstin,
+        customerGstLegalName: customerGstLegalName,
+        customerGstTradeName: customerGstTradeName,
+        customerAddressSnapshot: customerAddressSnapshot,
+        placeOfSupplyStateCode: placeOfSupplyStateCode,
+      );
+      values['customer_gstin'] = cleaned.customerGstin;
+      values['customer_gst_legal_name'] = cleaned.customerGstLegalName;
+      values['customer_gst_trade_name'] = cleaned.customerGstTradeName;
+      values['customer_address_snapshot'] = cleaned.customerAddressSnapshot;
+      values['place_of_supply_state_code'] = cleaned.placeOfSupplyStateCode;
+    }
+    final count = await db.update(
+      'bills',
+      values,
       where: 'id = ?',
       whereArgs: [id],
     );

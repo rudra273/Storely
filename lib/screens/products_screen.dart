@@ -847,7 +847,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     var purchaseDate = DateTime.now();
     String? selectedSupplier;
 
-    final proceed = await showModalBottomSheet<bool>(
+    final action = await showModalBottomSheet<_PurchaseInitialAction>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -874,7 +874,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 children: [
                   _ProductSheetHeader(
                     title: 'New Purchase',
-                    onClose: () => Navigator.pop(ctx, false),
+                    onClose: () => Navigator.pop(ctx),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
@@ -948,13 +948,39 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        FilledButton.icon(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          icon: const Icon(Icons.arrow_forward_rounded),
-                          label: const Text('Next'),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(48),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => Navigator.pop(
+                                  ctx,
+                                  _PurchaseInitialAction.import,
+                                ),
+                                icon: const Icon(
+                                  Icons.upload_file_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text('Import file'),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(48),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: () => Navigator.pop(
+                                  ctx,
+                                  _PurchaseInitialAction.manual,
+                                ),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('Add product'),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(48),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -967,12 +993,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
       ),
     );
 
-    if (proceed != true || !mounted) return;
+    if (action == null || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _NewPurchaseScreen(
           purchaseDate: purchaseDate,
           supplier: selectedSupplier,
+          initialAction: action,
           addProduct: (stagedNames) => _showAddEditSheet(
             stageOnly: true,
             initialPurchaseDate: purchaseDate,

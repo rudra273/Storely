@@ -195,6 +195,7 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
                 ],
               ),
             ),
+            _BillPreviewPanel(settings: _settings),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.fromLTRB(20, 8, 20, bottomInset + 20),
@@ -590,11 +591,86 @@ class _BillSettingsSheetState extends State<_BillSettingsSheet> {
   }
 
   Widget _switch(String title, bool value, ValueChanged<bool> update) {
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
+    return _CheckRow(
+      title: title,
       value: value,
       onChanged: (next) => setState(() => update(next)),
+    );
+  }
+}
+
+class _CheckRow extends StatelessWidget {
+  final String title;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _CheckRow({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: AppRadius.smRadius,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: AppSpacing.sm,
+          horizontal: AppSpacing.xs,
+        ),
+        child: Row(
+          children: [
+            _CheckBox(value: value),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                title,
+                style: AppText.body.copyWith(
+                  color: value
+                      ? AppColors.inkOf(context)
+                      : AppColors.inkMutedOf(context),
+                  fontWeight: value ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckBox extends StatelessWidget {
+  final bool value;
+
+  const _CheckBox({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = AppColors.brandOf(context);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: value ? brand : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: value ? brand : AppColors.borderStrongOf(context),
+          width: 1.5,
+        ),
+      ),
+      child: value
+          ? Icon(
+              Icons.check_rounded,
+              size: 16,
+              color: AppColors.isDark(context)
+                  ? AppColors.darkBg
+                  : Colors.white,
+            )
+          : null,
     );
   }
 }
@@ -662,11 +738,27 @@ class _AssetRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         children: [
-          Switch(value: enabled, onChanged: onToggle),
+          InkWell(
+            onTap: () => onToggle(!enabled),
+            borderRadius: AppRadius.smRadius,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: AppSpacing.sm,
+                horizontal: AppSpacing.xs,
+              ),
+              child: _CheckBox(value: enabled),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               hasAsset ? '$title selected' : title,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: AppText.body.copyWith(
+                color: enabled
+                    ? AppColors.inkOf(context)
+                    : AppColors.inkMutedOf(context),
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           TextButton.icon(
@@ -684,4 +776,504 @@ class _AssetRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Sample data used by the live preview so the layout looks realistic.
+class _PreviewSample {
+  static const shopName = 'Acme Traders';
+  static const shopAddress = '14 Market Road, Pune 411001';
+  static const shopPhone = '+91 98765 43210';
+  static const shopEmail = 'sales@acme.in';
+  static const shopGstin = '27AAAAA0000A1Z5';
+
+  static const customerName = 'Rahul Sharma';
+  static const customerLegalName = 'Sharma Enterprises Pvt Ltd';
+  static const customerTradeName = 'Sharma Stores';
+  static const customerGstin = '27BBBBB1111B2Z6';
+  static const customerPhone = '+91 91234 56789';
+  static const customerAddress = '5 Hill View, Pune';
+  static const placeOfSupply = '27';
+
+  static const invoiceNo = 'INV-2025-0042';
+  static const invoiceDate = '05 Jun 2026, 11:30 AM';
+  static const supplyType = 'Intrastate';
+
+  // name, hsn, qty, rate, gst%, gstAmt, amount
+  static const items = [
+    ['Steel Bolt M6', '7318', '20', '4.50', '18%', '16.20', '106.20'],
+    ['Hex Nut M6', '7318', '20', '2.00', '18%', '7.20', '47.20'],
+    ['Washer 6mm', '7318', '50', '0.80', '18%', '7.20', '47.20'],
+  ];
+
+  static const subtotal = '200.60';
+  static const discount = '-10.00';
+  static const taxable = '190.60';
+  static const cgst = '17.15';
+  static const sgst = '17.15';
+  static const gstTotal = '34.30';
+  static const grandTotal = '224.90';
+}
+
+/// A live, scaled-down mock of the generated invoice PDF. Mirrors the section
+/// layout and visibility rules in [BillPdfGenerator] using sample data, so the
+/// shopkeeper can see what each toggle adds/removes in real time.
+class _BillPreviewPanel extends StatelessWidget {
+  final BillSettings settings;
+
+  const _BillPreviewPanel({required this.settings});
+
+  bool get _showHeader =>
+      settings.showInvoiceTitle ||
+      (settings.showShopLogo && settings.shopLogoBase64 != null);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, AppSpacing.xs),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.visibility_outlined,
+                  size: 14,
+                  color: AppColors.brandOf(context),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'LIVE PREVIEW',
+                  style: AppText.label.copyWith(
+                    color: AppColors.inkMutedOf(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // The PDF page is always white; render it on white regardless of theme.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 220),
+            child: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFE2E5EA)),
+                ),
+                child: DefaultTextStyle(
+                  style: const TextStyle(
+                    color: Color(0xFF1F1F1F),
+                    fontSize: 7,
+                    height: 1.25,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: _sections(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _sections() {
+    final out = <Widget>[];
+    final header = _header();
+    if (header != null) {
+      out.add(header);
+      out.add(const SizedBox(height: 6));
+    }
+    final party = _partyBlock();
+    if (party != null) {
+      out.add(party);
+      out.add(const SizedBox(height: 6));
+    }
+    final meta = _meta();
+    if (meta != null) {
+      out.add(meta);
+      out.add(const SizedBox(height: 6));
+    }
+    final table = _itemsTable();
+    if (table != null) {
+      out.add(table);
+      out.add(const SizedBox(height: 6));
+    }
+    final totals = _totals();
+    if (totals != null) {
+      out.add(totals);
+      out.add(const SizedBox(height: 6));
+    }
+    final footer = _footer();
+    if (footer != null) out.add(footer);
+
+    if (out.isEmpty) {
+      return [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Center(
+            child: Text(
+              'Everything is hidden',
+              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 8),
+            ),
+          ),
+        ),
+      ];
+    }
+    return out;
+  }
+
+  Widget? _header() {
+    if (!_showHeader) return null;
+    final title = settings.invoiceTitle.trim().isEmpty
+        ? BillSettings.defaultInvoiceTitle
+        : settings.invoiceTitle.trim().toUpperCase();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.only(bottom: 6),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFF9CA3AF))),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 26,
+            child: settings.showShopLogo && settings.shopLogoBase64 != null
+                ? _logo(settings.shopLogoBase64!)
+                : const SizedBox(),
+          ),
+          Expanded(
+            child: settings.showInvoiceTitle
+                ? Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : const SizedBox(),
+          ),
+          const SizedBox(width: 26),
+        ],
+      ),
+    );
+  }
+
+  Widget _logo(String base64Value) {
+    try {
+      return SizedBox(
+        height: 22,
+        child: Image.memory(base64Decode(base64Value), fit: BoxFit.contain),
+      );
+    } catch (_) {
+      return const SizedBox();
+    }
+  }
+
+  Widget? _partyBlock() {
+    final seller = _sellerLines();
+    final buyer = _buyerLines();
+    if (seller.isEmpty && buyer.isEmpty) return null;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (seller.isNotEmpty)
+          Expanded(child: _infoBox('Seller / From', seller)),
+        if (seller.isNotEmpty && buyer.isNotEmpty) const SizedBox(width: 6),
+        if (buyer.isNotEmpty)
+          Expanded(child: _infoBox('Buyer / Bill To', buyer)),
+      ],
+    );
+  }
+
+  Widget _infoBox(String title, List<String> lines) {
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF9CA3AF), width: 0.5),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 7.5),
+          ),
+          const SizedBox(height: 3),
+          ...lines.map((l) => Text(l)),
+        ],
+      ),
+    );
+  }
+
+  List<String> _sellerLines() => [
+    if (settings.showShopName) _PreviewSample.shopName,
+    if (settings.showShopAddress) _PreviewSample.shopAddress,
+    if (settings.showShopPhone) 'Phone: ${_PreviewSample.shopPhone}',
+    if (settings.showShopEmail) 'Email: ${_PreviewSample.shopEmail}',
+    if (settings.showShopGstin) 'GSTIN: ${_PreviewSample.shopGstin}',
+  ];
+
+  List<String> _buyerLines() => [
+    if (settings.showCustomerName) _PreviewSample.customerLegalName,
+    if (settings.showCustomerTradeName)
+      'Trade Name: ${_PreviewSample.customerTradeName}',
+    if (settings.showCustomerLegalName)
+      'Legal Name: ${_PreviewSample.customerLegalName}',
+    if (settings.showCustomerName) 'Contact: ${_PreviewSample.customerName}',
+    if (settings.showCustomerGstin) 'GSTIN: ${_PreviewSample.customerGstin}',
+    if (settings.showCustomerPhone) 'Phone: ${_PreviewSample.customerPhone}',
+    if (settings.showCustomerAddress)
+      'Address: ${_PreviewSample.customerAddress}',
+    if (settings.showCustomerPlaceOfSupply)
+      'Place of Supply: ${_PreviewSample.placeOfSupply}',
+  ];
+
+  Widget? _meta() {
+    final cells = <List<String>>[
+      if (settings.showInvoiceNumber) ['INVOICE NO', _PreviewSample.invoiceNo],
+      if (settings.showInvoiceDate) ['DATE', _PreviewSample.invoiceDate],
+      if (settings.showInvoicePlaceOfSupply)
+        ['PLACE OF SUPPLY', _PreviewSample.placeOfSupply],
+      if (settings.showInvoiceSupplyType)
+        ['SUPPLY TYPE', _PreviewSample.supplyType],
+    ];
+    if (cells.isEmpty) return null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        border: Border.all(color: const Color(0xFF9CA3AF), width: 0.5),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Row(
+        children: [
+          for (final c in cells)
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    c[0],
+                    style: const TextStyle(
+                      fontSize: 5.5,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    c[1],
+                    style: const TextStyle(
+                      fontSize: 7,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget? _itemsTable() {
+    final showGst = settings.showGstBreakdown;
+    final cols = <_PreviewCol>[
+      if (settings.showItemSerialColumn)
+        const _PreviewCol('#', 0.4, TextAlign.center, _ColKind.serial),
+      if (settings.showItemNameColumn)
+        const _PreviewCol('Item', 2.4, TextAlign.left, _ColKind.data, 0),
+      if (settings.showHsnColumn)
+        const _PreviewCol('HSN', 0.8, TextAlign.right, _ColKind.data, 1),
+      if (settings.showQuantityColumn)
+        const _PreviewCol('Qty', 0.7, TextAlign.right, _ColKind.data, 2),
+      if (settings.showRateColumn)
+        const _PreviewCol('Rate', 0.9, TextAlign.right, _ColKind.data, 3),
+      if (showGst && settings.showGstPercentColumn)
+        const _PreviewCol('GST %', 0.7, TextAlign.right, _ColKind.data, 4),
+      if (showGst && settings.showGstAmountColumn)
+        const _PreviewCol('GST', 0.9, TextAlign.right, _ColKind.data, 5),
+      if (settings.showAmountColumn)
+        const _PreviewCol('Amount', 1.0, TextAlign.right, _ColKind.data, 6),
+    ];
+    if (cols.isEmpty) return null;
+
+    const border = BorderSide(color: Color(0xFF9CA3AF), width: 0.5);
+    Widget cell(String text, _PreviewCol col, {bool header = false}) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+        decoration: const BoxDecoration(
+          border: Border(right: border, bottom: border),
+        ),
+        child: Text(
+          text,
+          textAlign: col.align,
+          style: TextStyle(
+            fontSize: 6.5,
+            fontWeight: header ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      );
+    }
+
+    TableRow row(List<String>? item, int? serial) {
+      return TableRow(
+        decoration: item == null
+            ? const BoxDecoration(color: Color(0xFFE5E7EB))
+            : null,
+        children: [
+          for (final col in cols)
+            cell(
+              item == null
+                  ? col.label
+                  : col.kind == _ColKind.serial
+                  ? '$serial'
+                  : item[col.dataIndex],
+              col,
+              header: item == null,
+            ),
+        ],
+      );
+    }
+
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(left: border, top: border),
+      ),
+      child: Table(
+        columnWidths: {
+          for (var i = 0; i < cols.length; i++)
+            i: FlexColumnWidth(cols[i].flex),
+        },
+        children: [
+          row(null, null),
+          for (var i = 0; i < _PreviewSample.items.length; i++)
+            row(_PreviewSample.items[i], i + 1),
+        ],
+      ),
+    );
+  }
+
+  Widget? _totals() {
+    final showGst = settings.showGstBreakdown;
+    final rows = <List<dynamic>>[
+      if (settings.showSubtotal) ['Subtotal', _PreviewSample.subtotal, false],
+      if (settings.showDiscount)
+        ['Discount (5%)', _PreviewSample.discount, false],
+      if (showGst && settings.showTaxableAmount)
+        ['Taxable Amount', _PreviewSample.taxable, false],
+      if (showGst && settings.showCgstSgstIgst)
+        ['CGST', _PreviewSample.cgst, false],
+      if (showGst && settings.showCgstSgstIgst)
+        ['SGST', _PreviewSample.sgst, false],
+      if (showGst && settings.showGstTotal)
+        ['GST Total', _PreviewSample.gstTotal, false],
+      if (settings.showGrandTotal)
+        ['Grand total', _PreviewSample.grandTotal, true],
+    ];
+    if (rows.isEmpty) return null;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: SizedBox(
+        width: 150,
+        child: Column(
+          children: [
+            for (final r in rows)
+              _totalRow(r[0] as String, r[1] as String, r[2] as bool),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _totalRow(String label, String value, bool bold) {
+    final style = TextStyle(
+      fontSize: bold ? 8.5 : 7,
+      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+    );
+    return Column(
+      children: [
+        if (bold) const Divider(height: 6, color: Color(0xFFD1D5DB)),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: Row(
+            children: [
+              Expanded(child: Text(label, style: style)),
+              Text('Rs. $value', style: style),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget? _footer() {
+    final hasSignature = settings.showDigitalSignature &&
+        settings.digitalSignatureBase64 != null;
+    final footerText =
+        settings.showFooterText ? settings.footerText.trim() : '';
+    if (footerText.isEmpty && !hasSignature) return null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 8, color: Color(0xFF9CA3AF)),
+        if (footerText.isNotEmpty)
+          Text(
+            footerText,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 7.5),
+          ),
+        if (hasSignature) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 22,
+                  child: _logo(settings.digitalSignatureBase64!),
+                ),
+                Container(
+                  width: 70,
+                  height: 0.5,
+                  color: const Color(0xFF6B7280),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Authorised signature',
+                  style: TextStyle(fontSize: 6),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+enum _ColKind { serial, data }
+
+class _PreviewCol {
+  final String label;
+  final double flex;
+  final TextAlign align;
+  final _ColKind kind;
+  final int dataIndex;
+
+  const _PreviewCol(this.label, this.flex, this.align, this.kind,
+      [this.dataIndex = 0]);
 }

@@ -104,9 +104,16 @@ mixin DatabaseSync {
     if (rows.isEmpty) return;
     final db = await database;
     await db.transaction((txn) async {
+      final activeShopId = await _activeShopId(txn);
       for (final row in rows) {
         final localMap = await _fromCloudMap(txn, table, row);
         if (localMap == null) continue;
+        // Defense-in-depth tenant isolation: never write a row that belongs to
+        // a different shop into the local database. The pull query already
+        // filters by shop_id, but a server-side RLS gap or a shared cloud
+        // project must not be able to leak another shop's data onto this
+        // device (and from there back up on the next push).
+        if (!_belongsToActiveShop(table, localMap, activeShopId)) continue;
         if (table == 'app_settings') {
           await _upsertAppSetting(txn, localMap);
           continue;
@@ -119,6 +126,19 @@ mixin DatabaseSync {
         await rebuildAllProductQuantityCaches(txn);
       }
     });
+  }
+
+  /// True when [map] either has no tenant column or its `shop_id` matches the
+  /// active shop. Rows for any other shop are rejected outright.
+  bool _belongsToActiveShop(
+    String table,
+    Map<String, dynamic> map,
+    String activeShopId,
+  ) {
+    if (!map.containsKey('shop_id')) return true;
+    final rowShopId = map['shop_id']?.toString();
+    if (rowShopId == null || rowShopId.isEmpty) return false;
+    return rowShopId == activeShopId;
   }
 
   Future<Map<String, dynamic>> _toCloudMap(
@@ -263,18 +283,7 @@ mixin DatabaseSync {
         await executor.insert(table, map..remove('id'));
       } on DatabaseException catch (e) {
         if (e.isUniqueConstraintError()) {
-          // A local row with a different UUID but same (shop_id, name) exists.
-          // Merge: update the existing local row to adopt the cloud UUID + data.
-          final shopId = map['shop_id']?.toString();
-          final name = map['name']?.toString();
-          if (shopId != null && name != null) {
-            await executor.update(
-              table,
-              map..remove('id'),
-              where: 'shop_id = ? AND name = ? COLLATE NOCASE',
-              whereArgs: [shopId, name],
-            );
-          }
+          await _mergeOnUniqueConflict(executor, table, map);
         } else {
           rethrow;
         }
@@ -289,6 +298,109 @@ mixin DatabaseSync {
       map..remove('id'),
       where: 'id = ?',
       whereArgs: [existing.single['id']],
+    );
+  }
+
+  /// Insert failed because a cloud row's UUID is new locally but collides with
+  /// an existing local row on some other unique constraint. We merge ONLY when
+  /// we can unambiguously identify the single live local row that represents the
+  /// same entity, and only when the cloud copy is newer. Otherwise we rethrow
+  /// rather than risk overwriting an unrelated record.
+  Future<void> _mergeOnUniqueConflict(
+    DatabaseExecutor executor,
+    String table,
+    Map<String, dynamic> map,
+  ) async {
+    final shopId = map['shop_id']?.toString();
+    if (shopId == null || shopId.isEmpty) return;
+
+    // bill_settings is unique per shop (partial index on shop_id where not
+    // deleted), so the colliding row is the shop's single live settings row.
+    if (table == 'bill_settings') {
+      await _mergeMatchingRow(
+        executor,
+        table,
+        map,
+        where: 'shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [shopId],
+      );
+      return;
+    }
+
+    // categories and units have a live-row unique index on (shop_id, name)
+    // (idx_categories_shop_name / idx_units_shop_name), so a name collision
+    // identifies the same entity. suppliers/products are deliberately excluded:
+    // suppliers have no business unique key (name index is non-unique) and
+    // products collide on product_code/barcode, not name.
+    const nameMergeTables = {'categories', 'units'};
+    if (nameMergeTables.contains(table)) {
+      final name = map['name']?.toString();
+      if (name == null) return;
+      await _mergeMatchingRow(
+        executor,
+        table,
+        map,
+        where: 'shop_id = ? AND name = ? COLLATE NOCASE AND deleted_at IS NULL',
+        whereArgs: [shopId, name],
+      );
+      return;
+    }
+
+    // customers have a live-row unique index on (shop_id, phone)
+    // (idx_customers_shop_phone) — that, not name, is what an insert collides on.
+    if (table == 'customers') {
+      final phone = map['phone']?.toString();
+      if (phone == null || phone.trim().isEmpty) {
+        throw StateError(
+          'Unresolvable unique conflict importing customers without phone '
+          '(uuid=${map['uuid']})',
+        );
+      }
+      await _mergeMatchingRow(
+        executor,
+        table,
+        map,
+        where: 'shop_id = ? AND phone = ? AND deleted_at IS NULL',
+        whereArgs: [shopId, phone],
+      );
+      return;
+    }
+
+    // Unknown unique conflict (e.g. product barcode/code, supplier with no
+    // business key): no safe merge key, so surface it instead of silently
+    // clobbering the wrong row.
+    throw StateError(
+      'Unresolvable unique conflict importing $table (uuid=${map['uuid']})',
+    );
+  }
+
+  /// Update the single live local row identified by [where]/[whereArgs] to adopt
+  /// the cloud row's UUID and data — but only if it is the only match and the
+  /// cloud copy is newer than the local one.
+  Future<void> _mergeMatchingRow(
+    DatabaseExecutor executor,
+    String table,
+    Map<String, dynamic> map, {
+    required String where,
+    required List<Object?> whereArgs,
+  }) async {
+    final matches = await executor.query(
+      table,
+      columns: ['id', 'updated_at'],
+      where: where,
+      whereArgs: whereArgs,
+      limit: 2,
+    );
+    // Ambiguous (more than one candidate) or none: do not guess.
+    if (matches.length != 1) return;
+    final localUpdatedAt = matches.single['updated_at']?.toString();
+    final cloudUpdatedAt = map['updated_at']?.toString();
+    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
+    await executor.update(
+      table,
+      map..remove('id'),
+      where: 'id = ?',
+      whereArgs: [matches.single['id']],
     );
   }
 

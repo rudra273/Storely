@@ -17,6 +17,7 @@ import '../services/app_settings_service.dart';
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
+import 'customer_profile_sheet.dart';
 
 part 'store/store_panels.dart';
 part 'store/cloud_setup_sheet.dart';
@@ -259,10 +260,23 @@ class _StoreScreenState extends State<StoreScreen> {
               context: ctx,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
-              builder: (_) => _CustomerProfileSheet(customer: current),
+              builder: (_) => CustomerProfileSheet(customer: current),
             );
             if (result == null) return;
-            await DatabaseHelper.instance.saveCustomerProfile(result);
+            try {
+              await DatabaseHelper.instance.saveCustomerProfile(result);
+            } on ArgumentError catch (e) {
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    e.message?.toString() ??
+                        'A customer with this phone already exists',
+                  ),
+                ),
+              );
+              return;
+            }
             await refreshSheet();
             await _loadStoreData();
           }

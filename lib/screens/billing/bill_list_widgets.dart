@@ -1,37 +1,5 @@
 part of '../bills_screen.dart';
 
-class _SearchBar extends StatelessWidget {
-  final TextEditingController controller;
-  final String query;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  const _SearchBar({
-    required this.controller,
-    required this.query,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        hintText: 'Search by name, bill # or date...',
-        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-        suffixIcon: query.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.clear_rounded, size: 18),
-                onPressed: onClear,
-              )
-            : null,
-      ),
-    );
-  }
-}
-
 // ── Unpaid summary (collapsible) ──────────────────────────────────────────────
 
 class _UnpaidSummary extends StatelessWidget {
@@ -157,6 +125,193 @@ class _UnpaidSummary extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Active / Cancelled filter ─────────────────────────────────────────────────
+
+class _BillFilterTabs extends StatelessWidget {
+  final bool showCancelled;
+  final int activeCount;
+  final int cancelledCount;
+  final ValueChanged<bool> onChanged;
+
+  const _BillFilterTabs({
+    required this.showCancelled,
+    required this.activeCount,
+    required this.cancelledCount,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: AppRadius.mdRadius,
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _FilterChip(
+              label: 'Active',
+              count: activeCount,
+              selected: !showCancelled,
+              onTap: () => onChanged(false),
+            ),
+          ),
+          Expanded(
+            child: _FilterChip(
+              label: 'Cancelled',
+              count: cancelledCount,
+              selected: showCancelled,
+              onTap: () => onChanged(true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.surfaceOf(context)
+              : Colors.transparent,
+          borderRadius: AppRadius.smRadius,
+          border: selected
+              ? Border.all(color: AppColors.borderOf(context))
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '$label ($count)',
+          style: AppText.body.copyWith(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? AppColors.inkOf(context)
+                : AppColors.inkMutedOf(context),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Cancelled bill card ───────────────────────────────────────────────────────
+
+class _CancelledBillCard extends StatelessWidget {
+  final Bill bill;
+  final VoidCallback onDuplicate;
+
+  const _CancelledBillCard({required this.bill, required this.onDuplicate});
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelledAt = bill.cancelledAt ?? bill.updatedAt;
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const LeadingIconChip(
+                icon: Icons.block_rounded,
+                color: AppColors.inkMuted,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      bill.customerName.isEmpty
+                          ? 'Walk-in'
+                          : bill.customerName,
+                      style: AppText.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_billDisplayId(bill)} · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
+                      style: AppText.caption,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const StatusPill(
+                    label: 'Cancelled',
+                    variant: PillVariant.neutral,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '₹${bill.totalAmount.toStringAsFixed(2)}',
+                    style: AppText.subtitle.copyWith(
+                      fontSize: 14,
+                      color: AppColors.inkMuted,
+                      decoration: TextDecoration.lineThrough,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.sm),
+          _BillMetaRow(
+            icon: Icons.event_busy_outlined,
+            text:
+                'Cancelled ${DateFormat('dd MMM yyyy, hh:mm a').format(cancelledAt)}',
+          ),
+          if (bill.cancelReason != null && bill.cancelReason!.isNotEmpty)
+            _BillMetaRow(
+              icon: Icons.notes_outlined,
+              text: 'Reason: ${bill.cancelReason}',
+            ),
+          const SizedBox(height: AppSpacing.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _ActionButton(
+              onPressed: onDuplicate,
+              icon: Icons.copy_rounded,
+              label: 'Duplicate as New',
+              color: AppColors.brandOf(context),
+            ),
+          ),
+        ],
       ),
     );
   }

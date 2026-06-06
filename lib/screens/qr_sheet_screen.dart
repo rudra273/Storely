@@ -16,22 +16,60 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
   int _columns = 3;
   int _rows = 8;
   String _codeType = PdfGenerator.codeTypeQr;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Product> get _filtered {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return widget.products;
+    return widget.products.where((product) {
+      return product.name.toLowerCase().contains(query) ||
+          (product.productCode?.toLowerCase().contains(query) ?? false) ||
+          (product.barcode?.toLowerCase().contains(query) ?? false);
+    }).toList();
+  }
 
   int get _itemsPerPage => _columns * _rows;
-  int get _pageCount => PdfGenerator.pageCount(
-    widget.products.length,
-    columns: _columns,
-    rows: _rows,
-  );
+  int get _pageCount =>
+      PdfGenerator.pageCount(_filtered.length, columns: _columns, rows: _rows);
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final products = _filtered;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Product Label Sheet')),
       body: Column(
         children: [
+          // ── Search ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Search by product name, code or barcode',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+          ),
           // ── Layout configuration card ──
           Container(
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -74,7 +112,7 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '$_pageCount page${_pageCount != 1 ? 's' : ''} · ${widget.products.length} items',
+                        '$_pageCount page${_pageCount != 1 ? 's' : ''} · ${products.length} items',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -168,41 +206,62 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
           ),
           // ── PDF Preview ──
           Expanded(
-            child: PdfPreview(
-              key: ValueKey('${_columns}_${_rows}_$_codeType'),
-              build: (format) => PdfGenerator.generate(
-                widget.products,
-                columns: _columns,
-                rows: _rows,
-                codeType: _codeType,
-              ),
-              allowPrinting: false,
-              allowSharing: true,
-              canChangePageFormat: false,
-              canChangeOrientation: false,
-              canDebug: false,
-              pdfFileName: _codeType == PdfGenerator.codeTypeBarcode
-                  ? 'storely_barcodes.pdf'
-                  : 'storely_qr_codes.pdf',
-              loadingWidget: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: colorScheme.primary),
-                    const SizedBox(height: 16),
-                    Text(
-                      _codeType == PdfGenerator.codeTypeBarcode
-                          ? 'Generating barcodes...'
-                          : 'Generating QR codes...',
-                      style: TextStyle(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 14,
+            child: products.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.search_off_rounded,
+                          size: 40,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No products match "${_query.trim()}"',
+                          style: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : PdfPreview(
+                    key: ValueKey('${_columns}_${_rows}_${_codeType}_$_query'),
+                    build: (format) => PdfGenerator.generate(
+                      products,
+                      columns: _columns,
+                      rows: _rows,
+                      codeType: _codeType,
+                    ),
+                    allowPrinting: false,
+                    allowSharing: true,
+                    canChangePageFormat: false,
+                    canChangeOrientation: false,
+                    canDebug: false,
+                    pdfFileName: _codeType == PdfGenerator.codeTypeBarcode
+                        ? 'storely_barcodes.pdf'
+                        : 'storely_qr_codes.pdf',
+                    loadingWidget: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: colorScheme.primary),
+                          const SizedBox(height: 16),
+                          Text(
+                            _codeType == PdfGenerator.codeTypeBarcode
+                                ? 'Generating barcodes...'
+                                : 'Generating QR codes...',
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  ),
           ),
         ],
       ),

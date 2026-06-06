@@ -96,7 +96,19 @@ String _dateOnly(DateTime value) {
   return local.toIso8601String().substring(0, 10);
 }
 
-Future<String> _activeShopId(DatabaseExecutor executor) async {
+/// Resolves the active shop UUID, migrating a legacy `'local-shop'` row if
+/// needed.
+///
+/// [inImplicitTransaction] must be true when called from `onCreate`/`onUpgrade`
+/// (or any other context that already holds sqflite's implicit transaction on a
+/// `Database` handle). In that case the legacy migration must NOT open its own
+/// transaction — sqflite forbids nesting one on a mid-migration `Database` and
+/// doing so throws. The surrounding migration is already atomic, so skipping the
+/// extra wrapper is safe.
+Future<String> _activeShopId(
+  DatabaseExecutor executor, {
+  bool inImplicitTransaction = false,
+}) async {
   final rows = await executor.query(
     'shops',
     columns: ['id', 'uuid'],
@@ -108,7 +120,11 @@ Future<String> _activeShopId(DatabaseExecutor executor) async {
     final uuid = rows.first['uuid']?.toString();
     if (uuid != null && uuid.isNotEmpty && uuid != _legacyShopId) return uuid;
     if (rows.first['id'] != null) {
-      return _migrateLegacyShopId(executor, rows.first['id'] as int);
+      return _migrateLegacyShopId(
+        executor,
+        rows.first['id'] as int,
+        inImplicitTransaction: inImplicitTransaction,
+      );
     }
   }
   return _createLocalShop(executor);
@@ -128,10 +144,23 @@ Future<String> _createLocalShop(DatabaseExecutor executor) async {
 
 Future<String> _migrateLegacyShopId(
   DatabaseExecutor executor,
-  int shopRowId,
-) async {
+  int shopRowId, {
+  bool inImplicitTransaction = false,
+}) async {
   final uuid = _newUuid();
-  await _replaceShopId(executor, _legacyShopId, uuid, shopRowId: shopRowId);
+  // Rewriting shop_id across every table must be atomic — a crash mid-loop
+  // would partition the user's data between the old and new shop_id. When we
+  // hold a top-level Database handle, run inside a fresh transaction; when
+  // we're already inside one (a Txn, or onCreate/onUpgrade's implicit
+  // transaction on a Database handle), it is atomic by definition and opening
+  // a nested transaction would throw.
+  if (executor is Database && !inImplicitTransaction) {
+    await executor.transaction((txn) async {
+      await _replaceShopId(txn, _legacyShopId, uuid, shopRowId: shopRowId);
+    });
+  } else {
+    await _replaceShopId(executor, _legacyShopId, uuid, shopRowId: shopRowId);
+  }
   return uuid;
 }
 

@@ -282,6 +282,7 @@ class _ScanScreenState extends State<ScanScreen> {
     required double discountPercent,
     required double paidAmount,
     required String paymentMethod,
+    String? transactionReference,
   }) async {
     if (_items.isEmpty) return null;
     if (_isSavingBill) return null;
@@ -344,6 +345,7 @@ class _ScanScreenState extends State<ScanScreen> {
       isPaid: received >= total,
       paymentMethod: paymentMethod,
       paidAmount: received,
+      transactionReference: transactionReference,
       duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
     );
 
@@ -435,6 +437,7 @@ class _ScanScreenState extends State<ScanScreen> {
         discountPercent: draft.discountPercent,
         paidAmount: draft.paidAmount,
         paymentMethod: draft.paymentMethod,
+        transactionReference: draft.transactionReference,
       );
       if (billId == null || !mounted) return;
       await _showBillCreatedDialog(

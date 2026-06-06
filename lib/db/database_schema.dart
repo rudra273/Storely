@@ -16,7 +16,12 @@ mixin DatabaseSchema {
   }
 
   Future<void> _createDB(Database db, int version) async {
+    // Fresh database: build the current schema directly. No backfill is needed
+    // because there is no legacy data to repair. Mark one-shot migrations as
+    // already satisfied so they never run for a brand-new install.
     await _createCleanSchema(db);
+    await _seedBaseData(db);
+    await _markMigrationDone(db, _v16BillingBackfillKey);
   }
 
   Future<void> _configureDB(Database db) async {
@@ -24,15 +29,66 @@ mixin DatabaseSchema {
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    await _ensureSchema(db);
+    // Real upgrade path for existing installs. Ensure additive schema, then run
+    // one-shot data migrations (each gated by its own marker so it runs once).
+    await _createCleanSchema(db);
+    await _ensureV16Columns(db);
+    await _seedBaseData(db);
+    await _runOneShotMigrations(db);
   }
 
+  /// Lightweight, idempotent schema check run on every open AFTER create/upgrade.
+  ///
+  /// This is defensive only — it guarantees additive tables/columns exist even
+  /// if a previous version's onUpgrade was interrupted. It MUST NOT run data
+  /// backfills (those are one-shot and live in [_runOneShotMigrations]); doing
+  /// so on every launch is the "migration leak" this method deliberately avoids.
   Future<void> _ensureSchema(Database db) async {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
-    await _backfillV16Billing(db);
+    await _runOneShotMigrations(db);
   }
 
+  // ---------------------------------------------------------------------------
+  // One-shot data migrations
+  //
+  // Each migration records a marker in cloud_sync_state once it has run, so it
+  // executes exactly once per database regardless of how many times the app
+  // opens or how the schema version was (mis)tracked by older builds.
+  // ---------------------------------------------------------------------------
+
+  static const _migrationMarkerPrefix = 'migration_done:';
+  static const _v16BillingBackfillKey = 'v16_billing_backfill';
+
+  Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
+    if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
+      await _backfillV16Billing(executor);
+      await _markMigrationDone(executor, _v16BillingBackfillKey);
+    }
+  }
+
+  Future<bool> _isMigrationDone(DatabaseExecutor executor, String key) async {
+    final rows = await executor.query(
+      'cloud_sync_state',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['$_migrationMarkerPrefix$key'],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> _markMigrationDone(DatabaseExecutor executor, String key) async {
+    await executor.insert('cloud_sync_state', {
+      'key': '$_migrationMarkerPrefix$key',
+      'value': _nowIso(),
+      'updated_at': _nowIso(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Pure DDL (CREATE TABLE/INDEX IF NOT EXISTS). Idempotent and safe to run on
+  /// every open. Does NOT seed data or create the local shop — that lives in
+  /// [_seedBaseData] so it is not repeated needlessly on each launch.
   Future<void> _createCleanSchema(DatabaseExecutor executor) async {
     await _createShopTables(executor);
     await _createSettingsTable(executor);
@@ -45,7 +101,16 @@ mixin DatabaseSchema {
     await _createPaymentTables(executor);
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
-    await _activeShopId(executor);
+  }
+
+  /// Seed the local shop and preset reference data. Guarded so it is safe to
+  /// re-run, but only invoked on create/upgrade rather than every open.
+  ///
+  /// Always runs inside sqflite's implicit migration transaction (or the
+  /// every-open [_ensureSchema] path), so any legacy shop-id migration triggered
+  /// here must not open a nested transaction — see [_activeShopId].
+  Future<void> _seedBaseData(DatabaseExecutor executor) async {
+    await _activeShopId(executor, inImplicitTransaction: true);
     await _seedPresetUnits(executor);
     await _seedDefaultInvoiceSeries(executor);
   }

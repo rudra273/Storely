@@ -31,7 +31,11 @@ class BillPdfGenerator {
         bold: pw.Font.ttf(boldFontData),
       ),
     );
-    final gstRegistered = shop?.gstRegistered ?? false;
+    // GST visibility is driven by the bill's own data, not the shop's current
+    // GST-registration flag. A bill that actually carries GST amounts should
+    // always be able to show them when the template toggles ask for it, so the
+    // shared PDF matches the live preview in Bill Settings.
+    final billHasGst = _billHasGst(bill);
 
     pdf.addPage(
       pw.MultiPage(
@@ -46,11 +50,11 @@ class BillPdfGenerator {
           pw.SizedBox(height: 16),
           _itemsTable(
             bill,
-            gstRegistered: gstRegistered,
+            gstRegistered: billHasGst,
             settings: billSettings,
           ),
           pw.SizedBox(height: 14),
-          _totals(bill, gstRegistered: gstRegistered, settings: billSettings),
+          _totals(bill, gstRegistered: billHasGst, settings: billSettings),
           pw.SizedBox(height: 20),
           _footer(billSettings),
         ],
@@ -111,6 +115,16 @@ class BillPdfGenerator {
         ],
       ),
     );
+  }
+
+  /// True when the bill carries any GST amounts. Used to decide whether GST
+  /// columns/rows can appear, independent of the shop's current registration
+  /// flag — so historical GST bills always render their tax breakdown.
+  static bool _billHasGst(Bill bill) {
+    if (bill.cgstAmount > 0 || bill.sgstAmount > 0 || bill.igstAmount > 0) {
+      return true;
+    }
+    return bill.items.any((item) => item.totalGst > 0);
   }
 
   static bool _showHeader(BillSettings settings) {
