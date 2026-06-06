@@ -40,6 +40,13 @@ mixin DatabaseSync {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// Removes a single cloud-sync-state key (e.g. the last-sync watermark). Only
+  /// touches the one key — migration markers in this table are left intact.
+  Future<void> clearCloudSyncState(String key) async {
+    final db = await database;
+    await db.delete('cloud_sync_state', where: 'key = ?', whereArgs: [key]);
+  }
+
   Future<List<Map<String, dynamic>>> cloudExportRows(
     String table, {
     String? updatedAfter,

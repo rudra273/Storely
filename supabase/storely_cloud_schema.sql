@@ -32,6 +32,25 @@ create table if not exists public.shop_members (
   primary key (shop_id, user_id)
 );
 
+-- Pending invites: an owner/admin invites a person by email; that person
+-- signs up themselves and is linked to the shop on first sync (zero-server).
+-- shop_id is text to match shops.uuid (app-generated string UUIDs); id is a
+-- real Postgres uuid because it is a new server-side primary key.
+create table if not exists public.shop_invites (
+  id          uuid primary key default gen_random_uuid(),
+  shop_id     text not null references public.shops(uuid) on delete cascade,
+  email       text not null,
+  role        text not null default 'staff' check (role in ('admin', 'staff')),
+  invited_by  uuid references auth.users(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  accepted_at timestamptz
+);
+
+-- One pending invite per (shop, email); matched case-insensitively.
+create unique index if not exists shop_invites_shop_email_uidx
+  on public.shop_invites (shop_id, lower(email))
+  where accepted_at is null;
+
 create table if not exists public.app_settings (
   key text not null,
   shop_id text not null references public.shops(uuid) on delete cascade,
@@ -398,9 +417,163 @@ as $$
   );
 $$;
 
+-- True when target_user_id is a member of some shop that the caller
+-- owns/admins. Used so admins can read their members' profile emails.
+create or replace function public.shares_admin_shop(target_user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.shop_members me
+    join public.shop_members them on them.shop_id = me.shop_id
+    where me.user_id = auth.uid()
+      and me.role in ('owner', 'admin')
+      and them.user_id = target_user_id
+  );
+$$;
+
+grant execute on function public.shares_admin_shop(uuid) to authenticated;
+
+-- Atomically register a new shop and make the caller its owner.
+-- Runs as definer so the shops insert + owner shop_members insert happen
+-- together regardless of RLS ordering. Fails if the shop already has members
+-- (so two owners can't claim the same shop_id). Safe because the caller can
+-- only ever make THEMSELVES the owner of a shop that has none.
+create or replace function public.create_shop(
+  target_shop_id text,
+  shop_name       text,
+  shop_phone      text default null,
+  shop_email      text default null,
+  shop_gstin      text default null,
+  shop_address    text default null,
+  shop_created_at text default null,
+  shop_updated_at text default null
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_id uuid := auth.uid();
+  now_iso   text := to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+begin
+  if caller_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  -- Caller already owns/belongs to this shop → nothing to do.
+  if exists (
+    select 1 from public.shop_members
+    where shop_id = target_shop_id and user_id = caller_id
+  ) then
+    return 'already_member';
+  end if;
+
+  -- Someone else already registered this shop id.
+  if exists (
+    select 1 from public.shop_members where shop_id = target_shop_id
+  ) then
+    raise exception 'Shop already registered by another owner';
+  end if;
+
+  insert into public.shops (uuid, name, phone, email, gstin, address, created_at, updated_at)
+  values (
+    target_shop_id,
+    coalesce(nullif(shop_name, ''), 'My Shop'),
+    shop_phone, shop_email, shop_gstin, shop_address,
+    coalesce(shop_created_at, now_iso),
+    coalesce(shop_updated_at, now_iso)
+  )
+  on conflict (uuid) do update
+    set name = excluded.name, updated_at = excluded.updated_at;
+
+  insert into public.shop_members (shop_id, user_id, role)
+  values (target_shop_id, caller_id, 'owner')
+  on conflict (shop_id, user_id) do nothing;
+
+  return 'created';
+end;
+$$;
+
+grant execute on function public.create_shop(text, text, text, text, text, text, text, text) to authenticated;
+
+-- An invited (not-yet-member) user redeems their invite. Runs as definer so a
+-- non-member can insert their own shop_members row, but ONLY when a pending
+-- invite for THIS shop matches the caller's own JWT email, and only with the
+-- exact invited role. Returns: 'joined' | 'already_member' | 'no_invite'.
+create or replace function public.accept_invite(target_shop_id text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  caller_id    uuid := auth.uid();
+  invite       record;
+begin
+  if caller_id is null or caller_email = '' then
+    raise exception 'Not authenticated';
+  end if;
+
+  if exists (
+    select 1 from public.shop_members
+    where shop_id = target_shop_id and user_id = caller_id
+  ) then
+    return 'already_member';
+  end if;
+
+  select * into invite
+  from public.shop_invites
+  where shop_id = target_shop_id
+    and lower(email) = caller_email
+    and accepted_at is null
+  limit 1;
+
+  if invite is null then
+    return 'no_invite';
+  end if;
+
+  insert into public.shop_members (shop_id, user_id, role)
+  values (target_shop_id, caller_id, invite.role)
+  on conflict (shop_id, user_id) do nothing;
+
+  update public.shop_invites
+  set accepted_at = now()
+  where id = invite.id;
+
+  return 'joined';
+end;
+$$;
+
+grant execute on function public.accept_invite(text) to authenticated;
+
+-- Lets a freshly-signed-up user discover WHICH shop invited them, before they
+-- have any local shop_id. Returns the earliest pending invite's shop id.
+create or replace function public.my_pending_invite_shop()
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select shop_id
+  from public.shop_invites
+  where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and accepted_at is null
+  order by created_at asc
+  limit 1;
+$$;
+
+grant execute on function public.my_pending_invite_shop() to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.shops enable row level security;
 alter table public.shop_members enable row level security;
+alter table public.shop_invites enable row level security;
 alter table public.app_settings enable row level security;
 alter table public.bill_settings enable row level security;
 alter table public.categories enable row level security;
@@ -425,6 +598,13 @@ create policy "Users can update own profile"
 on public.profiles for update
 using ((select auth.uid()) = id)
 with check ((select auth.uid()) = id);
+
+-- Owners/admins can read profiles (for the email) of members of any shop they
+-- administer, so the Members screen can show who each member is.
+drop policy if exists "Admins can view member profiles" on public.profiles;
+create policy "Admins can view member profiles"
+on public.profiles for select
+using (public.shares_admin_shop(id));
 
 -- ── Shops ──
 -- Any authenticated user can create a shop (first sync).
@@ -479,6 +659,29 @@ create policy "Owners and admins can manage shop members"
 on public.shop_members for all
 using (public.can_manage_shop_members(shop_id))
 with check (public.can_manage_shop_members(shop_id));
+
+-- ── Shop invites ──
+-- Owners/admins see & manage invites for their shop; an invited user can read
+-- invites addressed to their own email (to discover where they were invited).
+drop policy if exists "Admins can view shop invites" on public.shop_invites;
+create policy "Admins can view shop invites"
+on public.shop_invites for select
+using (public.is_shop_admin(shop_id));
+
+drop policy if exists "Invitee can view own invites" on public.shop_invites;
+create policy "Invitee can view own invites"
+on public.shop_invites for select
+using (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+
+drop policy if exists "Admins can create shop invites" on public.shop_invites;
+create policy "Admins can create shop invites"
+on public.shop_invites for insert
+with check (public.is_shop_admin(shop_id));
+
+drop policy if exists "Admins can revoke shop invites" on public.shop_invites;
+create policy "Admins can revoke shop invites"
+on public.shop_invites for delete
+using (public.is_shop_admin(shop_id));
 
 -- ── Admin-managed tables: members can read, only owner/admin can write ──
 drop policy if exists "Members can sync app_settings" on public.app_settings;

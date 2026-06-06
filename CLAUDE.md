@@ -83,6 +83,19 @@ do not introduce a state-management package or rearchitect unless I ask.
   `_balanceDue` / `_paymentStatus`); follow that pattern.
 - Treat the SQLite schema as migration-sensitive — schema changes need a proper
   migration path; don't break existing users' local data.
+- **Migrations from now on (REQUIRED).** The cloud schema now has real data, so
+  **never** drop-and-recreate it. For **every** DB schema change — cloud Postgres
+  *or* local SQLite — create a new timestamped migration file in
+  `supabase/migrations/` (e.g. `YYYYMMDD_short_description.sql`) containing only
+  the additive delta, written to be idempotent and safe to re-run:
+  `create table if not exists`, `alter table ... add column if not exists`,
+  `create or replace function`, `drop policy if exists` then `create policy`.
+  Never `drop table` / `drop column` on populated tables without a backfill plan.
+  `supabase/storely_cloud_schema.sql` is the fresh-install snapshot only — also
+  update it to match, but the migration file is the source of truth for applying
+  changes to existing projects. For local SQLite, keep mirroring the change in
+  the additive `_ensureV16Columns`/one-shot-migration pattern in
+  `lib/db/database_schema.dart` as well.
 - Before release work, verify on a real/older Android device, bump the version
   appropriately, and keep the build reproducible (`flutter build apk --release`).
 

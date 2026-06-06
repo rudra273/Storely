@@ -101,36 +101,52 @@ class _ProductsScreenState extends State<ProductsScreen> {
       }
     });
     final db = DatabaseHelper.instance;
-    await db.refreshAllProductSellingPrices();
-    final products = await db.getAllProducts();
-    final categories = await db.getCategories();
-    final suppliers = await db.getSuppliers();
-    final units = await db.getUnits();
-    final purchaseSummaries = await db.getProductPurchaseSummaries();
-    final purchaseDateProductIds = _selectedPurchaseDate == null
-        ? <int>{}
-        : await db.getProductIdsPurchasedOn(_selectedPurchaseDate!);
-    final lowStockThreshold = await db.getLowStockThreshold();
-    if (!mounted) return;
-    setState(() {
-      _allProducts = products;
-      _categories = categories;
-      _suppliers = suppliers;
-      _units = units;
-      _purchaseSummaries = purchaseSummaries;
-      _purchaseDateProductIds = purchaseDateProductIds;
-      _lowStockThreshold = lowStockThreshold;
-      _selectedCategories.removeWhere((value) => !_categories.contains(value));
-      _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
-      final productIds = products
-          .map((product) => product.id)
-          .whereType<int>()
-          .toSet();
-      _selectedProductIds.removeWhere((id) => !productIds.contains(id));
-      _isLoading = false;
-      _isUpdatingPrices = false;
-    });
-    _applyFilter();
+    try {
+      await db.refreshAllProductSellingPrices();
+      final products = await db.getAllProducts();
+      final categories = await db.getCategories();
+      final suppliers = await db.getSuppliers();
+      final units = await db.getUnits();
+      final purchaseSummaries = await db.getProductPurchaseSummaries();
+      final purchaseDateProductIds = _selectedPurchaseDate == null
+          ? <int>{}
+          : await db.getProductIdsPurchasedOn(_selectedPurchaseDate!);
+      final lowStockThreshold = await db.getLowStockThreshold();
+      if (!mounted) return;
+      setState(() {
+        _allProducts = products;
+        _categories = categories;
+        _suppliers = suppliers;
+        _units = units;
+        _purchaseSummaries = purchaseSummaries;
+        _purchaseDateProductIds = purchaseDateProductIds;
+        _lowStockThreshold = lowStockThreshold;
+        _selectedCategories.removeWhere((value) => !_categories.contains(value));
+        _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
+        final productIds = products
+            .map((product) => product.id)
+            .whereType<int>()
+            .toSet();
+        _selectedProductIds.removeWhere((id) => !productIds.contains(id));
+        _isLoading = false;
+        _isUpdatingPrices = false;
+      });
+      _applyFilter();
+    } catch (e) {
+      // Never leave the screen stuck on the loading spinner: clear the loading
+      // flags and surface the failure instead of swallowing it.
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isUpdatingPrices = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not load products: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _openRequestedPurchaseFlow() {
@@ -2343,7 +2359,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             : _buildContent(),
         floatingActionButton: Column(
           mainAxisSize: MainAxisSize.min,
-          children: _selectionMode
+          children: _selectionMode || !widget.isActiveMainTab
               ? []
               : [
                   TestKeys.tag(

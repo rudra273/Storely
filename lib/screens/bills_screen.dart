@@ -20,7 +20,17 @@ part 'billing/bill_formatters.dart';
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
 
-  const BillsScreen({super.key, this.refreshToken = 0});
+  /// Whether the Bills tab is the one currently shown in the [AppShell].
+  /// The shell keeps every tab mounted in an `IndexedStack`, so without this
+  /// the "New Bill" FAB would briefly animate in over other screens (e.g. when
+  /// returning from a pushed page) even though Bills isn't visible.
+  final bool isActiveMainTab;
+
+  const BillsScreen({
+    super.key,
+    this.refreshToken = 0,
+    this.isActiveMainTab = true,
+  });
   @override
   State<BillsScreen> createState() => _BillsScreenState();
 }
@@ -535,7 +545,7 @@ class _BillsScreenState extends State<BillsScreen> {
           ],
         ),
       ),
-      floatingActionButton: _isLoading || _bills.isEmpty
+      floatingActionButton: !widget.isActiveMainTab || _isLoading || _bills.isEmpty
           ? null
           : TestKeys.tag(
               TestKeys.createBillBtn,
