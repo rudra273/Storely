@@ -19,6 +19,7 @@ drop table if exists public.units cascade;
 drop table if exists public.categories cascade;
 drop table if exists public.bill_settings cascade;
 drop table if exists public.app_settings cascade;
+drop table if exists public.shop_invites cascade;
 drop table if exists public.shop_members cascade;
 drop table if exists public.shops cascade;
 drop table if exists public.profiles cascade;
@@ -29,5 +30,9 @@ drop function if exists public.is_shop_admin(text) cascade;
 drop function if exists public.get_shop_role(text) cascade;
 drop function if exists public.can_manage_shop_members(text) cascade;
 drop function if exists public.shop_has_no_members(text) cascade;
+drop function if exists public.shares_admin_shop(uuid) cascade;
+drop function if exists public.create_shop(text, text, text, text, text, text, text, text) cascade;
+drop function if exists public.accept_invite(text) cascade;
+drop function if exists public.my_pending_invite_shop() cascade;
 
 commit;

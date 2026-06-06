@@ -392,7 +392,12 @@ mixin DatabaseProducts {
   }
 
   Future<int> refreshAllProductSellingPrices() async {
-    await _requireAdminMutation();
+    // Runs implicitly on every product-screen load. It is an admin-only write,
+    // but staff (and a signed-in user whose role hasn't resolved yet) must still
+    // be able to VIEW products — they see the already-stored selling prices. So
+    // we skip the recompute for non-admins rather than throwing and stranding
+    // the screen's loading spinner.
+    if (!_canMutateAsAdmin()) return 0;
     final db = await database;
     final global = await getGlobalPricingSettings();
     final productMaps = await _queryProducts(db);

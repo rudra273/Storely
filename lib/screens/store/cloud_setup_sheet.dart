@@ -13,6 +13,7 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   late final TextEditingController _emailCtrl;
   late final TextEditingController _passwordCtrl;
   late bool _editingCloudSettings;
+  late CloudBackendMode _mode;
   bool _isBusy = false;
   String? _sheetError;
   String? _sheetMessage;
@@ -22,6 +23,7 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
     super.initState();
     final config = CloudService.instance.state.value.config;
     _editingCloudSettings = config == null;
+    _mode = CloudService.instance.state.value.mode;
     _urlCtrl = TextEditingController(text: config?.url ?? '');
     _anonKeyCtrl = TextEditingController(text: config?.anonKey ?? '');
     _emailCtrl = TextEditingController(
@@ -67,11 +69,16 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   }
 
   Future<void> _saveConfig() {
+    final action = _mode == CloudBackendMode.storelyHosted
+        ? CloudService.instance.useStorelyCloud
+        : () => CloudService.instance.saveConfig(
+            CloudConfig(url: _urlCtrl.text, anonKey: _anonKeyCtrl.text),
+          );
     return _run(
-      () => CloudService.instance.saveConfig(
-        CloudConfig(url: _urlCtrl.text, anonKey: _anonKeyCtrl.text),
-      ),
-      successMessage: 'Cloud settings saved',
+      action,
+      successMessage: _mode == CloudBackendMode.storelyHosted
+          ? 'Storely Cloud enabled'
+          : 'Cloud settings saved',
       onSuccess: () => setState(() => _editingCloudSettings = false),
     );
   }
@@ -92,6 +99,18 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
 
   Future<void> _signOut() =>
       _run(CloudService.instance.signOut, successMessage: 'Signed out');
+
+  Future<void> _registerShop() => _run(
+    CloudService.instance.registerShop,
+    successMessage: 'Shop registered. Syncing…',
+  );
+
+  Future<void> _chooseFirstSync(FirstSyncMode mode) => _run(
+    () => CloudService.instance.chooseFirstSync(mode),
+    successMessage: mode == FirstSyncMode.uploadExisting
+        ? 'Uploading your existing data…'
+        : 'Starting fresh — only new data will sync.',
+  );
 
   Future<void> _disableCloud() => _run(
     CloudService.instance.clearConfig,
@@ -165,30 +184,43 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
                         ),
                       ),
                     ] else ...[
-                      TextField(
-                        controller: _urlCtrl,
-                        keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
-                          labelText: 'Supabase URL',
-                          prefixIcon: Icon(Icons.link_rounded),
-                        ),
+                      _BackendModeSelector(
+                        mode: _mode,
+                        enabled: !_isBusy,
+                        onChanged: (m) => setState(() => _mode = m),
                       ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _anonKeyCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Supabase anon key',
-                          prefixIcon: Icon(Icons.key_outlined),
+                      const SizedBox(height: 12),
+                      if (_mode == CloudBackendMode.storelyHosted) ...[
+                        const _StorelyCloudBlurb(),
+                        const SizedBox(height: 10),
+                      ] else ...[
+                        TextField(
+                          controller: _urlCtrl,
+                          keyboardType: TextInputType.url,
+                          decoration: const InputDecoration(
+                            labelText: 'Supabase URL',
+                            prefixIcon: Icon(Icons.link_rounded),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _anonKeyCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Supabase anon key',
+                            prefixIcon: Icon(Icons.key_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
                           onPressed: _isBusy ? null : _saveConfig,
                           icon: const Icon(Icons.save_outlined),
                           label: Text(
-                            state.isConfigured
+                            _mode == CloudBackendMode.storelyHosted
+                                ? 'Enable Storely Cloud'
+                                : state.isConfigured
                                 ? 'Save Updated Settings'
                                 : 'Save Cloud Settings',
                           ),
@@ -247,6 +279,48 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
                         ),
                       ],
                     ),
+                    if (state.needsShopRegistration) ...[
+                      const SizedBox(height: 12),
+                      const _RegisterShopPrompt(),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _isBusy ? null : _registerShop,
+                          icon: const Icon(Icons.storefront_outlined),
+                          label: const Text('Register My Shop'),
+                        ),
+                      ),
+                    ],
+                    if (state.firstSyncChoicePending) ...[
+                      const SizedBox(height: 12),
+                      const _FirstSyncChoicePrompt(),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _isBusy
+                              ? null
+                              : () => _chooseFirstSync(
+                                  FirstSyncMode.uploadExisting,
+                                ),
+                          icon: const Icon(Icons.cloud_upload_outlined),
+                          label: const Text('Upload My Existing Data'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _isBusy
+                              ? null
+                              : () =>
+                                    _chooseFirstSync(FirstSyncMode.startFresh),
+                          icon: const Icon(Icons.fiber_new_outlined),
+                          label: const Text('Start Fresh (new data only)'),
+                        ),
+                      ),
+                    ],
                     if (state.isSignedIn) ...[
                       const SizedBox(height: 10),
                       SizedBox(
@@ -273,6 +347,214 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+class _BackendModeSelector extends StatelessWidget {
+  final CloudBackendMode mode;
+  final bool enabled;
+  final ValueChanged<CloudBackendMode> onChanged;
+
+  const _BackendModeSelector({
+    required this.mode,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Row(
+        children: [
+          _segment(
+            context,
+            label: 'Storely Cloud',
+            icon: Icons.cloud_outlined,
+            value: CloudBackendMode.storelyHosted,
+          ),
+          _segment(
+            context,
+            label: 'Own Supabase',
+            icon: Icons.dns_outlined,
+            value: CloudBackendMode.ownSupabase,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment(
+    BuildContext context, {
+    required String label,
+    required IconData icon,
+    required CloudBackendMode value,
+  }) {
+    final selected = mode == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: enabled && !selected ? () => onChanged(value) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.surfaceOf(context)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            border: selected
+                ? Border.all(color: AppColors.borderStrongOf(context))
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected
+                    ? AppColors.brandOf(context)
+                    : AppColors.inkMutedOf(context),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? AppColors.inkOf(context)
+                      : AppColors.inkMutedOf(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StorelyCloudBlurb extends StatelessWidget {
+  const _StorelyCloudBlurb();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.verified_user_outlined,
+            size: 18,
+            color: AppColors.brandOf(context),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No setup needed. Storely manages the cloud for you — just sign up '
+              'with your email and password below. Shop owners can invite staff '
+              'from the Members screen.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.inkMutedOf(context),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RegisterShopPrompt extends StatelessWidget {
+  const _RegisterShopPrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.amber),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "You're signed in but don't belong to a shop yet. Register this "
+              'device\'s shop to become its owner — then you can invite staff '
+              'from the Members screen.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.inkOf(context),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FirstSyncChoicePrompt extends StatelessWidget {
+  const _FirstSyncChoicePrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.softBgOf(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderOf(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.cloud_sync_outlined,
+            size: 18,
+            color: AppColors.brandOf(context),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'This device already has data. Upload it to the cloud now, or '
+              'start fresh and sync only data you add from now on.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.inkOf(context),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -52,6 +52,12 @@ class DatabaseHelper
   VoidCallback? onDatabaseChanged;
   Future<void> Function()? assertAdminMutation;
 
+  /// Read-only check used to skip (rather than throw on) admin-only work that
+  /// runs implicitly on screen load — e.g. recomputing display prices. Returns
+  /// true when the current user may perform catalog/settings writes. Defaults to
+  /// true (local-only / no cloud guard installed).
+  bool Function()? isAdminMutationAllowed;
+
   Future<String> currentShopId() async {
     final db = await database;
     return _activeShopId(db);
@@ -74,6 +80,15 @@ void notifyDatabaseChanged() {
 Future<void> _requireAdminMutation() async {
   final guard = DatabaseHelper.instance.assertAdminMutation;
   if (guard != null) await guard();
+}
+
+/// True when the current user may perform admin-only catalog/settings writes.
+/// Used by implicit, load-time recomputes that must NOT crash for staff users
+/// (or for a signed-in user whose role hasn't resolved yet) — they simply skip
+/// the write instead of throwing the way [_requireAdminMutation] does.
+bool _canMutateAsAdmin() {
+  final check = DatabaseHelper.instance.isAdminMutationAllowed;
+  return check == null || check();
 }
 
 String? _normaliseName(String? value) {

@@ -21,6 +21,7 @@ import 'customer_profile_sheet.dart';
 
 part 'store/store_panels.dart';
 part 'store/cloud_setup_sheet.dart';
+part 'store/members_sheet.dart';
 part 'store/store_action_widgets.dart';
 part 'store/supplier_manager_sheet.dart';
 part 'store/pricing_settings_sheets.dart';
@@ -557,6 +558,15 @@ class _StoreScreenState extends State<StoreScreen> {
     await _loadStoreData();
   }
 
+  Future<void> _openMembers() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _MembersSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -682,7 +692,11 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Advanced'),
                   const SizedBox(height: AppSpacing.sm),
-                  _CloudSyncPanel(onSetup: _openCloudSetup, onSync: _syncCloud),
+                  _CloudSyncPanel(
+                    onSetup: _openCloudSetup,
+                    onSync: _syncCloud,
+                    onMembers: _openMembers,
+                  ),
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Legal & App Information'),
                   const SizedBox(height: AppSpacing.sm),

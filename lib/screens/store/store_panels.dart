@@ -14,8 +14,13 @@ class _SectionLabel extends StatelessWidget {
 class _CloudSyncPanel extends StatelessWidget {
   final VoidCallback onSetup;
   final Future<void> Function() onSync;
+  final VoidCallback onMembers;
 
-  const _CloudSyncPanel({required this.onSetup, required this.onSync});
+  const _CloudSyncPanel({
+    required this.onSetup,
+    required this.onSync,
+    required this.onMembers,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +106,21 @@ class _CloudSyncPanel extends StatelessWidget {
                   style: TextStyle(
                     color: AppColors.inkMutedOf(context),
                     fontSize: 12,
+                  ),
+                ),
+              ],
+              // Owners/admins of a registered cloud shop can manage members.
+              if (state.isConfigured &&
+                  state.isSignedIn &&
+                  state.membership == CloudMembership.member &&
+                  (state.shopRole == 'owner' || state.shopRole == 'admin')) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: onMembers,
+                    icon: const Icon(Icons.group_outlined, size: 18),
+                    label: const Text('Manage Members'),
                   ),
                 ),
               ],
