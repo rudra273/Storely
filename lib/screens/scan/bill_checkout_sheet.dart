@@ -28,6 +28,11 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _discountController = TextEditingController();
   final _paidAmountController = TextEditingController();
 
+  final _customerFieldLink = LayerLink();
+  final _customerFocusNode = FocusNode();
+  OverlayEntry? _suggestionOverlay;
+  List<Customer> _overlayMatches = const [];
+
   var _discountPercent = 0.0;
   var _billType = Bill.typeB2c;
   var _paymentStatus = Bill.statusUnpaid;
@@ -85,6 +90,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _stateCodeController.dispose();
     _discountController.dispose();
     _paidAmountController.dispose();
+    _removeSuggestionOverlay();
+    _customerFocusNode.dispose();
     super.dispose();
   }
 
@@ -112,6 +119,49 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
       if (customer.gstin != null) _billType = Bill.typeB2b;
       _hideCustomerSuggestions = true;
     });
+    _customerFocusNode.unfocus();
+  }
+
+  /// Keeps the floating suggestion overlay in sync with [matches]. Shows,
+  /// rebuilds, or tears down the [OverlayEntry] anchored under the name field.
+  void _syncSuggestionOverlay(List<Customer> matches) {
+    _overlayMatches = matches;
+    if (matches.isEmpty) {
+      _removeSuggestionOverlay();
+      return;
+    }
+    if (_suggestionOverlay == null) {
+      _suggestionOverlay = _buildSuggestionOverlay();
+      Overlay.of(context).insert(_suggestionOverlay!);
+    } else {
+      _suggestionOverlay!.markNeedsBuild();
+    }
+  }
+
+  OverlayEntry _buildSuggestionOverlay() {
+    return OverlayEntry(
+      builder: (context) {
+        final width = _customerFieldLink.leaderSize?.width ?? 0;
+        final height = _customerFieldLink.leaderSize?.height ?? 0;
+        return Positioned(
+          width: width,
+          child: CompositedTransformFollower(
+            link: _customerFieldLink,
+            showWhenUnlinked: false,
+            offset: Offset(0, height + 6),
+            child: _CustomerSuggestionList(
+              customers: _overlayMatches,
+              onSelected: _selectCustomer,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _removeSuggestionOverlay() {
+    _suggestionOverlay?.remove();
+    _suggestionOverlay = null;
   }
 
   void _submit(double total, double paidAmount) {
@@ -191,6 +241,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
             _customerController.text,
             _phoneController.text,
           );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncSuggestionOverlay(customerMatches);
+    });
 
     return PopScope(
       canPop: true,
@@ -217,14 +270,18 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 ],
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _customerController,
-                textCapitalization: TextCapitalization.words,
-                onChanged: (_) =>
-                    setState(() => _hideCustomerSuggestions = false),
-                decoration: const InputDecoration(
-                  labelText: 'Customer name',
-                  prefixIcon: Icon(Icons.person_outline_rounded),
+              CompositedTransformTarget(
+                link: _customerFieldLink,
+                child: TextField(
+                  controller: _customerController,
+                  focusNode: _customerFocusNode,
+                  textCapitalization: TextCapitalization.words,
+                  onChanged: (_) =>
+                      setState(() => _hideCustomerSuggestions = false),
+                  decoration: const InputDecoration(
+                    labelText: 'Customer name',
+                    prefixIcon: Icon(Icons.person_outline_rounded),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -310,13 +367,6 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     labelText: 'Place of supply state code',
                     prefixIcon: Icon(Icons.map_outlined),
                   ),
-                ),
-              ],
-              if (customerMatches.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _CustomerSuggestionList(
-                  customers: customerMatches,
-                  onSelected: _selectCustomer,
                 ),
               ],
               const SizedBox(height: 12),

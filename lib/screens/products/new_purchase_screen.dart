@@ -1,5 +1,9 @@
 part of '../products_screen.dart';
 
+/// The action a New Purchase screen fires on open, chosen from the date/supplier
+/// sheet so the user lands straight in the add-product or import flow.
+enum _PurchaseInitialAction { none, manual, import }
+
 class _NewPurchaseScreen extends StatefulWidget {
   final DateTime purchaseDate;
   final String? supplier;
@@ -26,6 +30,10 @@ class _NewPurchaseScreen extends StatefulWidget {
   final Future<int> Function(List<_PurchaseDraft> drafts, DateTime purchaseDate)
   commitBatch;
 
+  /// Action to fire automatically when the screen first opens, so the user
+  /// goes straight from the date/supplier sheet into adding or importing.
+  final _PurchaseInitialAction initialAction;
+
   const _NewPurchaseScreen({
     required this.purchaseDate,
     required this.supplier,
@@ -34,6 +42,7 @@ class _NewPurchaseScreen extends StatefulWidget {
     required this.pickAndParseImport,
     required this.matchExisting,
     required this.commitBatch,
+    this.initialAction = _PurchaseInitialAction.none,
   });
 
   @override
@@ -46,6 +55,23 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
 
   Set<String> get _stagedNames =>
       _drafts.map((d) => d.name.toLowerCase()).toSet();
+
+  @override
+  void initState() {
+    super.initState();
+    switch (widget.initialAction) {
+      case _PurchaseInitialAction.manual:
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _addProduct();
+        });
+      case _PurchaseInitialAction.import:
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _import();
+        });
+      case _PurchaseInitialAction.none:
+        break;
+    }
+  }
 
   Future<void> _addProduct() async {
     final draft = await widget.addProduct(_stagedNames);
