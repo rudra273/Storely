@@ -30,6 +30,7 @@ class _BillsScreenState extends State<BillsScreen> {
   List<Bill> _cancelledBills = [];
   bool _showCancelled = false;
   bool _isLoading = true;
+  bool _searchOpen = false;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
 
@@ -124,12 +125,14 @@ class _BillsScreenState extends State<BillsScreen> {
     Bill bill,
     bool isPaid, {
     String? paymentMethod,
+    String? paymentReference,
   }) async {
     if (bill.id == null) return;
     await DatabaseHelper.instance.updateBillPaidStatus(
       bill.id!,
       isPaid,
       paymentMethod: paymentMethod,
+      paymentReference: paymentReference,
     );
     await _loadBills();
   }
@@ -139,6 +142,7 @@ class _BillsScreenState extends State<BillsScreen> {
     final amountCtrl = TextEditingController(
       text: bill.balanceDue.toStringAsFixed(2),
     );
+    final txnRefCtrl = TextEditingController();
     var method = 'cash';
     try {
       final amount = await showDialog<double>(
@@ -179,6 +183,17 @@ class _BillsScreenState extends State<BillsScreen> {
                   onSelectionChanged: (value) =>
                       setDialogState(() => method = value.first),
                 ),
+                if (method == 'online') ...[
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: txnRefCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Transaction ID (optional)',
+                      prefixIcon: Icon(Icons.receipt_long_outlined),
+                    ),
+                  ),
+                ],
               ],
             ),
             actions: [
@@ -206,10 +221,12 @@ class _BillsScreenState extends State<BillsScreen> {
         bill.id!,
         amount: amount,
         paymentMethod: method,
+        paymentReference: method == 'online' ? txnRefCtrl.text : null,
       );
       await _loadBills();
     } finally {
       amountCtrl.dispose();
+      txnRefCtrl.dispose();
     }
   }
 
@@ -232,6 +249,78 @@ class _BillsScreenState extends State<BillsScreen> {
       ),
     );
     await _loadBills();
+  }
+
+  Future<void> _editBillDetails(Bill bill) async {
+    if (bill.id == null) return;
+    final isB2b = bill.billType == Bill.typeB2b;
+    final nameCtrl = TextEditingController(
+      text: bill.customerName == 'Walk-in Customer' ? '' : bill.customerName,
+    );
+    final phoneCtrl = TextEditingController(text: bill.customerPhone ?? '');
+    final gstinCtrl = TextEditingController(text: bill.customerGstin ?? '');
+    final legalNameCtrl = TextEditingController(
+      text: bill.customerGstLegalName ?? '',
+    );
+    final tradeNameCtrl = TextEditingController(
+      text: bill.customerGstTradeName ?? '',
+    );
+    final addressCtrl = TextEditingController(
+      text: bill.customerAddressSnapshot ?? '',
+    );
+    final stateCodeCtrl = TextEditingController(
+      text: bill.placeOfSupplyStateCode ?? '',
+    );
+    try {
+      final saved = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => _EditBuyerDetailsSheet(
+          isB2b: isB2b,
+          nameCtrl: nameCtrl,
+          phoneCtrl: phoneCtrl,
+          gstinCtrl: gstinCtrl,
+          legalNameCtrl: legalNameCtrl,
+          tradeNameCtrl: tradeNameCtrl,
+          addressCtrl: addressCtrl,
+          stateCodeCtrl: stateCodeCtrl,
+        ),
+      );
+      if (saved != true) return;
+      await DatabaseHelper.instance.updateBillCustomerDetails(
+        bill.id!,
+        customerName: nameCtrl.text,
+        customerPhone: phoneCtrl.text,
+        customerGstin: gstinCtrl.text,
+        customerGstLegalName: legalNameCtrl.text,
+        customerGstTradeName: tradeNameCtrl.text,
+        customerAddressSnapshot: addressCtrl.text,
+        placeOfSupplyStateCode: stateCodeCtrl.text,
+        isB2b: isB2b,
+      );
+      await _loadBills();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Buyer details updated'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      gstinCtrl.dispose();
+      legalNameCtrl.dispose();
+      tradeNameCtrl.dispose();
+      addressCtrl.dispose();
+      stateCodeCtrl.dispose();
+    }
   }
 
   Future<void> _sendBillOnWhatsApp(Bill bill) async {
@@ -312,40 +401,91 @@ class _BillsScreenState extends State<BillsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('Bills'),
-        actions: const [
-          AppInfoAction(
-            title: 'Bills Help',
-            intro:
-                'Bills keep the sale record, payment status, and printable invoice together.',
-            sections: [
-              AppInfoSection(
-                title: 'Create bills',
-                points: [
-                  'Use New Bill for manual billing, or Scan & Bill from home for product labels.',
-                  'Until Generate Bill, the billing screen is an editable draft.',
-                  'Products added to a bill use price snapshots so old bills do not change when product prices change later.',
-                  'Bill settings in Store control invoice title, numbering, logo, signature, and visible fields.',
-                ],
-              ),
-              AppInfoSection(
-                title: 'After saving',
-                points: [
-                  'Final bills are locked for amount, GST, item, and customer snapshot corrections.',
-                  'For mistakes, cancel the old bill with a reason and duplicate it as a new bill.',
-                  'Unpaid and partial bills can be updated with Record Payment.',
-                  'Share PDF creates a printable invoice from the saved bill data.',
-                  'WhatsApp sharing uses the customer phone saved on the bill.',
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+    return PopScope(
+      canPop: !_searchOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_searchOpen) {
+          setState(() {
+            _searchOpen = false;
+            _searchCtrl.clear();
+            _searchQuery = '';
+          });
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(
+          title: _searchOpen
+              ? TestKeys.tag(
+                  TestKeys.billSearchField,
+                  TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    cursorColor: AppColors.amber,
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      hintText: 'Search bills...',
+                      hintStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 16,
+                      ),
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                    ),
+                    onChanged: (val) => setState(
+                      () => _searchQuery = val.trim().toLowerCase(),
+                    ),
+                  ),
+                  textField: true,
+                )
+              : const Text('Bills'),
+          actions: [
+            IconButton(
+              onPressed: () {
+                setState(() {
+                  _searchOpen = !_searchOpen;
+                  if (!_searchOpen) {
+                    _searchCtrl.clear();
+                    _searchQuery = '';
+                  }
+                });
+              },
+              icon: Icon(_searchOpen ? Icons.close : Icons.search),
+            ),
+            const AppInfoAction(
+              title: 'Bills Help',
+              intro:
+                  'Bills keep the sale record, payment status, and printable invoice together.',
+              sections: [
+                AppInfoSection(
+                  title: 'Create bills',
+                  points: [
+                    'Use New Bill for manual billing, or Scan & Bill from home for product labels.',
+                    'Until Generate Bill, the billing screen is an editable draft.',
+                    'Products added to a bill use price snapshots so old bills do not change when product prices change later.',
+                    'Bill settings in Store control invoice title, numbering, logo, signature, and visible fields.',
+                  ],
+                ),
+                AppInfoSection(
+                  title: 'After saving',
+                  points: [
+                    'Final bills are locked for amount, GST, item, and customer snapshot corrections.',
+                    'For mistakes, cancel the old bill with a reason and duplicate it as a new bill.',
+                    'Unpaid and partial bills can be updated with Record Payment.',
+                    'Share PDF creates a printable invoice from the saved bill data.',
+                    'WhatsApp sharing uses the customer phone saved on the bill.',
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+        body: RefreshIndicator(
         color: AppColors.amber,
         onRefresh: _loadBills,
         child: CustomScrollView(
@@ -369,22 +509,6 @@ class _BillsScreenState extends State<BillsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TestKeys.tag(
-                        TestKeys.billSearchField,
-                        _SearchBar(
-                          controller: _searchCtrl,
-                          query: _searchQuery,
-                          onChanged: (val) => setState(
-                            () => _searchQuery = val.trim().toLowerCase(),
-                          ),
-                          onClear: () {
-                            _searchCtrl.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        ),
-                        textField: true,
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
                       if (_cancelledBills.isNotEmpty) ...[
                         _BillFilterTabs(
                           showCancelled: _showCancelled,
@@ -422,6 +546,7 @@ class _BillsScreenState extends State<BillsScreen> {
               ),
               button: true,
             ),
+      ),
     );
   }
 
@@ -455,9 +580,13 @@ class _BillsScreenState extends State<BillsScreen> {
           _BillCard(
             bill: bill,
             onCancel: () => _cancelBill(bill),
-            onDuplicate: () => _duplicateBill(bill),
-            onStatusChanged: (isPaid, method) =>
-                _updateBillStatus(bill, isPaid, paymentMethod: method),
+            onEdit: () => _editBillDetails(bill),
+            onStatusChanged: (isPaid, method, reference) => _updateBillStatus(
+              bill,
+              isPaid,
+              paymentMethod: method,
+              paymentReference: reference,
+            ),
             onRecordPayment: () => _recordPayment(bill),
             onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
             onSharePdf: () => _shareBillPdf(bill),

@@ -3,16 +3,21 @@ part of '../bills_screen.dart';
 class _BillCard extends StatefulWidget {
   final Bill bill;
   final VoidCallback onCancel;
-  final VoidCallback onDuplicate;
+  final VoidCallback onEdit;
   final VoidCallback onSendWhatsApp;
   final VoidCallback onSharePdf;
-  final void Function(bool isPaid, String? paymentMethod) onStatusChanged;
+  final void Function(
+    bool isPaid,
+    String? paymentMethod,
+    String? paymentReference,
+  )
+  onStatusChanged;
   final VoidCallback onRecordPayment;
 
   const _BillCard({
     required this.bill,
     required this.onCancel,
-    required this.onDuplicate,
+    required this.onEdit,
     required this.onSendWhatsApp,
     required this.onSharePdf,
     required this.onStatusChanged,
@@ -29,28 +34,70 @@ class _BillCardState extends State<_BillCard> {
   Future<void> _togglePaidStatus() async {
     final bill = widget.bill;
     if (bill.isPaid) {
-      widget.onStatusChanged(false, null);
-    } else {
-      final method = await showDialog<String>(
+      widget.onStatusChanged(false, null, null);
+      return;
+    }
+    final method = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Payment Method'),
+        content: const Text('How was this bill paid?'),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'cash'),
+            icon: const Icon(Icons.payments_outlined),
+            label: const Text('Cash'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'online'),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            label: const Text('Online'),
+          ),
+        ],
+      ),
+    );
+    if (method == null) return;
+    String? reference;
+    if (method == 'online') {
+      if (!mounted) return;
+      reference = await _promptTransactionId();
+      if (!mounted) return;
+    }
+    widget.onStatusChanged(true, method, reference);
+  }
+
+  /// Prompts for an optional online transaction id. Returns the entered value
+  /// (may be empty/null); a dismissed dialog also yields null. The bill is still
+  /// marked paid either way — the id is optional.
+  Future<String?> _promptTransactionId() async {
+    final ctrl = TextEditingController();
+    try {
+      return await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Payment Method'),
-          content: const Text('How was this bill paid?'),
-          actions: [
-            TextButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'cash'),
-              icon: const Icon(Icons.payments_outlined),
-              label: const Text('Cash'),
+          title: const Text('Transaction ID'),
+          content: TextField(
+            controller: ctrl,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Transaction ID (optional)',
+              prefixIcon: Icon(Icons.receipt_long_outlined),
             ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'online'),
-              icon: const Icon(Icons.account_balance_wallet_outlined),
-              label: const Text('Online'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Skip'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Save'),
             ),
           ],
         ),
       );
-      if (method != null) widget.onStatusChanged(true, method);
+    } finally {
+      ctrl.dispose();
     }
   }
 
@@ -262,24 +309,32 @@ class _BillCardState extends State<_BillCard> {
                         value: '₹${bill.balanceDue.toStringAsFixed(2)}',
                       ),
                     ],
+                    if (bill.transactionReference != null) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      _AmountRow(
+                        label: 'Txn ID',
+                        value: bill.transactionReference!,
+                      ),
+                    ],
                     const SizedBox(height: AppSpacing.sm),
                     const Divider(height: 1),
                     const SizedBox(height: AppSpacing.xs),
                     Wrap(
                       children: [
-                        if (CloudService.instance.state.value.isAdmin)
+                        if (CloudService.instance.state.value.isAdmin) ...[
                           _ActionButton(
                             onPressed: widget.onCancel,
                             icon: Icons.block_rounded,
                             label: 'Cancel',
                             color: AppColors.error,
                           ),
-                        _ActionButton(
-                          onPressed: widget.onDuplicate,
-                          icon: Icons.copy_rounded,
-                          label: 'Duplicate',
-                          color: AppColors.brandOf(context),
-                        ),
+                          _ActionButton(
+                            onPressed: widget.onEdit,
+                            icon: Icons.edit_outlined,
+                            label: 'Edit',
+                            color: AppColors.brandOf(context),
+                          ),
+                        ],
                         _ActionButton(
                           onPressed: _togglePaidStatus,
                           icon: bill.isPaid

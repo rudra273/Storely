@@ -47,6 +47,11 @@ class Bill {
   final DateTime? deletedAt;
   final List<BillItem> items;
 
+  /// Transaction reference (e.g. UPI/online txn id) from the latest payment on
+  /// this bill. Loaded transiently from `bill_payments` for display — it is not
+  /// a `bills` column and is never written by [toMap].
+  final String? transactionReference;
+
   Bill({
     this.id,
     String? uuid,
@@ -87,7 +92,9 @@ class Bill {
     DateTime? updatedAt,
     this.deletedAt,
     this.items = const [],
+    String? transactionReference,
   }) : uuid = uuid ?? '',
+       transactionReference = _cleanOptional(transactionReference),
        billNumber = billNumber ?? '',
        customerGstin = _cleanGstin(customerGstin),
        customerGstLegalName = _cleanOptional(customerGstLegalName),
@@ -217,6 +224,9 @@ class Bill {
           ? null
           : DateTime.tryParse(map['deleted_at'] as String),
       items: items ?? [],
+      // Not a `bills` column; supplied transiently when bills are loaded with
+      // their latest payment reference joined in (see getAllBills).
+      transactionReference: map['transaction_reference'] as String?,
     );
   }
 }

@@ -1,37 +1,5 @@
 part of '../bills_screen.dart';
 
-class _SearchBar extends StatelessWidget {
-  final TextEditingController controller;
-  final String query;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  const _SearchBar({
-    required this.controller,
-    required this.query,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        hintText: 'Search by name, bill # or date...',
-        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-        suffixIcon: query.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.clear_rounded, size: 18),
-                onPressed: onClear,
-              )
-            : null,
-      ),
-    );
-  }
-}
-
 // ── Unpaid summary (collapsible) ──────────────────────────────────────────────
 
 class _UnpaidSummary extends StatelessWidget {

@@ -20,6 +20,7 @@ class _BillDraft {
   final double discountPercent;
   final double paidAmount;
   final String paymentMethod;
+  final String? transactionReference;
 
   const _BillDraft({
     required this.customerName,
@@ -33,5 +34,6 @@ class _BillDraft {
     required this.discountPercent,
     required this.paidAmount,
     required this.paymentMethod,
+    this.transactionReference,
   });
 }

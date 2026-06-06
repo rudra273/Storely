@@ -63,6 +63,7 @@ mixin DatabaseBills {
           'bill_uuid': billUuid,
           'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
           'payment_method': bill.paymentMethod,
+          'payment_reference': _normaliseName(bill.transactionReference),
           'received_at': bill.createdAt.toIso8601String(),
           'created_at': bill.createdAt.toIso8601String(),
           'updated_at': _nowIso(),
@@ -86,9 +87,13 @@ mixin DatabaseBills {
       billMaps,
       includeDeleted: false,
     );
+    final refByBillUuid = await _latestPaymentRefByBillUuid(db, billMaps);
     return [
       for (final map in billMaps)
-        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+        Bill.fromMap({
+          ...map,
+          'transaction_reference': refByBillUuid[map['uuid']],
+        }, itemsByBillId[map['id']] ?? const []),
     ];
   }
 
@@ -108,10 +113,52 @@ mixin DatabaseBills {
       billMaps,
       includeDeleted: true,
     );
+    final refByBillUuid = await _latestPaymentRefByBillUuid(db, billMaps);
     return [
       for (final map in billMaps)
-        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+        Bill.fromMap({
+          ...map,
+          'transaction_reference': refByBillUuid[map['uuid']],
+        }, itemsByBillId[map['id']] ?? const []),
     ];
+  }
+
+  /// Loads the most recent non-empty `payment_reference` for each bill in
+  /// [billMaps], keyed by bill uuid. Batched (chunked IN-list) to avoid N+1
+  /// queries, mirroring [_itemsByBillId].
+  Future<Map<String, String>> _latestPaymentRefByBillUuid(
+    DatabaseExecutor executor,
+    List<Map<String, Object?>> billMaps,
+  ) async {
+    final uuids = [
+      for (final map in billMaps)
+        if ((map['uuid'] as String?)?.isNotEmpty == true) map['uuid'] as String,
+    ];
+    if (uuids.isEmpty) return const {};
+    final result = <String, String>{};
+    const chunkSize = 500;
+    for (var start = 0; start < uuids.length; start += chunkSize) {
+      final chunk = uuids.sublist(
+        start,
+        start + chunkSize > uuids.length ? uuids.length : start + chunkSize,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'bill_payments',
+        columns: ['bill_uuid', 'payment_reference'],
+        where:
+            'bill_uuid IN ($placeholders) AND deleted_at IS NULL '
+            "AND payment_reference IS NOT NULL AND payment_reference != ''",
+        whereArgs: chunk,
+        orderBy: 'received_at DESC, id DESC',
+      );
+      for (final row in rows) {
+        final uuid = row['bill_uuid'] as String;
+        // First row per bill wins (ordered newest-first), so don't overwrite.
+        result.putIfAbsent(uuid, () => row['payment_reference'] as String);
+      }
+    }
+    return result;
   }
 
   /// Loads the bill_items for every bill in [billMaps] in a single batched query
@@ -304,6 +351,7 @@ mixin DatabaseBills {
     int id,
     bool isPaid, {
     String? paymentMethod,
+    String? paymentReference,
   }) async {
     final db = await database;
     return db.transaction((txn) async {
@@ -335,6 +383,7 @@ mixin DatabaseBills {
           'bill_uuid': billUuid,
           'amount': balance,
           'payment_method': paymentMethod ?? 'cash',
+          'payment_reference': _normaliseName(paymentReference),
           'received_at': now,
           'created_at': now,
           'updated_at': now,
@@ -402,6 +451,55 @@ mixin DatabaseBills {
         'profit_commission_percent': percent.clamp(0, 100).toDouble(),
         'updated_at': _nowIso(),
       },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    notifyDatabaseChanged();
+    return count;
+  }
+
+  /// Updates only the buyer/customer snapshot fields on a finalized bill.
+  /// Amounts, items, GST, and totals are intentionally left untouched — those
+  /// snapshots are immutable. GST fields are ignored for non-B2B bills.
+  Future<int> updateBillCustomerDetails(
+    int id, {
+    required String customerName,
+    String? customerPhone,
+    String? customerGstin,
+    String? customerGstLegalName,
+    String? customerGstTradeName,
+    String? customerAddressSnapshot,
+    String? placeOfSupplyStateCode,
+    required bool isB2b,
+  }) async {
+    await _requireAdminMutation();
+    final db = await database;
+    final values = <String, Object?>{
+      'customer_name': _normaliseName(customerName) ?? 'Walk-in Customer',
+      'customer_phone': _normaliseCustomerPhone(customerPhone),
+      'updated_at': _nowIso(),
+    };
+    if (isB2b) {
+      // Reuse the Bill constructor's canonical cleaning for the GST snapshot
+      // fields (GSTIN upper-casing, state-code padding, whitespace collapse).
+      final cleaned = Bill(
+        totalAmount: 0,
+        itemCount: 0,
+        customerGstin: customerGstin,
+        customerGstLegalName: customerGstLegalName,
+        customerGstTradeName: customerGstTradeName,
+        customerAddressSnapshot: customerAddressSnapshot,
+        placeOfSupplyStateCode: placeOfSupplyStateCode,
+      );
+      values['customer_gstin'] = cleaned.customerGstin;
+      values['customer_gst_legal_name'] = cleaned.customerGstLegalName;
+      values['customer_gst_trade_name'] = cleaned.customerGstTradeName;
+      values['customer_address_snapshot'] = cleaned.customerAddressSnapshot;
+      values['place_of_supply_state_code'] = cleaned.placeOfSupplyStateCode;
+    }
+    final count = await db.update(
+      'bills',
+      values,
       where: 'id = ?',
       whereArgs: [id],
     );

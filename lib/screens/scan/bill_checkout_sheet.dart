@@ -27,6 +27,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _stateCodeController = TextEditingController();
   final _discountController = TextEditingController();
   final _paidAmountController = TextEditingController();
+  final _transactionIdController = TextEditingController();
 
   final _customerFieldLink = LayerLink();
   final _customerFocusNode = FocusNode();
@@ -90,6 +91,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _stateCodeController.dispose();
     _discountController.dispose();
     _paidAmountController.dispose();
+    _transactionIdController.dispose();
     _removeSuggestionOverlay();
     _customerFocusNode.dispose();
     super.dispose();
@@ -182,6 +184,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
         discountPercent: _discountPercent.clamp(0, 100).toDouble(),
         paidAmount: paidAmount.clamp(0, total).toDouble(),
         paymentMethod: _paymentMethod,
+        transactionReference: _paymentMethod == 'online'
+            ? _transactionIdController.text
+            : null,
       ),
     );
   }
@@ -472,6 +477,17 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   onSelectionChanged: (value) =>
                       setState(() => _paymentMethod = value.first),
                 ),
+                if (_paymentMethod == 'online') ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _transactionIdController,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Transaction ID (optional)',
+                      prefixIcon: Icon(Icons.receipt_long_outlined),
+                    ),
+                  ),
+                ],
               ],
               const SizedBox(height: 16),
               Container(
