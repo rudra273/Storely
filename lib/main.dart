@@ -11,6 +11,7 @@ import 'screens/welcome_screen.dart';
 import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
 import 'services/home_section_prefs.dart';
+import 'services/kpi_prefs.dart';
 import 'theme/app_theme.dart';
 import 'utils/test_keys.dart';
 
@@ -20,6 +21,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppSettingsService.instance.load();
   await HomeSectionPrefs.instance.load();
+  await KpiPrefs.instance.load();
   await CloudService.instance.initialize();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

@@ -81,17 +81,15 @@ mixin DatabaseBills {
       where: 'deleted_at IS NULL',
       orderBy: 'created_at DESC',
     );
-    final bills = <Bill>[];
-    for (final map in billMaps) {
-      final itemMaps = await db.query(
-        'bill_items',
-        where: 'deleted_at IS NULL AND bill_id = ?',
-        whereArgs: [map['id']],
-      );
-      final items = itemMaps.map((m) => BillItem.fromMap(m)).toList();
-      bills.add(Bill.fromMap(map, items));
-    }
-    return bills;
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: false,
+    );
+    return [
+      for (final map in billMaps)
+        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+    ];
   }
 
   /// Cancelled bills are soft-deleted (deleted_at is set) so they stay out of
@@ -105,17 +103,52 @@ mixin DatabaseBills {
       whereArgs: [Bill.lifecycleCancelled],
       orderBy: 'cancelled_at DESC, created_at DESC',
     );
-    final bills = <Bill>[];
-    for (final map in billMaps) {
-      final itemMaps = await db.query(
-        'bill_items',
-        where: 'bill_id = ?',
-        whereArgs: [map['id']],
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: true,
+    );
+    return [
+      for (final map in billMaps)
+        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+    ];
+  }
+
+  /// Loads the bill_items for every bill in [billMaps] in a single batched query
+  /// (grouped by bill_id in memory) instead of one query per bill. Avoids the
+  /// N+1 round-trips that made bill lists scale linearly with bill count.
+  Future<Map<int, List<BillItem>>> _itemsByBillId(
+    DatabaseExecutor executor,
+    List<Map<String, Object?>> billMaps, {
+    required bool includeDeleted,
+  }) async {
+    final billIds = [
+      for (final map in billMaps)
+        if (map['id'] != null) map['id'] as int,
+    ];
+    if (billIds.isEmpty) return const {};
+    final deletedClause = includeDeleted ? '' : 'deleted_at IS NULL AND ';
+    final grouped = <int, List<BillItem>>{};
+    // Chunk the IN-list so we never exceed SQLite's bound-variable limit
+    // (~999) on shops with very large bill counts.
+    const chunkSize = 500;
+    for (var start = 0; start < billIds.length; start += chunkSize) {
+      final chunk = billIds.sublist(
+        start,
+        start + chunkSize > billIds.length ? billIds.length : start + chunkSize,
       );
-      final items = itemMaps.map((m) => BillItem.fromMap(m)).toList();
-      bills.add(Bill.fromMap(map, items));
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final itemMaps = await executor.query(
+        'bill_items',
+        where: '${deletedClause}bill_id IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final m in itemMaps) {
+        final billId = m['bill_id'] as int;
+        (grouped[billId] ??= <BillItem>[]).add(BillItem.fromMap(m));
+      }
     }
-    return bills;
+    return grouped;
   }
 
   Future<List<Customer>> getAllCustomers() async {
