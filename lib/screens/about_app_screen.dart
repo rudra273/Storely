@@ -134,7 +134,12 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Release Notes', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Version 1.0.4 brings refinements to the billing flow, a redesigned full bill page, quick navigation improvements, GST display fixes, the account section, and bug fixes for a smoother experience.',
+                  'Version 1.0.4 brings:\n'
+                  '• Dark mode for comfortable use in any lighting.\n'
+                  '• Store your data in Storely Cloud and access it across devices.\n'
+                  '• Bill customisation to tailor your invoices.\n'
+                  '• App lock to keep your business data private.\n'
+                  '• Major bug fixes for a smoother, more reliable experience.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
