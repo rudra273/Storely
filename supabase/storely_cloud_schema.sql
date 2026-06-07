@@ -27,6 +27,11 @@ create table if not exists public.shops (
 create table if not exists public.shop_members (
   shop_id text not null references public.shops(uuid) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
+  -- Direct FK to profiles so PostgREST can resolve the profiles(email) embed
+  -- in listMembers(). Indirect linkage through auth.users is not traversed by
+  -- PostgREST. See migrations/20260606_shop_members_profiles_fk.sql.
+  constraint shop_members_user_profile_fk
+    foreign key (user_id) references public.profiles(id) on delete cascade,
   role text not null check (role in ('owner', 'admin', 'staff')),
   created_at timestamptz not null default now(),
   primary key (shop_id, user_id)

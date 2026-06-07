@@ -353,6 +353,28 @@ mixin DatabaseSync {
       return;
     }
 
+    // bills have a live-row unique index on (shop_id, bill_number)
+    // (idx_bills_shop_bill_number) — a collision means the same invoice number
+    // exists locally under a different uuid (e.g. the bill was created before
+    // cloud sync, then pulled back with the cloud's uuid). Merge onto that
+    // single local bill and re-point its children's bill_uuid.
+    if (table == 'bills') {
+      final billNumber = map['bill_number']?.toString();
+      if (billNumber == null || billNumber.isEmpty) {
+        throw StateError(
+          'Unresolvable unique conflict importing bills without bill_number '
+          '(uuid=${map['uuid']})',
+        );
+      }
+      await _mergeBillRow(
+        executor,
+        map,
+        shopId: shopId,
+        billNumber: billNumber,
+      );
+      return;
+    }
+
     // customers have a live-row unique index on (shop_id, phone)
     // (idx_customers_shop_phone) — that, not name, is what an insert collides on.
     if (table == 'customers') {
@@ -409,6 +431,60 @@ mixin DatabaseSync {
       where: 'id = ?',
       whereArgs: [matches.single['id']],
     );
+  }
+
+  /// Merge a pulled cloud bill onto the single live local bill that shares its
+  /// (shop_id, bill_number). Like [_mergeMatchingRow] this only proceeds when
+  /// there is exactly one live match and the cloud copy is newer, but it must
+  /// also re-point the local bill's children: bill_items and bill_payments
+  /// reference the bill by bill_uuid, so adopting the cloud uuid would orphan
+  /// them otherwise. bill_id links are preserved because the local row keeps
+  /// its id.
+  Future<void> _mergeBillRow(
+    DatabaseExecutor executor,
+    Map<String, dynamic> map, {
+    required String shopId,
+    required String billNumber,
+  }) async {
+    final matches = await executor.query(
+      'bills',
+      columns: ['id', 'uuid', 'updated_at'],
+      where: 'shop_id = ? AND bill_number = ? AND deleted_at IS NULL',
+      whereArgs: [shopId, billNumber],
+      limit: 2,
+    );
+    // Ambiguous (more than one candidate) or none: do not guess.
+    if (matches.length != 1) return;
+    final localUpdatedAt = matches.single['updated_at']?.toString();
+    final cloudUpdatedAt = map['updated_at']?.toString();
+    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
+
+    final localId = matches.single['id'];
+    final oldUuid = matches.single['uuid']?.toString();
+    final newUuid = map['uuid']?.toString();
+
+    await executor.update(
+      'bills',
+      map..remove('id'),
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+
+    // Re-point children from the old local uuid to the adopted cloud uuid so
+    // bill_uuid joins (payment refs, the bills↔payments JOIN) keep resolving.
+    if (oldUuid != null &&
+        newUuid != null &&
+        oldUuid.isNotEmpty &&
+        oldUuid != newUuid) {
+      for (final childTable in const ['bill_items', 'bill_payments']) {
+        await executor.update(
+          childTable,
+          {'bill_uuid': newUuid},
+          where: 'bill_uuid = ?',
+          whereArgs: [oldUuid],
+        );
+      }
+    }
   }
 
   Future<void> _upsertAppSetting(

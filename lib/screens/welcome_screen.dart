@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
 import '../services/cloud_service.dart';
 import '../theme/app_theme.dart';
@@ -24,6 +25,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   final _passwordCtrl = TextEditingController();
   _WelcomeMode _mode = _WelcomeMode.choice;
   bool _isSaving = false;
+
+  /// Reveals the "use your own Supabase" fields in the join flow. Forced open
+  /// when the bundled Storely Cloud credentials aren't compiled into the build.
+  bool _showAdvanced = !CloudDefaults.isAvailable;
   String? _message;
   String? _error;
 
@@ -55,6 +60,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
+  /// Configure the cloud backend before sign in/up: bundled Storely Cloud by
+  /// default, or the user-entered Supabase project when the advanced fields are
+  /// shown.
+  Future<void> _configureBackend() {
+    if (_showAdvanced) {
+      return CloudService.instance.saveConfig(
+        CloudConfig(url: _cloudUrlCtrl.text, anonKey: _anonKeyCtrl.text),
+      );
+    }
+    return CloudService.instance.useStorelyCloud();
+  }
+
   Future<void> _joinCloudShop() async {
     setState(() {
       _isSaving = true;
@@ -62,9 +79,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       _error = null;
     });
     try {
-      await CloudService.instance.saveConfig(
-        CloudConfig(url: _cloudUrlCtrl.text, anonKey: _anonKeyCtrl.text),
-      );
+      await _configureBackend();
       await CloudService.instance.signIn(
         _emailCtrl.text,
         _passwordCtrl.text,
@@ -94,9 +109,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       _error = null;
     });
     try {
-      await CloudService.instance.saveConfig(
-        CloudConfig(url: _cloudUrlCtrl.text, anonKey: _anonKeyCtrl.text),
-      );
+      await _configureBackend();
       await CloudService.instance.signUp(
         _emailCtrl.text,
         _passwordCtrl.text,
@@ -262,26 +275,29 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Widget _joinCloudForm() {
+    final storelyCloudAvailable = CloudDefaults.isAvailable;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: _cloudUrlCtrl,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            labelText: 'Supabase URL',
-            prefixIcon: Icon(Icons.link_rounded),
+        if (_showAdvanced) ...[
+          TextField(
+            controller: _cloudUrlCtrl,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Supabase URL',
+              prefixIcon: Icon(Icons.link_rounded),
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: _anonKeyCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Supabase anon key',
-            prefixIcon: Icon(Icons.key_outlined),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _anonKeyCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Supabase anon key',
+              prefixIcon: Icon(Icons.key_outlined),
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
+        ],
         TextField(
           controller: _emailCtrl,
           keyboardType: TextInputType.emailAddress,
@@ -324,6 +340,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
           ),
         ),
+        if (storelyCloudAvailable)
+          TextButton.icon(
+            onPressed: _isSaving
+                ? null
+                : () => setState(() => _showAdvanced = !_showAdvanced),
+            icon: Icon(
+              _showAdvanced ? Icons.expand_less_rounded : Icons.tune_rounded,
+              size: 18,
+            ),
+            style: TextButton.styleFrom(foregroundColor: AppColors.inkMuted),
+            label: const Text('Advanced — use your own Supabase'),
+          ),
         TextButton(
           onPressed: _isSaving
               ? null

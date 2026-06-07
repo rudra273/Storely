@@ -1,7 +1,5 @@
-import 'dart:convert';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
@@ -19,13 +17,13 @@ import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'customers_screen.dart';
 import 'suppliers_screen.dart';
+import 'store/bill_settings_screen.dart';
 
 part 'store/store_panels.dart';
 part 'store/cloud_setup_sheet.dart';
 part 'store/members_sheet.dart';
 part 'store/store_action_widgets.dart';
 part 'store/pricing_settings_sheets.dart';
-part 'store/bill_settings_sheet.dart';
 part 'store/profile_sheets.dart';
 part 'store/store_dialogs.dart';
 part 'store/app_settings_sheet.dart';
@@ -48,7 +46,6 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _units = [];
   List<Customer> _customers = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
-  BillSettings _billSettings = BillSettings();
   InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
   int _lowStockThreshold = 5;
   bool _isLoading = true;
@@ -79,7 +76,6 @@ class _StoreScreenState extends State<StoreScreen> {
     final units = await db.getUnits();
     final customers = await db.getAllCustomers();
     final pricingSettings = await db.getGlobalPricingSettings();
-    final billSettings = await db.getBillSettings();
     final invoiceSeriesSettings = await db.getDefaultInvoiceSeriesSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
@@ -92,7 +88,6 @@ class _StoreScreenState extends State<StoreScreen> {
       _units = units;
       _customers = customers;
       _pricingSettings = pricingSettings;
-      _billSettings = billSettings;
       _invoiceSeriesSettings = invoiceSeriesSettings;
       _lowStockThreshold = lowStockThreshold;
       _isLoading = false;
@@ -235,22 +230,12 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showBillSettings() async {
-    final result = await showModalBottomSheet<_BillSettingsResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _BillSettingsSheet(
-        settings: _billSettings,
-        invoiceSeries: _invoiceSeriesSettings,
-      ),
+    // The full-page editor loads and saves its own data; it pops `true` when
+    // changes were persisted so we just reload to reflect them here.
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (_) => const BillSettingsScreen()),
     );
-    if (result == null) return;
-    await _runStoreAction(() async {
-      await DatabaseHelper.instance.saveBillSettings(result.settings);
-      await DatabaseHelper.instance.saveDefaultInvoiceSeriesSettings(
-        result.invoiceSeries,
-      );
-    });
+    if (saved == true && mounted) await _loadStoreData();
   }
 
   Future<void> _showCategoryPricing(String name) async {
@@ -579,9 +564,9 @@ class _StoreScreenState extends State<StoreScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Advanced'),
+                  const _SectionLabel(title: 'Account'),
                   const SizedBox(height: AppSpacing.sm),
-                  _CloudSyncPanel(
+                  _AccountSection(
                     onSetup: _openCloudSetup,
                     onSync: _syncCloud,
                     onMembers: _openMembers,
@@ -598,7 +583,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.2',
+                    subtitle: 'App information and version 1.0.4',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),

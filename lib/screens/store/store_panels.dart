@@ -11,12 +11,15 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _CloudSyncPanel extends StatelessWidget {
+/// The "Account" settings section: sign-in, cloud backup/sync, and (for
+/// owners/admins) team members — rendered as standard [_StoreActionRow]s so it
+/// matches the rest of the Store screen instead of a one-off panel.
+class _AccountSection extends StatelessWidget {
   final VoidCallback onSetup;
   final Future<void> Function() onSync;
   final VoidCallback onMembers;
 
-  const _CloudSyncPanel({
+  const _AccountSection({
     required this.onSetup,
     required this.onSync,
     required this.onMembers,
@@ -29,103 +32,67 @@ class _CloudSyncPanel extends StatelessWidget {
       builder: (context, state, _) {
         final email = state.user?.email;
         final role = state.shopRole;
-        final roleStr = role != null
-            ? ' (${role[0].toUpperCase()}${role.substring(1)})'
+        final roleLabel = role != null && role.isNotEmpty
+            ? ' • ${role[0].toUpperCase()}${role.substring(1)}'
             : '';
-        final subtitle = !state.isConfigured
-            ? 'Local only'
-            : email == null
-            ? 'Configured • sign in to sync'
-            : 'Signed in as $email$roleStr';
+
+        // Account row — who is signed in (or a prompt to sign in).
+        final accountTitle = state.isSignedIn ? 'Account' : 'Sign In';
+        final accountSubtitle = email != null
+            ? '$email$roleLabel'
+            : 'Sign in to back up and sync your data';
+
+        // Cloud backup & sync row — reflects current sync state.
         final lastSync = state.lastSyncedAt == null
             ? null
             : _formatCloudTime(state.lastSyncedAt!.toLocal());
-        return _StorePanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const _PanelIcon(icon: Icons.cloud_sync_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Cloud Sync',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          lastSync == null ? subtitle : '$subtitle • $lastSync',
-                          style: TextStyle(
-                            color: AppColors.inkMutedOf(context),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Cloud setup',
-                    onPressed: onSetup,
-                    icon: const Icon(Icons.settings_outlined),
-                  ),
-                  IconButton(
-                    tooltip: 'Sync now',
-                    onPressed:
-                        state.isConfigured &&
-                            state.isSignedIn &&
-                            !state.isSyncing
-                        ? onSync
-                        : null,
-                    icon: state.isSyncing
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.sync_rounded),
-                  ),
-                ],
+        final String syncSubtitle;
+        if (state.error != null) {
+          syncSubtitle = state.error!;
+        } else if (state.isSyncing) {
+          syncSubtitle = 'Syncing…';
+        } else if (!state.isConfigured || !state.isSignedIn) {
+          syncSubtitle = 'Sign in to enable backup & sync';
+        } else if (lastSync != null) {
+          syncSubtitle = 'Last synced $lastSync';
+        } else {
+          syncSubtitle = 'Tap to sync now';
+        }
+        final canSync =
+            state.isConfigured && state.isSignedIn && !state.isSyncing;
+
+        // Owners/admins of a registered cloud shop can manage members.
+        final canManageMembers =
+            state.isConfigured &&
+            state.isSignedIn &&
+            state.membership == CloudMembership.member &&
+            (state.shopRole == 'owner' || state.shopRole == 'admin');
+
+        return Column(
+          children: [
+            _StoreActionRow(
+              title: accountTitle,
+              subtitle: accountSubtitle,
+              icon: Icons.person_outline_rounded,
+              onTap: onSetup,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _StoreActionRow(
+              title: 'Cloud Backup & Sync',
+              subtitle: syncSubtitle,
+              icon: Icons.cloud_sync_outlined,
+              onTap: canSync ? () => onSync() : onSetup,
+            ),
+            if (canManageMembers) ...[
+              const SizedBox(height: AppSpacing.sm),
+              _StoreActionRow(
+                title: 'Team Members',
+                subtitle: 'Invite and manage staff access',
+                icon: Icons.group_outlined,
+                onTap: onMembers,
               ),
-              if (state.error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  state.error!,
-                  style: const TextStyle(color: AppColors.error, fontSize: 12),
-                ),
-              ] else if (state.message != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  state.message!,
-                  style: TextStyle(
-                    color: AppColors.inkMutedOf(context),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-              // Owners/admins of a registered cloud shop can manage members.
-              if (state.isConfigured &&
-                  state.isSignedIn &&
-                  state.membership == CloudMembership.member &&
-                  (state.shopRole == 'owner' || state.shopRole == 'admin')) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: onMembers,
-                    icon: const Icon(Icons.group_outlined, size: 18),
-                    label: const Text('Manage Members'),
-                  ),
-                ),
-              ],
             ],
-          ),
+          ],
         );
       },
     );

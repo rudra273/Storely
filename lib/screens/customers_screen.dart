@@ -27,8 +27,6 @@ class _CustomersScreenState extends State<CustomersScreen> {
   bool _isLoading = true;
   final _searchCtrl = TextEditingController();
 
-  bool get _canManage => CloudService.instance.state.value.isAdmin;
-
   @override
   void initState() {
     super.initState();
@@ -136,14 +134,15 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _openDetail(Customer customer) async {
+    final canManage = CloudService.instance.state.value.isAdmin;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _CustomerDetailScreen(
           customer: customer,
           bills: _billsFor(customer),
           pendingAmount: _pendingAmount(customer),
-          canManage: _canManage,
-          onEdit: _canManage ? () => _editCustomer(customer) : null,
+          canManage: canManage,
+          onEdit: canManage ? () => _editCustomer(customer) : null,
         ),
       ),
     );
@@ -154,19 +153,30 @@ class _CustomersScreenState extends State<CustomersScreen> {
   @override
   Widget build(BuildContext context) {
     final customers = _filtered;
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: navyAppBar(title: 'Customers'),
-      floatingActionButton: _canManage
-          ? FloatingActionButton.extended(
-              onPressed: _addCustomer,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add Customer'),
-            )
-          : null,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+    // Listen to cloud state so Add actions appear the moment the user's role
+    // resolves on startup — otherwise isAdmin is read once (null role → false)
+    // and the buttons only show after a sync round-trip + reopening the page.
+    return ValueListenableBuilder<CloudState>(
+      valueListenable: CloudService.instance.state,
+      builder: (context, cloudState, _) {
+        final canManage = cloudState.isAdmin;
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          appBar: navyAppBar(title: 'Customers'),
+          // Hidden when the list is truly empty — the centered empty-state
+          // button is the single add action there. Shown once customers exist
+          // (including when a search filters them all out, so adding stays
+          // reachable).
+          floatingActionButton: canManage && _customers.isNotEmpty
+              ? FloatingActionButton.extended(
+                  onPressed: _addCustomer,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Add Customer'),
+                )
+              : null,
+          body: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -187,7 +197,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   child: customers.isEmpty
                       ? _EmptyCustomers(
                           hasAny: _customers.isNotEmpty,
-                          canManage: _canManage,
+                          canManage: canManage,
                           onAdd: _addCustomer,
                         )
                       : ListView.separated(
@@ -212,6 +222,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
                 ),
               ],
             ),
+        );
+      },
     );
   }
 }
