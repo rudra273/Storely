@@ -519,17 +519,16 @@ class _BillsScreenState extends State<BillsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (_cancelledBills.isNotEmpty) ...[
-                        _BillFilterTabs(
-                          showCancelled: _showCancelled,
-                          activeCount: _bills.length,
-                          cancelledCount: _cancelledBills.length,
-                          onChanged: (showCancelled) => setState(
-                            () => _showCancelled = showCancelled,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                      ],
+                      // Always shown so the Cancelled tab stays reachable even
+                      // when there are no cancelled bills yet (count shows 0).
+                      _BillFilterTabs(
+                        showCancelled: _showCancelled,
+                        activeCount: _bills.length,
+                        cancelledCount: _cancelledBills.length,
+                        onChanged: (showCancelled) =>
+                            setState(() => _showCancelled = showCancelled),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
                       if (_showCancelled) ...[
                         ..._buildCancelledBillCards(),
                       ] else ...[
@@ -545,7 +544,13 @@ class _BillsScreenState extends State<BillsScreen> {
           ],
         ),
       ),
-      floatingActionButton: !widget.isActiveMainTab || _isLoading || _bills.isEmpty
+      // Hidden only when there are no bills of any kind (the full-page empty
+      // state has its own Create button). When only cancelled bills remain, the
+      // FAB must stay so a new bill is still reachable.
+      floatingActionButton:
+          !widget.isActiveMainTab ||
+              _isLoading ||
+              (_bills.isEmpty && _cancelledBills.isEmpty)
           ? null
           : TestKeys.tag(
               TestKeys.createBillBtn,

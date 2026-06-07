@@ -21,8 +21,6 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   List<SupplierProfile> _suppliers = [];
   bool _isLoading = true;
 
-  bool get _canManage => CloudService.instance.state.value.isAdmin;
-
   @override
   void initState() {
     super.initState();
@@ -121,40 +119,51 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: navyAppBar(title: 'Suppliers'),
-      floatingActionButton: _canManage
-          ? FloatingActionButton.extended(
-              onPressed: _addSupplier,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add Supplier'),
-            )
-          : null,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _suppliers.isEmpty
-          ? _EmptySuppliers(canManage: _canManage, onAdd: _addSupplier)
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.lg,
-                AppSpacing.lg,
-                AppSpacing.xxxl * 2,
-              ),
-              itemCount: _suppliers.length,
-              separatorBuilder: (_, _) =>
-                  const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final supplier = _suppliers[index];
-                return _SupplierCard(
-                  supplier: supplier,
-                  canManage: _canManage,
-                  onEdit: () => _editSupplier(supplier),
-                  onDelete: () => _deleteSupplier(supplier),
-                );
-              },
-            ),
+    // Listen to cloud state so Add/Edit/Delete actions appear the moment the
+    // user's role resolves on startup — otherwise isAdmin is read once (null
+    // role → false) and the buttons only show after a sync round-trip + reopen.
+    return ValueListenableBuilder<CloudState>(
+      valueListenable: CloudService.instance.state,
+      builder: (context, cloudState, _) {
+        final canManage = cloudState.isAdmin;
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          appBar: navyAppBar(title: 'Suppliers'),
+          // Hidden when the list is empty — the centered empty-state button is
+          // the single add action there. Shown once suppliers exist.
+          floatingActionButton: canManage && _suppliers.isNotEmpty
+              ? FloatingActionButton.extended(
+                  onPressed: _addSupplier,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Add Supplier'),
+                )
+              : null,
+          body: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _suppliers.isEmpty
+              ? _EmptySuppliers(canManage: canManage, onAdd: _addSupplier)
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    AppSpacing.xxxl * 2,
+                  ),
+                  itemCount: _suppliers.length,
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(height: AppSpacing.sm),
+                  itemBuilder: (context, index) {
+                    final supplier = _suppliers[index];
+                    return _SupplierCard(
+                      supplier: supplier,
+                      canManage: canManage,
+                      onEdit: () => _editSupplier(supplier),
+                      onDelete: () => _deleteSupplier(supplier),
+                    );
+                  },
+                ),
+        );
+      },
     );
   }
 }
