@@ -580,9 +580,9 @@ class _StoreScreenState extends State<StoreScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Advanced'),
+                  const _SectionLabel(title: 'Account'),
                   const SizedBox(height: AppSpacing.sm),
-                  _CloudSyncPanel(
+                  _AccountSection(
                     onSetup: _openCloudSetup,
                     onSync: _syncCloud,
                     onMembers: _openMembers,
