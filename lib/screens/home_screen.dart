@@ -10,6 +10,7 @@ import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
 import 'suppliers_screen.dart';
 import 'customers_screen.dart';
+import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
 import '../services/home_section_prefs.dart';
 
@@ -243,6 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               onCustomers: _openCustomers,
                               supplierCount: _supplierCount,
                               onSuppliers: _openSuppliers,
+                              onPricing: _openPricing,
                             ),
                             if (!HomeSectionPrefs.instance.unpaidHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
@@ -413,6 +415,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) _loadData();
   }
 
+  Future<void> _openPricing() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const PricingScreen()),
+    );
+    if (mounted) _loadData();
+  }
+
   double _pendingAmount(Customer customer) {
     final byId = customer.id == null ? null : _pendingByCustomerId[customer.id];
     if (byId != null) return byId;
@@ -569,12 +578,14 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
   final VoidCallback onCustomers;
   final int supplierCount;
   final VoidCallback onSuppliers;
+  final VoidCallback onPricing;
 
   const _WorkspaceShortcutsSection({
     required this.customerCount,
     required this.onCustomers,
     required this.supplierCount,
     required this.onSuppliers,
+    required this.onPricing,
   });
 
   @override
@@ -603,17 +614,11 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
-              icon: Icons.account_balance_wallet_outlined,
-              label: 'Expenses',
-              subtitle: 'Soon',
+              icon: Icons.sell_outlined,
+              label: 'Pricing',
+              subtitle: 'GST & rates',
               color: AppColors.inkMutedOf(context),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            _WorkspaceTile(
-              icon: Icons.group_work_outlined,
-              label: 'Staff',
-              subtitle: 'Soon',
-              color: AppColors.inkMutedOf(context),
+              onTap: onPricing,
             ),
           ],
         ),
