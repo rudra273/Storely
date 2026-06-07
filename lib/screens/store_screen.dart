@@ -583,7 +583,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.2',
+                    subtitle: 'App information and version 1.0.4',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),

@@ -52,7 +52,7 @@ class AboutAppScreen extends StatelessWidget {
                     final info = snapshot.data;
                     return Text(
                       info == null
-                          ? '1.0.2'
+                          ? '1.0.4'
                           : '${info.version}+${info.buildNumber}',
                       style: AppText.body.copyWith(color: AppColors.inkMuted),
                     );
@@ -134,7 +134,7 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Release Notes', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Version 1.0.3 brings UI improvements across all screens, custom billing options, updated import functionality, barcode scanning support, and major bug fixes for a smoother experience.',
+                  'Version 1.0.4 brings refinements to the billing flow, a redesigned full bill page, quick navigation improvements, GST display fixes, the account section, and bug fixes for a smoother experience.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],
