@@ -619,8 +619,8 @@ class _PricingInputRow extends StatelessWidget {
                       label,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textDark,
+                      style: TextStyle(
+                        color: AppColors.inkOf(context),
                         fontWeight: FontWeight.w700,
                         fontSize: 12.5,
                       ),
@@ -689,8 +689,8 @@ class _PricingInputRow extends StatelessWidget {
                         deltaText,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.textDark,
+                        style: TextStyle(
+                          color: AppColors.inkOf(context),
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
                         ),

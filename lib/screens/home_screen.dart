@@ -230,6 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             _StatsRow(
                               productCount: _productCount,
                               billCount: _todayBillCount,
+                              onProducts: () => widget.onNavigate(1),
+                              onBills: () => widget.onNavigate(2),
                             ),
                             const SizedBox(height: AppSpacing.xxl),
                             _QuickActionsSection(
@@ -764,8 +766,15 @@ class _SalesHero extends StatelessWidget {
 class _StatsRow extends StatelessWidget {
   final int productCount;
   final int billCount;
+  final VoidCallback onProducts;
+  final VoidCallback onBills;
 
-  const _StatsRow({required this.productCount, required this.billCount});
+  const _StatsRow({
+    required this.productCount,
+    required this.billCount,
+    required this.onProducts,
+    required this.onBills,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -777,6 +786,7 @@ class _StatsRow extends StatelessWidget {
             value: '$productCount',
             subtitle: 'in catalog',
             icon: Icons.inventory_2_outlined,
+            onTap: onProducts,
           ),
         ),
         const SizedBox(width: AppSpacing.md),
@@ -786,6 +796,7 @@ class _StatsRow extends StatelessWidget {
             value: '$billCount',
             subtitle: 'transactions',
             icon: Icons.receipt_long_outlined,
+            onTap: onBills,
           ),
         ),
       ],
@@ -796,17 +807,20 @@ class _StatsRow extends StatelessWidget {
 class _StatTile extends StatelessWidget {
   final String label, value, subtitle;
   final IconData icon;
+  final VoidCallback? onTap;
 
   const _StatTile({
     required this.label,
     required this.value,
     required this.subtitle,
     required this.icon,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return AppCard(
+      onTap: onTap,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [

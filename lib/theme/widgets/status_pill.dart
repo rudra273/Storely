@@ -23,7 +23,7 @@ class StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg) = _colors;
+    final (bg, fg) = _colorsFor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: bg, borderRadius: AppRadius.smRadius),
@@ -39,38 +39,38 @@ class StatusPill extends StatelessWidget {
     );
   }
 
-  (Color bg, Color fg) get _colors => switch (variant) {
-    PillVariant.out => (
-      AppColors.error.withValues(alpha: 0.1),
-      AppColors.error,
-    ),
-    PillVariant.low => (
-      AppColors.amber.withValues(alpha: 0.12),
-      AppColors.amber,
-    ),
-    PillVariant.paid => (
-      AppColors.success.withValues(alpha: 0.1),
-      AppColors.success,
-    ),
-    PillVariant.unpaid => (
-      AppColors.error.withValues(alpha: 0.1),
-      AppColors.error,
-    ),
-    PillVariant.success => (
-      AppColors.success.withValues(alpha: 0.1),
-      AppColors.success,
-    ),
-    PillVariant.warning => (
-      AppColors.amber.withValues(alpha: 0.12),
-      AppColors.amber,
-    ),
-    PillVariant.info => (
-      AppColors.navy.withValues(alpha: 0.08),
-      AppColors.navy,
-    ),
-    PillVariant.neutral => (
-      AppColors.inkMuted.withValues(alpha: 0.12),
-      AppColors.inkMuted,
-    ),
-  };
+  (Color bg, Color fg) _colorsFor(BuildContext context) {
+    // Brand "info" and "neutral" foregrounds (charcoal / muted grey) are
+    // nearly invisible on the dark surface, so resolve them per-theme.
+    final infoFg = AppColors.brandOf(context);
+    final neutralFg = AppColors.inkMutedOf(context);
+    return switch (variant) {
+      PillVariant.out => (
+        AppColors.error.withValues(alpha: 0.1),
+        AppColors.error,
+      ),
+      PillVariant.low => (
+        AppColors.amber.withValues(alpha: 0.12),
+        AppColors.amber,
+      ),
+      PillVariant.paid => (
+        AppColors.success.withValues(alpha: 0.1),
+        AppColors.success,
+      ),
+      PillVariant.unpaid => (
+        AppColors.error.withValues(alpha: 0.1),
+        AppColors.error,
+      ),
+      PillVariant.success => (
+        AppColors.success.withValues(alpha: 0.1),
+        AppColors.success,
+      ),
+      PillVariant.warning => (
+        AppColors.amber.withValues(alpha: 0.12),
+        AppColors.amber,
+      ),
+      PillVariant.info => (infoFg.withValues(alpha: 0.1), infoFg),
+      PillVariant.neutral => (neutralFg.withValues(alpha: 0.14), neutralFg),
+    };
+  }
 }
