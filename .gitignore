@@ -4,6 +4,9 @@
 *.pyc
 *.swp
 .DS_Store
+
+# Storely Cloud build-time credentials (never commit real values)
+dart_define.json
 .atom/
 .build/
 .buildlog/

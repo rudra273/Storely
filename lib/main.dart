@@ -72,20 +72,34 @@ class _AppGateState extends State<AppGate> {
     final profile = await DatabaseHelper.instance.getShopProfile();
     final name = profile?.name.trim();
     final needsSetup = name == null || name.isEmpty || name == 'My Shop';
+    // A returning user who is already signed in to cloud has onboarded, even if
+    // their local shop name hasn't synced yet (newly-invited staff). At cold
+    // start membership isn't resolved, so use signed-in as the durable signal.
+    final signedInToCloud = CloudService.instance.state.value.isSignedIn;
     if (mounted) {
       setState(() {
-        _isFirstLaunch = needsSetup;
+        _isFirstLaunch = needsSetup && !signedInToCloud;
         _isLoading = false;
       });
     }
   }
 
   Future<void> _completeWelcome() async {
+    // A user who joined a cloud shop has finished setup even if the shop's name
+    // hasn't synced to this device yet (a newly-invited staff member starts with
+    // an empty/'My Shop' local profile). Treat cloud membership as done so the
+    // welcome screen doesn't loop back on itself.
+    final cloudState = CloudService.instance.state.value;
+    final joinedCloudShop =
+        cloudState.isSignedIn &&
+        cloudState.membership == CloudMembership.member;
     final profile = await DatabaseHelper.instance.getShopProfile();
     final name = profile?.name.trim();
+    final needsSetup =
+        name == null || name.isEmpty || name == 'My Shop';
     if (mounted) {
       setState(() {
-        _isFirstLaunch = name == null || name.isEmpty || name == 'My Shop';
+        _isFirstLaunch = needsSetup && !joinedCloudShop;
       });
     }
   }
