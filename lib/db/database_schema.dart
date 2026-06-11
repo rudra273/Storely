@@ -22,6 +22,7 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
     await _seedBaseData(db);
     await _markMigrationDone(db, _v16BillingBackfillKey);
+    await _markMigrationDone(db, _v21IndexRebuildKey);
   }
 
   Future<void> _configureDB(Database db) async {
@@ -33,6 +34,7 @@ mixin DatabaseSchema {
     // one-shot data migrations (each gated by its own marker so it runs once).
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
+    await _ensureV20Columns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -46,6 +48,7 @@ mixin DatabaseSchema {
   Future<void> _ensureSchema(Database db) async {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
+    await _ensureV20Columns(db);
     await _runOneShotMigrations(db);
   }
 
@@ -59,11 +62,16 @@ mixin DatabaseSchema {
 
   static const _migrationMarkerPrefix = 'migration_done:';
   static const _v16BillingBackfillKey = 'v16_billing_backfill';
+  static const _v21IndexRebuildKey = 'v21_index_rebuild';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
     if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
       await _backfillV16Billing(executor);
       await _markMigrationDone(executor, _v16BillingBackfillKey);
+    }
+    if (!await _isMigrationDone(executor, _v21IndexRebuildKey)) {
+      await _rebuildV21Indexes(executor);
+      await _markMigrationDone(executor, _v21IndexRebuildKey);
     }
   }
 
@@ -759,6 +767,74 @@ mixin DatabaseSchema {
       'show_grand_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_footer_text': 'INTEGER NOT NULL DEFAULT 1',
     });
+  }
+
+  /// Columns added by the v20 stock_movements redesign. Installs that created
+  /// the table before v20 (DB <= 16) never get them from CREATE TABLE IF NOT
+  /// EXISTS, and every stock write references them — without this, upgraded
+  /// devices throw "no such column" on the first bill or purchase entry.
+  Future<void> _ensureV20Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'stock_movements', {
+      'supplier_id': 'INTEGER REFERENCES suppliers(id)',
+      'supplier_uuid': 'TEXT',
+      'source_document_type': 'TEXT',
+      'source_document_id': 'INTEGER',
+      'source_document_uuid': 'TEXT',
+      'import_row_number': 'INTEGER',
+    });
+  }
+
+  /// v20 changed these index definitions but kept their names, so the CREATE
+  /// INDEX IF NOT EXISTS in [_createCleanSchema] silently keeps the old
+  /// definitions on upgraded devices. Drop and recreate them once. Duplicate
+  /// product codes/barcodes that the old non-unique indexes allowed are
+  /// cleared (the newest row keeps the value) so the UNIQUE indexes can build.
+  Future<void> _rebuildV21Indexes(DatabaseExecutor executor) async {
+    await executor.execute('DROP INDEX IF EXISTS idx_stock_movements_source');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_source
+      ON stock_movements(source_document_type, source_document_uuid)
+    ''');
+
+    await _clearDuplicateProductValues(executor, 'product_code');
+    await executor.execute(
+      'DROP INDEX IF EXISTS idx_products_shop_product_code',
+    );
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_product_code
+      ON products(shop_id, LOWER(product_code))
+      WHERE product_code IS NOT NULL AND TRIM(product_code) != '' AND deleted_at IS NULL
+    ''');
+
+    await _clearDuplicateProductValues(executor, 'barcode');
+    await executor.execute('DROP INDEX IF EXISTS idx_products_shop_barcode');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_barcode
+      ON products(shop_id, LOWER(barcode))
+      WHERE barcode IS NOT NULL AND TRIM(barcode) != '' AND deleted_at IS NULL
+    ''');
+  }
+
+  /// The predicate and grouping here must mirror the partial UNIQUE index
+  /// expression exactly — that is what guarantees the index build cannot fail
+  /// after this runs.
+  Future<void> _clearDuplicateProductValues(
+    DatabaseExecutor executor,
+    String column,
+  ) async {
+    await executor.rawUpdate(
+      '''
+      UPDATE products
+      SET $column = NULL, updated_at = ?
+      WHERE $column IS NOT NULL AND TRIM($column) != '' AND deleted_at IS NULL
+        AND id NOT IN (
+          SELECT MAX(id) FROM products
+          WHERE $column IS NOT NULL AND TRIM($column) != '' AND deleted_at IS NULL
+          GROUP BY shop_id, LOWER($column)
+        )
+    ''',
+      [_nowIso()],
+    );
   }
 
   Future<void> _ensureColumns(
