@@ -2,13 +2,16 @@ part of '../scan_screen.dart';
 
 class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
-  final double subtotal;
+
+  /// Payable totals for a discount %, from the same calculator used to save
+  /// the bill, so the preview always matches the saved invoice.
+  final BillTotals Function(double discountPercent) totalsFor;
   final int itemCount;
   final Bill? initialBill;
 
   const _BillCheckoutSheet({
     required this.customers,
-    required this.subtotal,
+    required this.totalsFor,
     required this.itemCount,
     this.initialBill,
   });
@@ -231,8 +234,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final percent = _discountPercent.clamp(0, 100).toDouble();
-    final discount = widget.subtotal * percent / 100;
-    final total = widget.subtotal - discount;
+    final totals = widget.totalsFor(percent);
+    final discount = totals.discountAmount;
+    final total = totals.grandTotal;
     final parsedPaid = _paymentStatus == Bill.statusPaid
         ? total
         : _paymentStatus == Bill.statusPartial
@@ -377,7 +381,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               const SizedBox(height: 12),
               _BillSummaryRow(
                 label: 'Subtotal',
-                value: '₹${widget.subtotal.toStringAsFixed(2)}',
+                value: '₹${totals.subtotal.toStringAsFixed(2)}',
               ),
               _BillSummaryRow(label: 'Items', value: '${widget.itemCount}'),
               const SizedBox(height: 12),
@@ -503,6 +507,12 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       label: 'Discount (${percent.toStringAsFixed(2)}%)',
                       value: '- ₹${discount.toStringAsFixed(2)}',
                     ),
+                    if (totals.roundOffAmount != 0)
+                      _BillSummaryRow(
+                        label: 'Round off',
+                        value:
+                            '${totals.roundOffAmount > 0 ? '+' : '-'} ₹${totals.roundOffAmount.abs().toStringAsFixed(2)}',
+                      ),
                     const Divider(height: 20),
                     _BillSummaryRow(
                       label: 'Grand Total',

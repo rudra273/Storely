@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/bill_totals.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
 
@@ -302,7 +303,7 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  Future<int?> _completeBill({
+  Future<({int id, BillTotals totals})?> _completeBill({
     required String customerName,
     required String? customerPhone,
     required String billType,
@@ -320,11 +321,9 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_isSavingBill) return null;
 
     setState(() => _isSavingBill = true);
-    final subtotal = _subtotal;
     final percent = discountPercent.clamp(0, 100).toDouble();
-    final discount = subtotal * percent / 100;
-    final total = subtotal - discount;
     final shop = await DatabaseHelper.instance.getShopProfile();
+    final settings = await DatabaseHelper.instance.getBillSettings();
     final gstRegistered = shop?.gstRegistered ?? false;
     final shopStateCode = _stateCodeFromGstin(shop?.gstin);
     final supplyStateCode =
@@ -337,7 +336,7 @@ class _ScanScreenState extends State<ScanScreen> {
         shopStateCode != supplyStateCode;
     final itemCopies = _items
         .map(
-          (item) => _taxAdjustedItemCopy(
+          (item) => BillTotals.taxedItem(
             item,
             discountPercent: percent,
             gstRegistered: gstRegistered,
@@ -345,14 +344,12 @@ class _ScanScreenState extends State<ScanScreen> {
           ),
         )
         .toList();
-    final received = paidAmount.clamp(0, total).toDouble();
-    final taxableTotal = itemCopies.fold(
-      0.0,
-      (sum, item) => sum + item.totalTaxableValue,
+    final totals = BillTotals.fromTaxedItems(
+      itemCopies,
+      roundOff: settings.roundOffTotal,
     );
-    final cgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalCgst);
-    final sgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalSgst);
-    final igstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalIgst);
+    final total = totals.grandTotal;
+    final received = paidAmount.clamp(0, total).toDouble();
 
     final bill = Bill(
       billType: billType,
@@ -365,16 +362,17 @@ class _ScanScreenState extends State<ScanScreen> {
       customerGstTradeName: _cleanOptionalText(customerGstTradeName),
       customerAddressSnapshot: _cleanOptionalText(customerAddress),
       placeOfSupplyStateCode: supplyStateCode,
-      subtotalAmount: subtotal,
+      subtotalAmount: totals.subtotal,
       discountPercent: percent,
-      discountAmount: discount,
-      taxableAmount: taxableTotal,
-      cgstAmount: cgstTotal,
-      sgstAmount: sgstTotal,
-      igstAmount: igstTotal,
+      discountAmount: totals.discountAmount,
+      taxableAmount: totals.taxableAmount,
+      cgstAmount: totals.cgstAmount,
+      sgstAmount: totals.sgstAmount,
+      igstAmount: totals.igstAmount,
+      roundOffAmount: totals.roundOffAmount,
       totalAmount: total,
       itemCount: _itemCount,
-      isPaid: received >= total,
+      isPaid: received >= total - 0.005,
       paymentMethod: paymentMethod,
       paidAmount: received,
       transactionReference: transactionReference,
@@ -382,56 +380,11 @@ class _ScanScreenState extends State<ScanScreen> {
     );
 
     try {
-      return await DatabaseHelper.instance.insertBill(bill, itemCopies);
+      final id = await DatabaseHelper.instance.insertBill(bill, itemCopies);
+      return (id: id, totals: totals);
     } finally {
       if (mounted) setState(() => _isSavingBill = false);
     }
-  }
-
-  BillItem _taxAdjustedItemCopy(
-    BillItem item, {
-    required double discountPercent,
-    required bool gstRegistered,
-    required bool interState,
-  }) {
-    final quantity = item.quantity;
-    final gstPercent = item.gstPercentSnapshot ?? 0.0;
-    final discountFactor = (1 - discountPercent / 100).clamp(0.0, 1.0);
-    final discountedUnitGross = item.sellingPriceSnapshot * discountFactor;
-    final taxableUnit = gstRegistered && gstPercent > 0
-        ? discountedUnitGross / (1 + gstPercent / 100)
-        : discountedUnitGross;
-    final gstUnit = gstRegistered
-        ? (discountedUnitGross - taxableUnit).clamp(0.0, double.infinity)
-        : 0.0;
-    final cgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
-    final sgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
-    final igstUnit = gstRegistered && interState ? gstUnit : 0.0;
-
-    return BillItem(
-      uuid: item.uuid,
-      shopId: item.shopId,
-      productId: item.productId,
-      productUuid: item.productUuid,
-      productName: item.productName,
-      hsnCodeSnapshot: item.hsnCodeSnapshot,
-      hsnTypeSnapshot: item.hsnTypeSnapshot,
-      mrp: item.mrp,
-      unit: item.unit,
-      purchasePriceSnapshot: item.purchasePriceSnapshot,
-      sellingPriceSnapshot: item.sellingPriceSnapshot,
-      costSnapshot: item.costSnapshot,
-      profitSnapshot: item.profitSnapshot,
-      commissionSnapshot: item.commissionSnapshot,
-      gstSnapshot: _roundMoney(gstUnit),
-      gstPercentSnapshot: item.gstPercentSnapshot,
-      taxableValueSnapshot: _roundMoney(taxableUnit),
-      cgstAmountSnapshot: _roundMoney(cgstUnit),
-      sgstAmountSnapshot: _roundMoney(sgstUnit),
-      igstAmountSnapshot: _roundMoney(igstUnit),
-      wasDirectPrice: item.wasDirectPrice,
-      quantity: quantity,
-    );
   }
 
   Future<void> _openBillSheet() async {
@@ -446,7 +399,18 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _runBillCheckout() async {
     final customers = await DatabaseHelper.instance.getAllCustomers();
+    final settings = await DatabaseHelper.instance.getBillSettings();
     if (!mounted) return;
+    final cartItems = List<BillItem>.of(_items);
+    // GST-inclusive prices: the payable total does not depend on GST
+    // registration or inter-state supply, only on discount and round-off.
+    BillTotals totalsFor(double discountPercent) => BillTotals.forCart(
+      cartItems,
+      discountPercent: discountPercent,
+      gstRegistered: false,
+      interState: false,
+      roundOff: settings.roundOffTotal,
+    );
 
     try {
       final draft = await showModalBottomSheet<_BillDraft>(
@@ -459,13 +423,13 @@ class _ScanScreenState extends State<ScanScreen> {
         ),
         builder: (_) => _BillCheckoutSheet(
           customers: customers,
-          subtotal: _subtotal,
+          totalsFor: totalsFor,
           itemCount: _itemCount,
           initialBill: widget.duplicateFromBill,
         ),
       );
       if (draft == null) return;
-      final billId = await _completeBill(
+      final saved = await _completeBill(
         customerName: draft.customerName,
         customerPhone: draft.customerPhone,
         billType: draft.billType,
@@ -479,21 +443,20 @@ class _ScanScreenState extends State<ScanScreen> {
         paymentMethod: draft.paymentMethod,
         transactionReference: draft.transactionReference,
       );
-      if (billId == null || !mounted) return;
-      final totalAmount =
-          _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100);
+      if (saved == null || !mounted) return;
+      final totalAmount = saved.totals.grandTotal;
       final itemCount = _itemCount;
       // The bill is saved: empty the cart now so no path back to this screen
       // (e.g. Android back on the success dialog) can save it a second time.
       setState(() => _items.clear());
       await _showBillCreatedDialog(
-        billId: billId,
+        billId: saved.id,
         customerName: draft.customerName.trim().isEmpty
             ? 'Walk-in Customer'
             : draft.customerName.trim(),
         totalAmount: totalAmount,
         itemCount: itemCount,
-        isPaid: draft.paidAmount >= totalAmount,
+        isPaid: draft.paidAmount >= totalAmount - 0.005,
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -608,7 +571,6 @@ class _ScanScreenState extends State<ScanScreen> {
     return digits.padLeft(2, '0').substring(0, 2);
   }
 
-  double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
 
   Widget _buildModeSelector() {
     return Padding(

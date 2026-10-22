@@ -212,6 +212,24 @@ void main() {
       },
     );
 
+    test('round-off amount is stored and loaded with the bill', () async {
+      await db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          subtotalAmount: 58.6,
+          roundOffAmount: 0.4,
+          totalAmount: 59,
+          itemCount: 1,
+        ),
+        [BillItem(productName: 'Item', mrp: 58.6)],
+      );
+      final bill = (await db.getAllBills()).single;
+      expect(bill.roundOffAmount, 0.4);
+      expect(bill.totalAmount, 59);
+      expect(bill.paidAmount, 59);
+      expect(bill.balanceDue, 0);
+    });
+
     test('only admins can mark a paid bill unpaid', () async {
       final billId = await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),

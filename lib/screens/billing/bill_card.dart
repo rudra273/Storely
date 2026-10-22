@@ -271,16 +271,23 @@ class _BillCardState extends State<_BillCard> {
                       ),
                     ),
                     const Divider(height: AppSpacing.lg),
-                    if (bill.discountAmount > 0) ...[
+                    if (bill.discountAmount > 0 ||
+                        bill.roundOffAmount != 0) ...[
                       _AmountRow(
                         label: 'Subtotal',
                         value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
                       ),
-                      _AmountRow(
-                        label:
-                            'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
-                        value: '−₹${bill.discountAmount.toStringAsFixed(2)}',
-                      ),
+                      if (bill.discountAmount > 0)
+                        _AmountRow(
+                          label:
+                              'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
+                          value: '−₹${bill.discountAmount.toStringAsFixed(2)}',
+                        ),
+                      if (bill.roundOffAmount != 0)
+                        _AmountRow(
+                          label: 'Round off',
+                          value: _signedRupees(bill.roundOffAmount),
+                        ),
                       const SizedBox(height: AppSpacing.xs),
                     ],
                     Row(

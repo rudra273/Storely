@@ -316,6 +316,9 @@ class _BillsScreenState extends State<BillsScreen> {
         'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -₹${bill.discountAmount.toStringAsFixed(2)}',
       );
     }
+    if (bill.roundOffAmount != 0) {
+      buffer.writeln('Round off: ${_signedRupees(bill.roundOffAmount)}');
+    }
     buffer
       ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
       ..writeln('Paid: ₹${bill.paidAmount.toStringAsFixed(2)}')

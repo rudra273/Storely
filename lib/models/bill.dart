@@ -1,3 +1,5 @@
+import 'bill_totals.dart';
+
 class Bill {
   static const typeB2c = 'b2c';
   static const typeB2b = 'b2b';
@@ -30,6 +32,9 @@ class Bill {
   final double cgstAmount;
   final double sgstAmount;
   final double igstAmount;
+
+  /// Added to the line total to reach a whole-rupee grand total (+/- < 0.50).
+  final double roundOffAmount;
   final double totalAmount;
   final int itemCount;
   final bool isPaid;
@@ -76,6 +81,7 @@ class Bill {
     this.cgstAmount = 0,
     this.sgstAmount = 0,
     this.igstAmount = 0,
+    this.roundOffAmount = 0,
     required this.totalAmount,
     required this.itemCount,
     this.isPaid = true,
@@ -142,6 +148,7 @@ class Bill {
     'cgst_amount': cgstAmount,
     'sgst_amount': sgstAmount,
     'igst_amount': igstAmount,
+    'round_off_amount': roundOffAmount,
     'total_amount': totalAmount,
     'item_count': itemCount,
     'is_paid': isPaid ? 1 : 0,
@@ -199,6 +206,7 @@ class Bill {
       cgstAmount: (map['cgst_amount'] as num?)?.toDouble() ?? 0,
       sgstAmount: (map['sgst_amount'] as num?)?.toDouble() ?? 0,
       igstAmount: (map['igst_amount'] as num?)?.toDouble() ?? 0,
+      roundOffAmount: (map['round_off_amount'] as num?)?.toDouble() ?? 0,
       totalAmount: totalAmount,
       itemCount: map['item_count'] as int,
       isPaid: legacyPaid,
@@ -262,15 +270,27 @@ class BillItem {
   final DateTime? deletedAt;
 
   double get mrp => sellingPriceSnapshot;
-  double get subtotal => sellingPriceSnapshot * quantity;
+
+  /// Line value before bill discount (selling price x qty).
+  double get subtotal => roundMoney(sellingPriceSnapshot * quantity);
   double get totalCost => costSnapshot * quantity;
   double get totalProfit => profitSnapshot * quantity;
   double get totalCommission => commissionSnapshot * quantity;
-  double get totalGst => gstSnapshot * quantity;
-  double get totalTaxableValue => taxableValueSnapshot * quantity;
-  double get totalCgst => cgstAmountSnapshot * quantity;
-  double get totalSgst => sgstAmountSnapshot * quantity;
-  double get totalIgst => igstAmountSnapshot * quantity;
+
+  // Line tax amounts. Each is computed for the whole line and rounded once
+  // (never rounded per unit and then multiplied), and GST is derived as
+  // line amount - taxable so the two always add up. See [BillTotals].
+
+  /// Line value after bill discount, including tax.
+  double get lineAmount =>
+      roundMoney((taxableValueSnapshot + gstSnapshot) * quantity);
+  double get totalTaxableValue => roundMoney(taxableValueSnapshot * quantity);
+  double get totalGst => roundMoney(lineAmount - totalTaxableValue);
+  double get totalIgst => igstAmountSnapshot > 0 ? totalGst : 0;
+  double get totalCgst =>
+      cgstAmountSnapshot > 0 ? roundMoney(totalGst / 2) : 0;
+  double get totalSgst =>
+      sgstAmountSnapshot > 0 ? roundMoney(totalGst - totalCgst) : 0;
   double get totalNetProfit => totalProfit - totalCommission;
   String get unitLabel {
     final value = unit?.trim();

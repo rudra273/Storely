@@ -45,6 +45,9 @@ class BillSettings {
   final bool showGstTotal;
   final bool showGrandTotal;
   final bool showFooterText;
+
+  /// Round the grand total to the nearest rupee with a 'Round off' line.
+  final bool roundOffTotal;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -93,6 +96,7 @@ class BillSettings {
     this.showGstTotal = true,
     this.showGrandTotal = true,
     this.showFooterText = true,
+    this.roundOffTotal = true,
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
@@ -170,6 +174,7 @@ class BillSettings {
       showGstTotal: _flag(map['show_gst_total'], fallback: true),
       showGrandTotal: _flag(map['show_grand_total'], fallback: true),
       showFooterText: _flag(map['show_footer_text'], fallback: true),
+      roundOffTotal: _flag(map['round_off_total'], fallback: true),
       createdAt: _date(map['created_at']),
       updatedAt: _date(map['updated_at']),
       deletedAt: map['deleted_at'] == null
@@ -224,6 +229,7 @@ class BillSettings {
     'show_gst_total': showGstTotal ? 1 : 0,
     'show_grand_total': showGrandTotal ? 1 : 0,
     'show_footer_text': showFooterText ? 1 : 0,
+    'round_off_total': roundOffTotal ? 1 : 0,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
     'deleted_at': deletedAt?.toIso8601String(),
@@ -275,6 +281,7 @@ class BillSettings {
     bool? showGstTotal,
     bool? showGrandTotal,
     bool? showFooterText,
+    bool? roundOffTotal,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
@@ -332,6 +339,7 @@ class BillSettings {
       showGstTotal: showGstTotal ?? this.showGstTotal,
       showGrandTotal: showGrandTotal ?? this.showGrandTotal,
       showFooterText: showFooterText ?? this.showFooterText,
+      roundOffTotal: roundOffTotal ?? this.roundOffTotal,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,

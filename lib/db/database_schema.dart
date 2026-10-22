@@ -199,6 +199,7 @@ mixin DatabaseSchema {
         show_gst_total INTEGER NOT NULL DEFAULT 1,
         show_grand_total INTEGER NOT NULL DEFAULT 1,
         show_footer_text INTEGER NOT NULL DEFAULT 1,
+        round_off_total INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT
@@ -434,6 +435,7 @@ mixin DatabaseSchema {
         cgst_amount REAL NOT NULL DEFAULT 0,
         sgst_amount REAL NOT NULL DEFAULT 0,
         igst_amount REAL NOT NULL DEFAULT 0,
+        round_off_amount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
@@ -723,6 +725,7 @@ mixin DatabaseSchema {
       'cgst_amount': 'REAL NOT NULL DEFAULT 0',
       'sgst_amount': 'REAL NOT NULL DEFAULT 0',
       'igst_amount': 'REAL NOT NULL DEFAULT 0',
+      'round_off_amount': 'REAL NOT NULL DEFAULT 0',
       'paid_amount': 'REAL NOT NULL DEFAULT 0',
       'balance_due': 'REAL NOT NULL DEFAULT 0',
       'payment_status': "TEXT NOT NULL DEFAULT 'unpaid'",
@@ -766,6 +769,7 @@ mixin DatabaseSchema {
       'show_gst_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_grand_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_footer_text': 'INTEGER NOT NULL DEFAULT 1',
+      'round_off_total': 'INTEGER NOT NULL DEFAULT 1',
     });
   }
 

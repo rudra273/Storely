@@ -516,6 +516,13 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                               showGrandTotal: value,
                             ),
                           ),
+                          _switch(
+                            'Round grand total to nearest ₹1',
+                            _settings.roundOffTotal,
+                            (value) => _settings = _settings.copyWith(
+                              roundOffTotal: value,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.md),
@@ -826,6 +833,8 @@ class _PreviewSample {
   static const sgst = '17.15';
   static const gstTotal = '34.30';
   static const grandTotal = '224.90';
+  static const roundOff = '+0.10';
+  static const roundedGrandTotal = '225.00';
 }
 
 /// A live, scaled-down mock of the generated invoice PDF. Mirrors the section
@@ -1196,8 +1205,15 @@ class _BillPreviewPanel extends StatelessWidget {
         ['SGST', _PreviewSample.sgst, false],
       if (showGst && settings.showGstTotal)
         ['GST Total', _PreviewSample.gstTotal, false],
+      if (settings.roundOffTotal) ['Round off', _PreviewSample.roundOff, false],
       if (settings.showGrandTotal)
-        ['Grand total', _PreviewSample.grandTotal, true],
+        [
+          'Grand total',
+          settings.roundOffTotal
+              ? _PreviewSample.roundedGrandTotal
+              : _PreviewSample.grandTotal,
+          true,
+        ],
     ];
     if (rows.isEmpty) return null;
     return Align(

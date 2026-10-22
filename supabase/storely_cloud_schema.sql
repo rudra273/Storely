@@ -108,6 +108,7 @@ create table if not exists public.bill_settings (
   show_gst_total integer not null default 1,
   show_grand_total integer not null default 1,
   show_footer_text integer not null default 1,
+  round_off_total integer not null default 1,
   created_at text not null,
   updated_at text not null,
   deleted_at text
@@ -231,6 +232,7 @@ create table if not exists public.bills (
   cgst_amount double precision not null default 0,
   sgst_amount double precision not null default 0,
   igst_amount double precision not null default 0,
+  round_off_amount double precision not null default 0,
   total_amount double precision not null,
   item_count integer not null,
   is_paid integer not null default 1,

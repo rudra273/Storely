@@ -325,28 +325,49 @@ class BillPdfGenerator {
     final gstTotal = showGst
         ? bill.cgstAmount + bill.sgstAmount + bill.igstAmount
         : 0.0;
-    final rows = [
-      if (settings.showSubtotal) _totalRow('Subtotal', bill.subtotalAmount),
-      if (settings.showDiscount && bill.discountAmount > 0)
-        _totalRow(
-          'Discount (${bill.discountPercent.toStringAsFixed(2)}%)',
-          -bill.discountAmount,
-        ),
-      if (showGst && settings.showTaxableAmount)
-        _totalRow('Taxable Amount', bill.taxableAmount),
-      if (showGst && settings.showCgstSgstIgst && bill.cgstAmount > 0)
-        _totalRow('CGST', bill.cgstAmount),
-      if (showGst && settings.showCgstSgstIgst && bill.sgstAmount > 0)
-        _totalRow('SGST', bill.sgstAmount),
-      if (showGst && settings.showCgstSgstIgst && bill.igstAmount > 0)
-        _totalRow('IGST', bill.igstAmount),
-      if (showGst && settings.showGstTotal && gstTotal > 0)
-        _totalRow('GST Total', gstTotal),
-      if (settings.showGrandTotal) ...[
-        pw.Divider(),
-        _totalRow('Grand total', bill.totalAmount, bold: true),
-      ],
-    ];
+    final discountLabel =
+        'Discount (${bill.discountPercent.toStringAsFixed(2)}%)';
+    // GST layout: item lines are already after discount and include tax, so
+    // the totals read taxable + tax (+ round off) = grand total, matching the
+    // lines. The discount is shown for information only. Non-GST layout:
+    // item lines are before discount, so subtotal - discount = total.
+    final rows = showGst
+        ? [
+            if (settings.showDiscount && bill.discountAmount > 0)
+              _totalRow(
+                '$discountLabel on ${_money(bill.subtotalAmount)}',
+                -bill.discountAmount,
+                muted: true,
+              ),
+            if (settings.showTaxableAmount)
+              _totalRow('Taxable Amount', bill.taxableAmount),
+            if (settings.showCgstSgstIgst && bill.cgstAmount > 0)
+              _totalRow('CGST', bill.cgstAmount),
+            if (settings.showCgstSgstIgst && bill.sgstAmount > 0)
+              _totalRow('SGST', bill.sgstAmount),
+            if (settings.showCgstSgstIgst && bill.igstAmount > 0)
+              _totalRow('IGST', bill.igstAmount),
+            if (settings.showGstTotal && gstTotal > 0)
+              _totalRow('GST Total', gstTotal),
+            if (bill.roundOffAmount != 0)
+              _totalRow('Round off', bill.roundOffAmount),
+            if (settings.showGrandTotal) ...[
+              pw.Divider(),
+              _totalRow('Grand total', bill.totalAmount, bold: true),
+            ],
+          ]
+        : [
+            if (settings.showSubtotal)
+              _totalRow('Subtotal', bill.subtotalAmount),
+            if (settings.showDiscount && bill.discountAmount > 0)
+              _totalRow(discountLabel, -bill.discountAmount),
+            if (bill.roundOffAmount != 0)
+              _totalRow('Round off', bill.roundOffAmount),
+            if (settings.showGrandTotal) ...[
+              pw.Divider(),
+              _totalRow('Grand total', bill.totalAmount, bold: true),
+            ],
+          ];
     if (rows.isEmpty) return pw.SizedBox();
 
     return pw.Align(
@@ -453,7 +474,7 @@ class BillPdfGenerator {
 
   static double _lineAmount(BillItem item, {required bool showGst}) {
     if (!showGst) return item.subtotal;
-    return item.totalTaxableValue + item.totalGst;
+    return item.lineAmount;
   }
 
   static String _taxLabel(double? percent) {
@@ -497,10 +518,16 @@ class BillPdfGenerator {
     ];
   }
 
-  static pw.Widget _totalRow(String label, double value, {bool bold = false}) {
+  static pw.Widget _totalRow(
+    String label,
+    double value, {
+    bool bold = false,
+    bool muted = false,
+  }) {
     final style = pw.TextStyle(
       fontSize: bold ? 12 : 9,
       fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+      color: muted ? PdfColors.grey700 : null,
     );
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
