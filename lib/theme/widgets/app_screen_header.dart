@@ -75,7 +75,7 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
                       ],
                     ),
               ),
-              if (actions != null) ...actions!,
+              ...?actions,
             ],
           ),
         ),
