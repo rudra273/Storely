@@ -1,4 +1,5 @@
 import 'invoice_numbering.dart';
+import 'shop_profile.dart';
 
 class BillSettings {
   static const defaultInvoiceTitle = 'TAX INVOICE';
@@ -105,6 +106,18 @@ class BillSettings {
   }) : createdAt = createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
        updatedAt =
            updatedAt ?? createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Document title for a bill. A custom title typed in Bill Settings always
+  /// wins; the default title is replaced by the one GST requires:
+  /// TAX INVOICE when the bill carries GST, BILL OF SUPPLY for a registered
+  /// (regular or composition) shop billing without tax, and BILL otherwise.
+  String documentTitle({required bool billHasGst, required String gstScheme}) {
+    final custom = invoiceTitle.trim().toUpperCase();
+    if (custom.isNotEmpty && custom != defaultInvoiceTitle) return custom;
+    if (billHasGst) return 'TAX INVOICE';
+    if (gstScheme == GstScheme.unregistered) return 'BILL';
+    return 'BILL OF SUPPLY';
+  }
 
   factory BillSettings.fromMap(Map<String, dynamic> map) {
     return BillSettings(

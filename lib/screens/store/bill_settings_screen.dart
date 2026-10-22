@@ -263,6 +263,10 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                         textCapitalization: TextCapitalization.characters,
                         decoration: const InputDecoration(
                           labelText: 'Invoice title',
+                          helperText:
+                              'Keep TAX INVOICE to switch automatically to '
+                              'BILL OF SUPPLY or BILL when a bill has no GST',
+                          helperMaxLines: 2,
                           prefixIcon: Icon(Icons.title_rounded),
                         ),
                       ),

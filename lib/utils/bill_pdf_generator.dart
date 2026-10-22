@@ -42,7 +42,7 @@ class BillPdfGenerator {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
         build: (context) => [
-          _header(bill, shop, billSettings),
+          _header(bill, shop, billSettings, billHasGst: billHasGst),
           if (_showHeader(billSettings)) pw.SizedBox(height: 10),
           _partyBlock(bill, shop, billSettings),
           pw.SizedBox(height: 10),
@@ -73,12 +73,16 @@ class BillPdfGenerator {
   static pw.Widget _header(
     Bill bill,
     ShopProfile? shop,
-    BillSettings settings,
-  ) {
+    BillSettings settings, {
+    required bool billHasGst,
+  }) {
     if (!_showHeader(settings)) return pw.SizedBox();
-    final title = settings.invoiceTitle.trim().isEmpty
-        ? BillSettings.defaultInvoiceTitle
-        : settings.invoiceTitle.trim().toUpperCase();
+    final scheme = shop?.gstScheme ?? GstScheme.unregistered;
+    final title = settings.documentTitle(
+      billHasGst: billHasGst,
+      gstScheme: scheme,
+    );
+    final showLegend = scheme == GstScheme.composition && !billHasGst;
     final logo = settings.showShopLogo
         ? _imageProvider(settings.shopLogoBase64)
         : null;
@@ -101,13 +105,25 @@ class BillPdfGenerator {
           ),
           pw.Expanded(
             child: settings.showInvoiceTitle
-                ? pw.Text(
-                    title,
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      fontSize: 18,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
+                ? pw.Column(
+                    children: [
+                      pw.Text(
+                        title,
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      if (showLegend) ...[
+                        pw.SizedBox(height: 3),
+                        pw.Text(
+                          GstScheme.compositionLegend,
+                          textAlign: pw.TextAlign.center,
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
+                      ],
+                    ],
                   )
                 : pw.SizedBox(),
           ),

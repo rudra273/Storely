@@ -19,7 +19,10 @@ class _ShopPanel extends StatelessWidget {
       if (profile?.phone != null) profile!.phone!,
       if (profile?.email != null) profile!.email!,
       if (profile?.gstin != null) 'GSTIN ${profile!.gstin}',
-      gstRegistered ? 'GST registered' : 'GST not registered',
+      GstScheme.label(
+        profile?.gstScheme ??
+            (gstRegistered ? GstScheme.regular : GstScheme.unregistered),
+      ),
     ];
     return _StorePanel(
       child: Row(

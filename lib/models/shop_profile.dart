@@ -1,3 +1,28 @@
+/// How the shop is registered under GST. Decides the document type:
+/// regular -> TAX INVOICE with GST; composition -> BILL OF SUPPLY, no tax;
+/// unregistered -> plain BILL, no GST.
+class GstScheme {
+  static const regular = 'regular';
+  static const composition = 'composition';
+  static const unregistered = 'unregistered';
+  static const values = [regular, composition, unregistered];
+
+  /// Legend CGST Rule 49 requires on a composition dealer's bill of supply.
+  static const compositionLegend =
+      'Composition taxable person, not eligible to collect tax on supplies';
+
+  static String clean(String? value, {bool fallbackRegistered = false}) {
+    if (values.contains(value)) return value!;
+    return fallbackRegistered ? regular : unregistered;
+  }
+
+  static String label(String scheme) => switch (scheme) {
+    regular => 'GST registered (regular)',
+    composition => 'GST composition scheme',
+    _ => 'GST not registered',
+  };
+}
+
 class ShopProfile {
   final int? id;
   final String uuid;
@@ -6,7 +31,7 @@ class ShopProfile {
   final String? email;
   final String? gstin;
   final String? address;
-  final bool gstRegistered;
+  final String gstScheme;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -19,11 +44,16 @@ class ShopProfile {
     String? email,
     String? gstin,
     String? address,
-    this.gstRegistered = false,
+    bool gstRegistered = false,
+    String? gstScheme,
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
   }) : uuid = uuid ?? '',
+       gstScheme = GstScheme.clean(
+         gstScheme,
+         fallbackRegistered: gstRegistered,
+       ),
        phone = _cleanOptional(phone),
        email = _cleanOptional(email),
        gstin = _cleanOptional(gstin),
@@ -31,9 +61,15 @@ class ShopProfile {
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
+  /// Charges GST on its bills (regular scheme only).
+  bool get gstRegistered => gstScheme == GstScheme.regular;
+
+  /// Has a GSTIN (regular or composition).
+  bool get hasGstRegistration => gstScheme != GstScheme.unregistered;
+
   factory ShopProfile.fromMap(
     Map<String, dynamic> map, {
-    bool gstRegistered = false,
+    String? gstScheme,
   }) {
     return ShopProfile(
       id: map['id'] as int?,
@@ -43,7 +79,7 @@ class ShopProfile {
       email: map['email'] as String?,
       gstin: map['gstin'] as String?,
       address: map['address'] as String?,
-      gstRegistered: gstRegistered,
+      gstScheme: gstScheme,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt:
           DateTime.tryParse(map['updated_at']?.toString() ?? '') ??
