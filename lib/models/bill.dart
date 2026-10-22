@@ -292,6 +292,11 @@ class BillItem {
   double get totalSgst =>
       sgstAmountSnapshot > 0 ? roundMoney(totalGst - totalCgst) : 0;
   double get totalNetProfit => totalProfit - totalCommission;
+
+  /// Profit actually made on this line: taxable value after the bill
+  /// discount minus cost (GST is never profit).
+  double get lineProfit =>
+      roundMoney((taxableValueSnapshot - costSnapshot) * quantity);
   String get unitLabel {
     final value = unit?.trim();
     return value == null || value.isEmpty ? '' : value;

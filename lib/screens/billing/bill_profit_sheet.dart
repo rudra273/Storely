@@ -45,9 +45,10 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
   @override
   Widget build(BuildContext context) {
     final bill = widget.bill;
-    final revenue = bill.items.fold(0.0, (sum, item) => sum + item.subtotal);
+    // Sales after discount - GST - cost = profit (round-off excluded).
+    final revenue = bill.items.fold(0.0, (sum, item) => sum + item.lineAmount);
     final cost = bill.items.fold(0.0, (sum, item) => sum + item.totalCost);
-    final profit = bill.items.fold(0.0, (sum, item) => sum + item.totalProfit);
+    final profit = bill.items.fold(0.0, (sum, item) => sum + item.lineProfit);
     final commission = profit > 0 ? profit * _commissionPercent / 100 : 0.0;
     final gst = bill.items.fold(0.0, (sum, item) => sum + item.totalGst);
     final net = profit - commission;
@@ -92,10 +93,9 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                 color: AppColors.bg,
                 child: Column(
                   children: [
-                    _ProfitRow('Total Revenue', revenue),
-                    _ProfitRow('Purchase Cost', cost),
-                    _ProfitRow('Overhead', 0.0),
+                    _ProfitRow('Sales (after discount)', revenue),
                     if (gst > 0) _ProfitRow('GST', gst),
+                    _ProfitRow('Cost (incl. overhead)', cost),
                     const Divider(height: AppSpacing.lg),
                     _ProfitRow(
                       'Gross Profit',

@@ -255,11 +255,23 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
   'total_revenue': (ctx, db, from, to) => _KpiTile<double>(
     title: 'Total Revenue',
     load: () => db.kpiTotalRevenue(from: from, to: to),
-    builder: (v) => KpiCard(
-      title: 'TOTAL REVENUE',
-      value: fmtRupee(v),
-      subtitle: 'All paid bills',
-      icon: Icons.currency_rupee_rounded,
+    builder: (v) => KpiCardRow(
+      left: KpiCard(
+        title: 'SALES',
+        value: fmtRupee(v),
+        subtitle: 'All bills, paid or not',
+        icon: Icons.currency_rupee_rounded,
+      ),
+      right: _KpiTile<double>(
+        title: 'Collected',
+        load: () => db.kpiCollected(from: from, to: to),
+        builder: (c) => KpiCard(
+          title: 'COLLECTED',
+          value: fmtRupee(c),
+          subtitle: 'Payments received',
+          icon: Icons.account_balance_wallet_rounded,
+        ),
+      ),
     ),
   ),
   'avg_order_value': (ctx, db, from, to) => _KpiTile<double>(
