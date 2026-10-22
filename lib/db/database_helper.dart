@@ -99,7 +99,15 @@ String? _normaliseName(String? value) {
 
 String _newUuid() => _uuid.v4();
 
+/// Sync bookkeeping (updated_at, deleted_at): UTC, compared across devices.
 String _nowIso() => DateTime.now().toUtc().toIso8601String();
+
+/// Business dates (bill created_at, payment received_at, stock movement
+/// created_at): local wall-clock time without a zone, because reports group
+/// them by the shop's calendar day with substr(col, 1, 10). Mixing in UTC put
+/// anything between 00:00 and 05:30 IST on the previous day.
+String _localIso([DateTime? time]) =>
+    (time ?? DateTime.now()).toLocal().toIso8601String();
 
 bool _isPresetUnit(String value) {
   return Product.presetUnits.any(

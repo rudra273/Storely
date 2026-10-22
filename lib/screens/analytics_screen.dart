@@ -45,29 +45,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   void _setPeriod(int idx) {
-    final now = DateTime.now();
+    // "Last N days" includes today, so it starts N - 1 days ago.
+    String startOfLast(int days) => DateTime.now()
+        .subtract(Duration(days: days - 1))
+        .toIso8601String()
+        .substring(0, 10);
     setState(() {
       _periodIdx = idx;
       _to = null;
-      switch (idx) {
-        case 0:
-          _from = now
-              .subtract(const Duration(days: 7))
-              .toIso8601String()
-              .substring(0, 10);
-        case 1:
-          _from = now
-              .subtract(const Duration(days: 30))
-              .toIso8601String()
-              .substring(0, 10);
-        case 2:
-          _from = now
-              .subtract(const Duration(days: 90))
-              .toIso8601String()
-              .substring(0, 10);
-        default:
-          _from = null;
-      }
+      _from = switch (idx) {
+        0 => startOfLast(7),
+        1 => startOfLast(30),
+        2 => startOfLast(90),
+        _ => null,
+      };
     });
   }
 

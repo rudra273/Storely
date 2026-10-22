@@ -232,6 +232,44 @@ void main() {
       expect(bill.balanceDue, 0);
     });
 
+    test('payment and stock dates are stored in local time', () async {
+      final productId = await db.insertProduct(
+        Product(name: 'Tea', mrp: 0, purchasePrice: 10, quantity: 5),
+      );
+      final product = await db.getProductById(productId);
+      final item = await db.buildBillItemForProduct(product!);
+      final billId = await db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          subtotalAmount: item.subtotal,
+          totalAmount: item.subtotal,
+          itemCount: 1,
+          isPaid: false,
+        ),
+        [item],
+      );
+      // An instant given in UTC must land on the shop's local calendar day.
+      final paidAt = DateTime.utc(2026, 1, 10, 20, 0);
+      await db.recordBillPayment(billId, amount: 1, receivedAt: paidAt);
+      await db.updateBillPaidStatus(billId, true);
+
+      final raw = await db.database;
+      final received = (await raw.query('bill_payments', orderBy: 'id'))
+          .map((row) => row['received_at'] as String)
+          .toList();
+      expect(received.first, paidAt.toLocal().toIso8601String());
+      expect(received.every((value) => !value.endsWith('Z')), isTrue);
+
+      final movements = await raw.query('stock_movements');
+      expect(
+        movements.every((row) => !(row['created_at'] as String).endsWith('Z')),
+        isTrue,
+      );
+
+      final day = paidAt.toLocal().toIso8601String().substring(0, 10);
+      expect(await db.kpiCollected(from: day, to: day), 1);
+    });
+
     test('only admins can mark a paid bill unpaid', () async {
       final billId = await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),

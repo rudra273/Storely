@@ -963,7 +963,7 @@ mixin DatabaseProducts {
       'import_batch_key': importBatchKey,
       'import_row_number': importRowNumber,
       'notes': notes,
-      'created_at': (createdAt ?? now).toIso8601String(),
+      'created_at': _localIso(createdAt),
       'updated_at': now.toIso8601String(),
     });
   }

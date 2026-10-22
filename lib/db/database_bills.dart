@@ -31,6 +31,7 @@ mixin DatabaseBills {
         'invoice_series_uuid': billNumber.seriesUuid,
         'customer_id': customerInfo?.id,
         'customer_uuid': customerInfo?.uuid,
+        'created_at': _localIso(bill.createdAt),
         'updated_at': _nowIso(),
       };
       final billId = await txn.insert('bills', billMap..remove('id'));
@@ -42,7 +43,7 @@ mixin DatabaseBills {
               ? shopId
               : item.shopId,
           'bill_uuid': billUuid,
-          'created_at': bill.createdAt.toIso8601String(),
+          'created_at': _localIso(bill.createdAt),
           'updated_at': _nowIso(),
         };
         await txn.insert('bill_items', itemMap..remove('id'));
@@ -64,7 +65,7 @@ mixin DatabaseBills {
           'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
           'payment_method': bill.paymentMethod,
           'payment_reference': _normaliseName(bill.transactionReference),
-          'received_at': bill.createdAt.toIso8601String(),
+          'received_at': _localIso(bill.createdAt),
           'created_at': bill.createdAt.toIso8601String(),
           'updated_at': _nowIso(),
         });
@@ -387,7 +388,7 @@ mixin DatabaseBills {
           'amount': balance,
           'payment_method': paymentMethod ?? 'cash',
           'payment_reference': _normaliseName(paymentReference),
-          'received_at': now,
+          'received_at': _localIso(),
           'created_at': now,
           'updated_at': now,
         });
@@ -431,7 +432,7 @@ mixin DatabaseBills {
         'payment_method': paymentMethod,
         'payment_reference': _normaliseName(paymentReference),
         'notes': _normaliseName(notes),
-        'received_at': (receivedAt ?? DateTime.now()).toIso8601String(),
+        'received_at': _localIso(receivedAt),
         'created_at': now,
         'updated_at': now,
       });
@@ -806,7 +807,7 @@ mixin DatabaseBills {
       'source_document_type': sourceDocumentType,
       'source_document_id': sourceDocumentId,
       'source_document_uuid': sourceDocumentUuid,
-      'created_at': (createdAt ?? now).toIso8601String(),
+      'created_at': _localIso(createdAt),
       'updated_at': now.toIso8601String(),
     });
   }
