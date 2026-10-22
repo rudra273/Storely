@@ -143,6 +143,67 @@ void main() {
       ),
     );
   });
+
+  test('CSV keeps codes as text and reads Indian amounts', () async {
+    const csv =
+        'product_code,barcode,product_name,purchase_price,selling_price,quantity,unit\n'
+        '00042,0089012345,Atta 5kg,Rs.250,"₹ 1,250.00 /-",2.5 kg,kg\n';
+    final products = await CsvImporter.parseBytes(
+      Uint8List.fromList(utf8.encode(csv)),
+      fileName: 'purchase.csv',
+    );
+    final atta = products.single;
+    expect(atta.productCode, '00042');
+    expect(atta.barcode, '0089012345');
+    expect(atta.purchasePrice, 250);
+    expect(atta.manualPrice, 1250);
+    expect(atta.quantity, 2.5);
+  });
+
+  test('parseIndianNumber accepts real-world formats and rejects junk', () {
+    expect(CsvImporter.parseIndianNumber('Rs.250'), 250);
+    expect(CsvImporter.parseIndianNumber('rs 99.5'), 99.5);
+    expect(CsvImporter.parseIndianNumber('INR 1,25,000'), 125000);
+    expect(CsvImporter.parseIndianNumber('250/-'), 250);
+    expect(CsvImporter.parseIndianNumber('10 pcs'), 10);
+    expect(CsvImporter.parseIndianNumber('-3'), -3);
+    expect(CsvImporter.parseIndianNumber('12abc34'), isNull);
+    expect(CsvImporter.parseIndianNumber('abc'), isNull);
+  });
+
+  test('restock from an import row keeps fields the file lacks', () {
+    final existing = Product(
+      id: 7,
+      name: 'Atta 5kg',
+      mrp: 0,
+      purchasePrice: 200,
+      quantity: 10,
+      barcode: '890111',
+      hsnCode: '1101',
+      gstPercent: 5,
+      category: 'Grocery',
+      supplier: 'Old Supplier',
+      directPriceToggle: true,
+      manualPrice: 280,
+    );
+    final row = Product(
+      name: 'Atta 5kg',
+      mrp: 0,
+      purchasePrice: 230,
+      quantity: 4,
+    );
+
+    final merged = existing.withImportRow(row, applySupplier: false);
+    expect(merged.purchasePrice, 230);
+    expect(merged.barcode, '890111');
+    expect(merged.hsnCode, '1101');
+    expect(merged.gstPercent, 5);
+    expect(merged.category, 'Grocery');
+    expect(merged.supplier, 'Old Supplier');
+    expect(merged.directPriceToggle, isTrue);
+    expect(merged.manualPrice, 280);
+    expect(merged.id, 7);
+  });
 }
 
 Uint8List _xlsxBytes(List<List<Object?>> rows) {

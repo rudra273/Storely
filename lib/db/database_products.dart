@@ -164,12 +164,24 @@ mixin DatabaseProducts {
     });
   }
 
+  /// [importedRows] are the rows parsed from import files in this purchase
+  /// (as previewed with [wouldImportDuplicate]). Their stock movements are
+  /// tagged with the import batch key so re-importing the same file is caught.
   Future<int> commitProductPurchaseBatch(
     List<ProductPurchaseCommit> commits, {
     required DateTime purchaseDate,
+    List<Product> importedRows = const [],
   }) async {
     await _requireAdminMutation();
     if (commits.isEmpty) return 0;
+    final batchKey = importedRows.isEmpty
+        ? null
+        : _importBatchKey(
+            importedRows.map(_asImportedProduct).toList(),
+            purchaseDate,
+          );
+    String? keyFor(Product product) =>
+        product.source == ProductSource.imported ? batchKey : null;
     final db = await database;
     return db.transaction((txn) async {
       var committed = 0;
@@ -191,6 +203,7 @@ mixin DatabaseProducts {
             quantityAdded: commit.quantityAdded,
             purchaseDate: purchaseDate,
             source: commit.product.source,
+            importBatchKey: keyFor(commit.product),
           );
           if (count == 0) {
             throw StateError('Product "${target.name}" no longer exists');
@@ -200,6 +213,7 @@ mixin DatabaseProducts {
             txn,
             commit.product,
             purchaseDate: purchaseDate,
+            importBatchKey: keyFor(commit.product),
           );
         }
         committed++;
@@ -802,6 +816,7 @@ mixin DatabaseProducts {
     DatabaseExecutor executor,
     Product product, {
     DateTime? purchaseDate,
+    String? importBatchKey,
   }) async {
     final productToInsert = await _prepareProductForWrite(executor, product);
     await _assertProductCodeAndBarcodeUnique(executor, productToInsert);
@@ -822,6 +837,7 @@ mixin DatabaseProducts {
             ? 'import'
             : 'manual',
         supplierId: productToInsert.supplierId,
+        importBatchKey: importBatchKey,
         createdAt: purchaseDate ?? productToInsert.createdAt,
       );
       await _syncProductQuantityCache(executor, id);
@@ -835,6 +851,7 @@ mixin DatabaseProducts {
     required num quantityAdded,
     required DateTime purchaseDate,
     String source = ProductSource.mobile,
+    String? importBatchKey,
   }) async {
     if (product.id == null) throw ArgumentError('Product id is required');
     final existing = await _queryProducts(
@@ -873,6 +890,7 @@ mixin DatabaseProducts {
       unitCost: updatedProduct.purchasePrice,
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
       supplierId: updatedProduct.supplierId,
+      importBatchKey: importBatchKey,
       createdAt: purchaseDate,
     );
     await _syncProductQuantityCache(executor, product.id!);

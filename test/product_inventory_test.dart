@@ -374,6 +374,33 @@ void main() {
       expect(product!.quantity, 7);
     });
   });
+
+  test('re-importing the same purchase file is detected', () async {
+    final date = DateTime(2026, 10, 20);
+    final rows = [
+      Product(
+        name: 'Atta 5kg',
+        mrp: 0,
+        purchasePrice: 230,
+        quantity: 4,
+        source: ProductSource.imported,
+      ),
+    ];
+    expect(await db.wouldImportDuplicate(rows, purchaseDate: date), isFalse);
+
+    await db.commitProductPurchaseBatch(
+      [ProductPurchaseCommit(product: rows.single, quantityAdded: 4)],
+      purchaseDate: date,
+      importedRows: rows,
+    );
+
+    expect(await db.wouldImportDuplicate(rows, purchaseDate: date), isTrue);
+    // Same file on another day is still flagged.
+    expect(
+      await db.wouldImportDuplicate(rows, purchaseDate: DateTime(2026, 10, 21)),
+      isTrue,
+    );
+  });
 }
 
 Future<void> _deleteStorelyDb() async {

@@ -1055,6 +1055,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Future<int> _commitPurchaseBatch(
     List<_PurchaseDraft> drafts,
     DateTime purchaseDate,
+    List<Product> importedRows,
   ) async {
     final commits = drafts.map((draft) {
       final target = draft.restockTarget ?? _matchExistingByName(draft.name);
@@ -1067,6 +1068,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return DatabaseHelper.instance.commitProductPurchaseBatch(
       commits,
       purchaseDate: purchaseDate,
+      importedRows: importedRows,
     );
   }
 

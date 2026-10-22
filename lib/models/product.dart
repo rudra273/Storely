@@ -200,6 +200,25 @@ class Product {
         : DateTime.tryParse(map['deleted_at'] as String),
   );
 
+  /// This existing product restocked from an import file [row]. Only what
+  /// the file provides is overwritten, so columns the file lacks (HSN, GST %,
+  /// barcode, category, pricing rules...) are kept instead of wiped.
+  Product withImportRow(Product row, {required bool applySupplier}) {
+    final sellingPrice = row.manualPrice;
+    return copyWith(
+      purchasePrice: row.purchasePrice,
+      productCode: row.productCode,
+      barcode: row.barcode,
+      category: row.category,
+      unit: row.unit,
+      supplier: applySupplier ? row.supplier : null,
+      directPriceToggle: sellingPrice == null ? null : true,
+      manualPrice: sellingPrice,
+      sellingPrice: sellingPrice,
+      source: ProductSource.imported,
+    );
+  }
+
   Product copyWith({
     int? id,
     String? uuid,

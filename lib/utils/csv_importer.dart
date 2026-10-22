@@ -156,7 +156,11 @@ class CsvImporter {
 
   /// Reads CSV content into rows.
   static List<List<dynamic>> _readCsv(String content) {
-    return const CsvToListConverter().convert(content, eol: '\n');
+    // Keep every cell as text: number parsing turned barcodes/codes like
+    // "001234" into 1234 and long codes into doubles, so they never matched.
+    return const CsvToListConverter(
+      shouldParseNumbers: false,
+    ).convert(content, eol: '\n');
   }
 
   /// Reads an Excel file on a background isolate to prevent UI jank/crashes.
@@ -535,14 +539,25 @@ class CsvImporter {
     if (index == null || index >= row.length) return null;
     final raw = row[index].toString().trim();
     if (raw.isEmpty) return null;
-    final normalised = raw
-        .replaceAll(',', '')
-        .replaceAll(RegExp(r'[^0-9.\-]'), '');
-    final value = double.tryParse(normalised);
+    final value = parseIndianNumber(raw);
     if (value == null) {
       errors.add('Row $rowNumber: Invalid $label "$raw"');
     }
     return value;
+  }
+
+  /// Parses amounts as Indian shops write them: "Rs.250", "₹ 1,25,000.50",
+  /// "INR 99", "250/-", and quantities with a unit ("2.5 kg"). Returns null for anything else instead of guessing
+  /// (the old digit-stripping read "Rs.250" as 0.25).
+  @visibleForTesting
+  static double? parseIndianNumber(String raw) {
+    var text = raw.trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^(rs\.?|inr|₹)\s*'), '');
+    text = text.replaceFirst(RegExp(r'\s*/-$'), '');
+    text = text.replaceAll(',', '');
+    // Optional trailing unit word, e.g. "2.5 kg", "10 pcs", "250 rs".
+    final match = RegExp(r'^(-?\d+(\.\d+)?)\s*[a-z]*\.?$').firstMatch(text);
+    return match == null ? null : double.tryParse(match.group(1)!);
   }
 
   static bool _hasCellValue(List row, int? index) {
