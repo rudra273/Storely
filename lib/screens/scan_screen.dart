@@ -14,6 +14,7 @@ part 'scan/customer_suggestion_list.dart';
 part 'scan/bill_summary_widgets.dart';
 part 'scan/bill_draft.dart';
 part 'scan/bill_checkout_sheet.dart';
+part 'scan/quantity_input.dart';
 
 enum BillingEntryMode { scan, manual }
 
@@ -33,6 +34,10 @@ class ScanScreen extends StatefulWidget {
 class _ScanScreenState extends State<ScanScreen> {
   static const _scanCooldown = Duration(seconds: 1);
   static const _invalidScanCooldown = Duration(seconds: 2);
+  // The scanner reports a code ~every 250ms while it stays in frame. The same
+  // code only counts again once it has been out of view for this long, so a
+  // product held under the camera is added once, not once per cooldown.
+  static const _sameCodeHoldWindow = Duration(milliseconds: 1500);
 
   final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
@@ -41,9 +46,11 @@ class _ScanScreenState extends State<ScanScreen> {
   late BillingEntryMode _entryMode;
   bool _isProcessing = false;
   bool _isSavingBill = false;
+  bool _isOpeningBillSheet = false;
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   String? _lastScanned;
+  DateTime? _lastScannedSeenAt;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
   int get _itemCount =>
@@ -97,16 +104,41 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_isProcessing) return;
     final barcode = capture.barcodes.firstOrNull;
     if (barcode == null || barcode.rawValue == null) return;
 
     final raw = barcode.rawValue!;
-    if (raw == _lastScanned) return; // Avoid duplicate rapid scans
+    final now = DateTime.now();
+    final lastSeenAt = _lastScannedSeenAt;
+    final sameCodeStillInView =
+        raw == _lastScanned &&
+        lastSeenAt != null &&
+        now.difference(lastSeenAt) < _sameCodeHoldWindow;
+    if (raw == _lastScanned) _lastScannedSeenAt = now;
+    if (sameCodeStillInView || _isProcessing) return;
 
     setState(() => _isProcessing = true);
     _lastScanned = raw;
+    _lastScannedSeenAt = now;
 
+    try {
+      await _handleScannedCode(raw);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _showAddedStatus = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not read this code. Try again.'),
+            duration: _invalidScanCooldown,
+          ),
+        );
+      _allowNextScanAfter(_invalidScanCooldown);
+    }
+  }
+
+  Future<void> _handleScannedCode(String raw) async {
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
@@ -265,7 +297,6 @@ class _ScanScreenState extends State<ScanScreen> {
       setState(() {
         _isProcessing = false;
         _showAddedStatus = false;
-        _lastScanned = null;
       });
     });
   }
@@ -403,8 +434,16 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _openBillSheet() async {
-    if (_items.isEmpty) return;
+    if (_items.isEmpty || _isOpeningBillSheet || _isSavingBill) return;
+    _isOpeningBillSheet = true;
+    try {
+      await _runBillCheckout();
+    } finally {
+      _isOpeningBillSheet = false;
+    }
+  }
 
+  Future<void> _runBillCheckout() async {
     final customers = await DatabaseHelper.instance.getAllCustomers();
     if (!mounted) return;
 
@@ -440,18 +479,22 @@ class _ScanScreenState extends State<ScanScreen> {
         transactionReference: draft.transactionReference,
       );
       if (billId == null || !mounted) return;
+      final totalAmount =
+          _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100);
+      final itemCount = _itemCount;
+      // The bill is saved: empty the cart now so no path back to this screen
+      // (e.g. Android back on the success dialog) can save it a second time.
+      setState(() => _items.clear());
       await _showBillCreatedDialog(
         billId: billId,
         customerName: draft.customerName.trim().isEmpty
             ? 'Walk-in Customer'
             : draft.customerName.trim(),
-        totalAmount:
-            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
-        itemCount: _itemCount,
-        isPaid:
-            draft.paidAmount >=
-            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
+        totalAmount: totalAmount,
+        itemCount: itemCount,
+        isPaid: draft.paidAmount >= totalAmount,
       );
+      if (mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
       final message = e.toString().replaceFirst('Bad state: ', '');
@@ -504,10 +547,7 @@ class _ScanScreenState extends State<ScanScreen> {
           ),
           actions: [
             FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.pop(context);
-              },
+              onPressed: () => Navigator.pop(ctx),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.brandOf(ctx),
                 foregroundColor: AppColors.isDark(ctx)
@@ -977,42 +1017,10 @@ class _ScanScreenState extends State<ScanScreen> {
                             ),
                             SizedBox(
                               width: 44,
-                              child: TextFormField(
-                                key: ValueKey(
-                                  '${item.productName}-${item.mrp}-${item.quantity}',
-                                ),
-                                initialValue: _formatQuantityInput(
-                                  item.quantity,
-                                ),
-                                textAlign: TextAlign.center,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'^\d*\.?\d{0,3}'),
-                                  ),
-                                ],
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  filled: false,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 8,
-                                  ),
-                                  border: InputBorder.none,
-                                ),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                ),
-                                onChanged: (value) {
-                                  final quantity = double.tryParse(value);
-                                  if (quantity != null) {
-                                    _setQty(i, quantity);
-                                  }
-                                },
+                              child: _QuantityInput(
+                                key: ObjectKey(item),
+                                quantity: item.quantity,
+                                onChanged: (quantity) => _setQty(i, quantity),
                               ),
                             ),
                             IconButton(
