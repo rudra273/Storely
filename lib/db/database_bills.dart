@@ -353,6 +353,9 @@ mixin DatabaseBills {
     String? paymentMethod,
     String? paymentReference,
   }) async {
+    // Marking unpaid voids every recorded payment on the bill, so it is an
+    // admin-only correction like cancelling a bill.
+    if (!isPaid) await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
       final rows = await txn.query(

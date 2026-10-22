@@ -17,6 +17,7 @@ part 'billing/bill_card.dart';
 part 'billing/bill_profit_sheet.dart';
 part 'billing/bill_action_widgets.dart';
 part 'billing/bill_formatters.dart';
+part 'billing/bill_dialogs.dart';
 
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
@@ -78,57 +79,19 @@ class _BillsScreenState extends State<BillsScreen> {
 
   Future<void> _cancelBill(Bill bill) async {
     if (bill.id == null) return;
-    final reasonCtrl = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _CancelBillDialog(billLabel: _billDisplayId(bill)),
+    );
+    if (reason == null) return;
     try {
-      final reason = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          icon: Icon(Icons.block_rounded, color: AppColors.error, size: 32),
-          title: const Text('Cancel Bill'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Cancel ${_billDisplayId(bill)}? Stock and customer ledger will be reversed.',
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: reasonCtrl,
-                textCapitalization: TextCapitalization.sentences,
-                minLines: 2,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Reason',
-                  prefixIcon: Icon(Icons.notes_outlined),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Keep Bill'),
-            ),
-            TestKeys.tag(
-              TestKeys.confirmBtn,
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, reasonCtrl.text),
-                style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-                child: const Text('Cancel Bill'),
-              ),
-              button: true,
-            ),
-          ],
-        ),
-      );
-      if (reason == null) return;
       await DatabaseHelper.instance.cancelBill(
         bill.id!,
         reason: reason.trim().isEmpty ? 'Correction required' : reason,
       );
       await _loadBills();
-    } finally {
-      reasonCtrl.dispose();
+    } catch (e) {
+      _showActionError(e);
     }
   }
 
@@ -139,105 +102,49 @@ class _BillsScreenState extends State<BillsScreen> {
     String? paymentReference,
   }) async {
     if (bill.id == null) return;
-    await DatabaseHelper.instance.updateBillPaidStatus(
-      bill.id!,
-      isPaid,
-      paymentMethod: paymentMethod,
-      paymentReference: paymentReference,
-    );
-    await _loadBills();
+    try {
+      await DatabaseHelper.instance.updateBillPaidStatus(
+        bill.id!,
+        isPaid,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+      );
+      await _loadBills();
+    } catch (e) {
+      _showActionError(e);
+    }
+  }
+
+  void _showActionError(Object error) {
+    debugPrint('Bill action failed: $error');
+    if (!mounted) return;
+    final message = switch (error) {
+      ArgumentError(:final message) => '$message',
+      StateError(:final message) => message,
+      _ => 'Something went wrong. Please try again.',
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _recordPayment(Bill bill) async {
     if (bill.id == null || bill.balanceDue <= 0) return;
-    final amountCtrl = TextEditingController(
-      text: bill.balanceDue.toStringAsFixed(2),
+    final entry = await showDialog<_PaymentEntry>(
+      context: context,
+      builder: (_) => _RecordPaymentDialog(balanceDue: bill.balanceDue),
     );
-    final txnRefCtrl = TextEditingController();
-    var method = 'cash';
+    if (entry == null) return;
     try {
-      final amount = await showDialog<double>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            title: const Text('Record Payment'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: amountCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'Amount received',
-                    prefixText: '₹ ',
-                    helperText:
-                        'Balance: ₹${bill.balanceDue.toStringAsFixed(2)}',
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'cash',
-                      icon: Icon(Icons.payments_outlined),
-                      label: Text('Cash'),
-                    ),
-                    ButtonSegment(
-                      value: 'online',
-                      icon: Icon(Icons.account_balance_wallet_outlined),
-                      label: Text('Online'),
-                    ),
-                  ],
-                  selected: {method},
-                  onSelectionChanged: (value) =>
-                      setDialogState(() => method = value.first),
-                ),
-                if (method == 'online') ...[
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    controller: txnRefCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Transaction ID (optional)',
-                      prefixIcon: Icon(Icons.receipt_long_outlined),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              TestKeys.tag(
-                TestKeys.saveBtn,
-                FilledButton(
-                  onPressed: () {
-                    final value = double.tryParse(amountCtrl.text) ?? 0;
-                    Navigator.pop(ctx, value);
-                  },
-                  child: const Text('Save'),
-                ),
-                button: true,
-              ),
-            ],
-          ),
-        ),
-      );
-      if (amount == null || amount <= 0) return;
       await DatabaseHelper.instance.recordBillPayment(
         bill.id!,
-        amount: amount,
-        paymentMethod: method,
-        paymentReference: method == 'online' ? txnRefCtrl.text : null,
+        amount: entry.amount,
+        paymentMethod: entry.method,
+        paymentReference: entry.reference,
       );
       await _loadBills();
-    } finally {
-      amountCtrl.dispose();
-      txnRefCtrl.dispose();
+    } catch (e) {
+      _showActionError(e);
     }
   }
 

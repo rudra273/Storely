@@ -23,6 +23,7 @@ void main() {
   });
 
   tearDown(() async {
+    db.assertAdminMutation = null;
     await db.close();
     await _deleteStorelyDb();
   });
@@ -210,6 +211,34 @@ void main() {
         expect(numbers, containsAll(['INV-0002', 'INV-0003', 'INV-0004']));
       },
     );
+
+    test('only admins can mark a paid bill unpaid', () async {
+      final billId = await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),
+        [BillItem(productName: 'Item', mrp: 50)],
+      );
+      db.assertAdminMutation = () async =>
+          throw StateError('Only shop admins can do this');
+
+      await expectLater(
+        db.updateBillPaidStatus(billId, false),
+        throwsA(isA<StateError>()),
+      );
+      final stillPaid = (await db.getAllBills()).single;
+      expect(stillPaid.isPaid, isTrue);
+      expect(stillPaid.paidAmount, 50);
+
+      db.assertAdminMutation = null;
+      await db.updateBillPaidStatus(billId, false);
+      final unpaid = (await db.getAllBills()).single;
+      expect(unpaid.isPaid, isFalse);
+
+      // Staff can still collect payment.
+      db.assertAdminMutation = () async =>
+          throw StateError('Only shop admins can do this');
+      await db.updateBillPaidStatus(billId, true);
+      expect((await db.getAllBills()).single.isPaid, isTrue);
+    });
 
     test('selling decimal stock down to zero is not blocked by drift', () async {
       final productId = await db.insertProduct(

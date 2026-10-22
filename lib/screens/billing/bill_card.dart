@@ -34,7 +34,29 @@ class _BillCardState extends State<_BillCard> {
   Future<void> _togglePaidStatus() async {
     final bill = widget.bill;
     if (bill.isPaid) {
-      widget.onStatusChanged(false, null, null);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Mark as unpaid?'),
+          content: Text(
+            'This removes all recorded payments on this bill '
+            '(₹${bill.paidAmount.toStringAsFixed(2)}). '
+            'Use this only to correct a mistake.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Paid'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Mark Unpaid'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) widget.onStatusChanged(false, null, null);
       return;
     }
     final method = await showDialog<String>(
@@ -69,36 +91,11 @@ class _BillCardState extends State<_BillCard> {
   /// Prompts for an optional online transaction id. Returns the entered value
   /// (may be empty/null); a dismissed dialog also yields null. The bill is still
   /// marked paid either way — the id is optional.
-  Future<String?> _promptTransactionId() async {
-    final ctrl = TextEditingController();
-    try {
-      return await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Transaction ID'),
-          content: TextField(
-            controller: ctrl,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(
-              labelText: 'Transaction ID (optional)',
-              prefixIcon: Icon(Icons.receipt_long_outlined),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Skip'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      ctrl.dispose();
-    }
+  Future<String?> _promptTransactionId() {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => const _TransactionIdDialog(),
+    );
   }
 
   Future<void> _showProfitSummary() {
@@ -335,16 +332,18 @@ class _BillCardState extends State<_BillCard> {
                             color: AppColors.brandOf(context),
                           ),
                         ],
-                        _ActionButton(
-                          onPressed: _togglePaidStatus,
-                          icon: bill.isPaid
-                              ? Icons.pending_actions_outlined
-                              : Icons.check_circle_outline,
-                          label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
-                          color: bill.isPaid
-                              ? AppColors.inkMuted
-                              : AppColors.success,
-                        ),
+                        if (!bill.isPaid ||
+                            CloudService.instance.state.value.isAdmin)
+                          _ActionButton(
+                            onPressed: _togglePaidStatus,
+                            icon: bill.isPaid
+                                ? Icons.pending_actions_outlined
+                                : Icons.check_circle_outline,
+                            label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
+                            color: bill.isPaid
+                                ? AppColors.inkMuted
+                                : AppColors.success,
+                          ),
                         if (bill.balanceDue > 0)
                           _ActionButton(
                             onPressed: widget.onRecordPayment,
