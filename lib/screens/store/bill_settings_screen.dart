@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/bill_settings.dart';
+import '../../models/invoice_numbering.dart';
 import '../../theme/app_theme.dart';
 
 /// Full-page editor for invoice/bill appearance: numbering series, visible
@@ -102,13 +103,14 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   Future<void> _save() async {
     if (_isSaving) return;
     final pattern = _patternCtrl.text.trim();
-    if (!pattern.contains('{SEQ}')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bill number pattern must include {SEQ}')),
-      );
+    final problem = _patternProblem();
+    if (problem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(problem)));
       return;
     }
-    final padding = int.tryParse(_paddingCtrl.text.trim()) ?? 4;
+    final padding = _padding;
     final settings = _settings.copyWith(
       invoiceTitle: _titleCtrl.text,
       footerText: _footerCtrl.text,
@@ -136,10 +138,33 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
     }
   }
 
+  int get _padding => (int.tryParse(_paddingCtrl.text.trim()) ??
+          InvoiceNumbering.defaultPadding)
+      .clamp(1, 8);
+
+  String? _patternProblem() => InvoiceNumbering.validate(
+    template: _patternCtrl.text.trim(),
+    padding: _padding,
+    resetPeriod: _series.resetPeriod,
+  );
+
+  String _patternPreview() {
+    final number = InvoiceNumbering.format(
+      template: _patternCtrl.text.trim(),
+      date: DateTime.now(),
+      sequence: 1,
+      padding: _padding,
+      deviceId: 'local',
+    );
+    return 'First bill: $number  (${number.length}/${InvoiceNumbering.maxLength})'
+        '\nTokens: {FY}, {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}';
+  }
+
   Widget _sequenceDigitsField() {
     return TextField(
       controller: _paddingCtrl,
       keyboardType: TextInputType.number,
+      onChanged: (_) => setState(() {}),
       decoration: const InputDecoration(
         labelText: 'Sequence digits',
         prefixIcon: Icon(Icons.format_list_numbered_rounded),
@@ -199,12 +224,14 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                       TextField(
                         controller: _patternCtrl,
                         textCapitalization: TextCapitalization.characters,
-                        decoration: const InputDecoration(
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
                           labelText: 'Bill number pattern',
-                          helperText:
-                              'Tokens: {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}',
-                          helperMaxLines: 2,
-                          prefixIcon: Icon(Icons.tag_outlined),
+                          helperText: _patternPreview(),
+                          helperMaxLines: 3,
+                          errorText: _patternProblem(),
+                          errorMaxLines: 3,
+                          prefixIcon: const Icon(Icons.tag_outlined),
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),

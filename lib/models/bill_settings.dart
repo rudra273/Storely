@@ -1,3 +1,5 @@
+import 'invoice_numbering.dart';
+
 class BillSettings {
   static const defaultInvoiceTitle = 'TAX INVOICE';
   static const defaultFooterText = 'Thank you for your business.';
@@ -360,9 +362,9 @@ class InvoiceSeriesSettings {
     this.id,
     this.uuid = '',
     this.name = 'Default',
-    this.formatTemplate = 'INV-{YYYY}{MM}{DD}-{SEQ}',
-    this.sequencePadding = 4,
-    this.resetPeriod = 'daily',
+    this.formatTemplate = InvoiceNumbering.defaultTemplate,
+    this.sequencePadding = InvoiceNumbering.defaultPadding,
+    this.resetPeriod = InvoiceNumbering.defaultResetPeriod,
     this.nextSequence = 1,
   });
 
@@ -373,7 +375,7 @@ class InvoiceSeriesSettings {
       name: _cleanText(map['name']?.toString()) ?? 'Default',
       formatTemplate:
           _cleanText(map['format_template']?.toString()) ??
-          'INV-{YYYY}{MM}{DD}-{SEQ}',
+          InvoiceNumbering.defaultTemplate,
       sequencePadding: ((map['sequence_padding'] as num?)?.toInt() ?? 4).clamp(
         1,
         8,
@@ -420,7 +422,7 @@ String? _cleanText(String? value) {
 String _cleanResetPeriod(Object? value) {
   const allowed = {'daily', 'monthly', 'financial_year', 'never'};
   final text = value?.toString();
-  return allowed.contains(text) ? text! : 'daily';
+  return allowed.contains(text) ? text! : InvoiceNumbering.defaultResetPeriod;
 }
 
 DateTime _date(Object? value) {

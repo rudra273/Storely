@@ -23,6 +23,7 @@ mixin DatabaseSchema {
     await _seedBaseData(db);
     await _markMigrationDone(db, _v16BillingBackfillKey);
     await _markMigrationDone(db, _v21IndexRebuildKey);
+    await _markMigrationDone(db, _gstInvoiceNumberKey);
   }
 
   Future<void> _configureDB(Database db) async {
@@ -63,6 +64,7 @@ mixin DatabaseSchema {
   static const _migrationMarkerPrefix = 'migration_done:';
   static const _v16BillingBackfillKey = 'v16_billing_backfill';
   static const _v21IndexRebuildKey = 'v21_index_rebuild';
+  static const _gstInvoiceNumberKey = 'v2_gst_invoice_number_default';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
     if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
@@ -72,6 +74,10 @@ mixin DatabaseSchema {
     if (!await _isMigrationDone(executor, _v21IndexRebuildKey)) {
       await _rebuildV21Indexes(executor);
       await _markMigrationDone(executor, _v21IndexRebuildKey);
+    }
+    if (!await _isMigrationDone(executor, _gstInvoiceNumberKey)) {
+      await _moveLegacyInvoiceDefault(executor);
+      await _markMigrationDone(executor, _gstInvoiceNumberKey);
     }
   }
 
@@ -678,9 +684,9 @@ mixin DatabaseSchema {
       'uuid': _newUuid(),
       'shop_id': shopId,
       'name': 'Default',
-      'format_template': 'INV-{YYYY}{MM}{DD}-{SEQ}',
+      'format_template': InvoiceNumbering.defaultTemplate,
       'sequence_padding': 4,
-      'reset_period': 'daily',
+      'reset_period': InvoiceNumbering.defaultResetPeriod,
       'allocation_mode': 'local_device',
       'next_sequence': 1,
       'is_default': 1,
@@ -817,6 +823,24 @@ mixin DatabaseSchema {
       ON products(shop_id, LOWER(barcode))
       WHERE barcode IS NOT NULL AND TRIM(barcode) != '' AND deleted_at IS NULL
     ''');
+  }
+
+  /// The pre-2.0 default bill number (INV-20261023-0001) is 17 characters,
+  /// over the GST limit of 16, and resets daily. Series nobody customised
+  /// move to the GST-safe financial-year default; custom patterns are kept.
+  Future<void> _moveLegacyInvoiceDefault(DatabaseExecutor executor) async {
+    await executor.update(
+      'invoice_series',
+      {
+        'format_template': InvoiceNumbering.defaultTemplate,
+        'reset_period': InvoiceNumbering.defaultResetPeriod,
+        'next_sequence': 1,
+        'last_sequence_key': null,
+        'updated_at': _nowIso(),
+      },
+      where: 'format_template = ? AND deleted_at IS NULL',
+      whereArgs: [InvoiceNumbering.legacyTemplate],
+    );
   }
 
   /// The predicate and grouping here must mirror the partial UNIQUE index

@@ -606,7 +606,7 @@ mixin DatabaseBills {
     }
 
     final series = rows.single;
-    final resetKey = _invoiceResetKey(
+    final resetKey = InvoiceNumbering.resetKey(
       createdAt,
       series['reset_period']?.toString(),
     );
@@ -616,12 +616,13 @@ mixin DatabaseBills {
         : 1;
 
     final template =
-        series['format_template']?.toString() ?? 'INV-{YYYY}{MM}{DD}-{SEQ}';
+        series['format_template']?.toString() ??
+        InvoiceNumbering.defaultTemplate;
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
     final deviceId = series['device_id']?.toString() ?? 'local';
-    String format(int seq) => _formatInvoiceNumber(
+    String format(int seq) => InvoiceNumbering.format(
       template: template,
-      createdAt: createdAt,
+      date: createdAt,
       sequence: seq,
       padding: padding,
       deviceId: deviceId,
@@ -840,45 +841,6 @@ String _formatDbQuantity(double value) {
             .toStringAsFixed(3)
             .replaceFirst(RegExp(r'0+$'), '')
             .replaceFirst(RegExp(r'\.$'), '');
-}
-
-String _invoiceResetKey(DateTime createdAt, String? resetPeriod) {
-  final year = createdAt.year.toString().padLeft(4, '0');
-  final month = createdAt.month.toString().padLeft(2, '0');
-  final day = createdAt.day.toString().padLeft(2, '0');
-  switch (resetPeriod) {
-    case 'never':
-      return 'all';
-    case 'monthly':
-      return '$year$month';
-    case 'financial_year':
-      final startYear = createdAt.month >= 4
-          ? createdAt.year
-          : createdAt.year - 1;
-      return 'FY$startYear-${(startYear + 1).toString().substring(2)}';
-    case 'daily':
-    default:
-      return '$year$month$day';
-  }
-}
-
-String _formatInvoiceNumber({
-  required String template,
-  required DateTime createdAt,
-  required int sequence,
-  required int padding,
-  required String deviceId,
-}) {
-  final year = createdAt.year.toString().padLeft(4, '0');
-  final month = createdAt.month.toString().padLeft(2, '0');
-  final day = createdAt.day.toString().padLeft(2, '0');
-  return template
-      .replaceAll('{DEVICE}', deviceId)
-      .replaceAll('{YYYY}', year)
-      .replaceAll('{YY}', year.substring(2))
-      .replaceAll('{MM}', month)
-      .replaceAll('{DD}', day)
-      .replaceAll('{SEQ}', sequence.toString().padLeft(padding, '0'));
 }
 
 class _BillNumberAllocation {

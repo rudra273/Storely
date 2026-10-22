@@ -171,9 +171,9 @@ void main() {
 
       final bills = await db.getAllBills();
       final numbers = bills.map((bill) => bill.billNumber).toList();
-      expect(numbers, contains(endsWith('-0002')));
-      expect(numbers, contains(endsWith('-0003')));
-      expect(numbers, isNot(contains(endsWith('-0001'))));
+      expect(numbers, contains(endsWith('/0002')));
+      expect(numbers, contains(endsWith('/0003')));
+      expect(numbers, isNot(contains(endsWith('/0001'))));
     });
 
     test(
@@ -182,12 +182,14 @@ void main() {
         // A pattern without date tokens on a daily reset restarts at 0001
         // every day. That number already exists, which used to fail the
         // insert and roll back the sequence, blocking all later bills.
-        await db.saveDefaultInvoiceSeriesSettings(
-          const InvoiceSeriesSettings(
-            formatTemplate: 'INV-{SEQ}',
-            resetPeriod: 'daily',
-          ),
-        );
+        // Bill Settings now rejects this pattern, so write it directly the
+        // way an older install could have stored it.
+        await db.getDefaultInvoiceSeriesSettings();
+        final raw = await db.database;
+        await raw.update('invoice_series', {
+          'format_template': 'INV-{SEQ}',
+          'reset_period': 'daily',
+        });
         Future<void> billOn(DateTime day) => db.insertBill(
           Bill(
             customerName: 'Customer',
@@ -256,6 +258,50 @@ void main() {
           throw StateError('Only shop admins can do this');
       await db.updateBillPaidStatus(billId, true);
       expect((await db.getAllBills()).single.isPaid, isTrue);
+    });
+
+    test('default bill numbers are GST-safe and reset each April', () async {
+      Future<void> billOn(DateTime day) => db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          totalAmount: 10,
+          itemCount: 1,
+          createdAt: day,
+        ),
+        [BillItem(productName: 'Item', mrp: 10)],
+      );
+      await billOn(DateTime(2026, 3, 30));
+      await billOn(DateTime(2026, 3, 31));
+      await billOn(DateTime(2026, 4, 1));
+
+      final numbers = (await db.getAllBills())
+          .map((bill) => bill.billNumber)
+          .toList();
+      expect(
+        numbers,
+        containsAll(['INV/2526/0001', 'INV/2526/0002', 'INV/2627/0001']),
+      );
+      expect(numbers.every((n) => n.length <= 16), isTrue);
+    });
+
+    test('invalid bill number patterns are rejected on save', () async {
+      await expectLater(
+        db.saveDefaultInvoiceSeriesSettings(
+          const InvoiceSeriesSettings(
+            formatTemplate: 'INV-{YYYY}{MM}{DD}-{SEQ}',
+            resetPeriod: 'daily',
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      await db.saveDefaultInvoiceSeriesSettings(
+        const InvoiceSeriesSettings(
+          formatTemplate: 'SK/{FY}/{SEQ}',
+          resetPeriod: 'financial_year',
+        ),
+      );
+      final saved = await db.getDefaultInvoiceSeriesSettings();
+      expect(saved.formatTemplate, 'SK/{FY}/{SEQ}');
     });
 
     test('selling decimal stock down to zero is not blocked by drift', () async {

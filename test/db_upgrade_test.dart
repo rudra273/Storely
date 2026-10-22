@@ -29,6 +29,8 @@ void main() {
     await _deleteStorelyDb();
   });
 
+  _legacyInvoiceTests(() => db);
+
   test('v16 database upgrades and can save a bill', () async {
     await db.saveGlobalPricingSettings(
       const GlobalPricingSettings(
@@ -100,6 +102,36 @@ void main() {
       "SELECT sql FROM sqlite_master WHERE name = 'idx_products_shop_barcode'",
     );
     expect(indexSql.single['sql'].toString(), contains('UNIQUE'));
+  });
+}
+
+void _legacyInvoiceTests(DatabaseHelper Function() db) {
+  Future<void> reopenWithTemplate(String template) async {
+    await db().getDefaultInvoiceSeriesSettings();
+    final raw = await db().database;
+    await raw.update('invoice_series', {
+      'format_template': template,
+      'reset_period': 'daily',
+    });
+    await raw.delete(
+      'cloud_sync_state',
+      where: 'key = ?',
+      whereArgs: ['migration_done:v2_gst_invoice_number_default'],
+    );
+    await db().close();
+  }
+
+  test('untouched legacy bill number default moves to GST default', () async {
+    await reopenWithTemplate('INV-{YYYY}{MM}{DD}-{SEQ}');
+    final series = await db().getDefaultInvoiceSeriesSettings();
+    expect(series.formatTemplate, 'INV/{FY}/{SEQ}');
+    expect(series.resetPeriod, 'financial_year');
+  });
+
+  test('customised bill number pattern is kept', () async {
+    await reopenWithTemplate('SHOP-{YY}{MM}{DD}-{SEQ}');
+    final series = await db().getDefaultInvoiceSeriesSettings();
+    expect(series.formatTemplate, 'SHOP-{YY}{MM}{DD}-{SEQ}');
   });
 }
 

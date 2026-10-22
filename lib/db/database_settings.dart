@@ -357,9 +357,12 @@ mixin DatabaseSettings {
   ) async {
     await _requireAdminMutation();
     final template = _normaliseName(settings.formatTemplate);
-    if (template == null || !template.contains('{SEQ}')) {
-      throw ArgumentError('Bill number pattern must include {SEQ}');
-    }
+    final problem = InvoiceNumbering.validate(
+      template: template ?? '',
+      padding: settings.sequencePadding,
+      resetPeriod: settings.resetPeriod,
+    );
+    if (problem != null) throw ArgumentError(problem);
     final db = await database;
     await db.transaction((txn) async {
       final shopId = await _activeShopId(txn);
