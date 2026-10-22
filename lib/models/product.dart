@@ -1,5 +1,14 @@
 import 'dart:convert';
 
+/// Stock quantities are doubles (kg, litre, ...). Summing decimal movements
+/// drifts by tiny amounts (0.3 - 0.1 - 0.1 = 0.0999...), so stock checks
+/// compare with this tolerance instead of exact `>`.
+const double stockQuantityEpsilon = 1e-6;
+
+/// True when [requested] is more than [available] beyond float drift.
+bool exceedsStock(double requested, double available) =>
+    requested > available + stockQuantityEpsilon;
+
 class ProductSource {
   static const mobile = 'mobile';
   static const imported = 'imported';

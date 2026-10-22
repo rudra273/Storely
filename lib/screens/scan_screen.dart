@@ -251,7 +251,8 @@ class _ScanScreenState extends State<ScanScreen> {
     final available = _availableStockForItem(item);
     if (available != null) {
       final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
-      if (available <= 0 || currentQty + 1 > available) {
+      if (available <= stockQuantityEpsilon ||
+          exceedsStock(currentQty + 1, available)) {
         _showStockLimitMessage(item.productName, available);
         return;
       }
@@ -565,7 +566,8 @@ class _ScanScreenState extends State<ScanScreen> {
   void _updateQty(int index, int delta) {
     if (delta > 0) {
       final available = _availableStockForItem(_items[index]);
-      if (available != null && _items[index].quantity + delta > available) {
+      if (available != null &&
+          exceedsStock(_items[index].quantity + delta, available)) {
         _showStockLimitMessage(_items[index].productName, available);
         return;
       }
@@ -579,7 +581,7 @@ class _ScanScreenState extends State<ScanScreen> {
   void _setQty(int index, double quantity) {
     if (quantity <= 0) return;
     final available = _availableStockForItem(_items[index]);
-    if (available != null && quantity > available) {
+    if (available != null && exceedsStock(quantity, available)) {
       _showStockLimitMessage(_items[index].productName, available);
       setState(() => _items[index].quantity = available);
       return;

@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/bill_settings.dart';
 import 'package:storely/models/customer.dart';
 import 'package:storely/models/pricing.dart';
 import 'package:storely/models/product.dart';
@@ -172,6 +173,71 @@ void main() {
       expect(numbers, contains(endsWith('-0002')));
       expect(numbers, contains(endsWith('-0003')));
       expect(numbers, isNot(contains(endsWith('-0001'))));
+    });
+
+    test(
+      'sequence reset onto an existing bill number skips forward',
+      () async {
+        // A pattern without date tokens on a daily reset restarts at 0001
+        // every day. That number already exists, which used to fail the
+        // insert and roll back the sequence, blocking all later bills.
+        await db.saveDefaultInvoiceSeriesSettings(
+          const InvoiceSeriesSettings(
+            formatTemplate: 'INV-{SEQ}',
+            resetPeriod: 'daily',
+          ),
+        );
+        Future<void> billOn(DateTime day) => db.insertBill(
+          Bill(
+            customerName: 'Customer',
+            totalAmount: 10,
+            itemCount: 1,
+            createdAt: day,
+          ),
+          [BillItem(productName: 'Item', mrp: 10)],
+        );
+
+        await billOn(DateTime(2026, 10, 22, 10));
+        final cancelled = (await db.getAllBills()).single;
+        await db.cancelBill(cancelled.id!, reason: 'test');
+        await billOn(DateTime(2026, 10, 22, 11));
+        await billOn(DateTime(2026, 10, 23, 10));
+        await billOn(DateTime(2026, 10, 23, 11));
+
+        final numbers = (await db.getAllBills())
+            .map((bill) => bill.billNumber)
+            .toList();
+        expect(numbers, containsAll(['INV-0002', 'INV-0003', 'INV-0004']));
+      },
+    );
+
+    test('selling decimal stock down to zero is not blocked by drift', () async {
+      final productId = await db.insertProduct(
+        Product(
+          name: 'Loose Dal',
+          mrp: 0,
+          purchasePrice: 100,
+          quantity: 0.3,
+          unit: 'kg',
+        ),
+      );
+      for (var i = 0; i < 3; i++) {
+        final product = await db.getProductById(productId);
+        final item = await db.buildBillItemForProduct(product!);
+        item.quantity = 0.1;
+        await db.insertBill(
+          Bill(
+            customerName: 'Customer',
+            subtotalAmount: item.subtotal,
+            totalAmount: item.subtotal,
+            itemCount: 1,
+          ),
+          [item],
+        );
+      }
+
+      final product = await db.getProductById(productId);
+      expect(product!.quantity, closeTo(0, 1e-9));
     });
 
     test('non-GST shop bill items do not snapshot output GST', () async {

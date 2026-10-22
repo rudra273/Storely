@@ -608,37 +608,69 @@ mixin DatabaseBills {
       series['reset_period']?.toString(),
     );
     final storedKey = series['last_sequence_key']?.toString();
-    final sequence = storedKey == resetKey
+    var sequence = storedKey == resetKey
         ? (series['next_sequence'] as num?)?.toInt() ?? 1
         : 1;
-    final nextSequence = sequence + 1;
-    final now = _nowIso();
-    await executor.update(
-      'invoice_series',
-      {
-        'next_sequence': nextSequence,
-        'last_sequence_key': resetKey,
-        'updated_at': now,
-      },
-      where: 'id = ?',
-      whereArgs: [series['id']],
-    );
 
     final template =
         series['format_template']?.toString() ?? 'INV-{YYYY}{MM}{DD}-{SEQ}';
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
     final deviceId = series['device_id']?.toString() ?? 'local';
-    final number = _formatInvoiceNumber(
+    String format(int seq) => _formatInvoiceNumber(
       template: template,
       createdAt: createdAt,
-      sequence: sequence,
+      sequence: seq,
       padding: padding,
       deviceId: deviceId,
+    );
+
+    // A sequence reset can land on a number that already exists, e.g. a
+    // pattern without date tokens on a daily reset, or a pulled bill from
+    // another device. The unique (shop_id, bill_number) index covers
+    // cancelled bills too, so a collision would fail the insert and roll the
+    // sequence back, blocking every later bill. Skip forward to a free number.
+    var number = format(sequence);
+    var attempts = 0;
+    while (await _billNumberExists(executor, shopId, number)) {
+      if (++attempts > 100000) {
+        throw StateError(
+          'Could not find a free bill number. Check the bill number pattern '
+          'in Bill Settings.',
+        );
+      }
+      sequence++;
+      number = format(sequence);
+    }
+
+    await executor.update(
+      'invoice_series',
+      {
+        'next_sequence': sequence + 1,
+        'last_sequence_key': resetKey,
+        'updated_at': _nowIso(),
+      },
+      where: 'id = ?',
+      whereArgs: [series['id']],
     );
     return _BillNumberAllocation(
       number: number,
       seriesUuid: series['uuid']?.toString(),
     );
+  }
+
+  Future<bool> _billNumberExists(
+    DatabaseExecutor executor,
+    String shopId,
+    String billNumber,
+  ) async {
+    final rows = await executor.query(
+      'bills',
+      columns: ['id'],
+      where: 'shop_id = ? AND bill_number = ?',
+      whereArgs: [shopId, billNumber],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   Future<void> _updateBillPaymentSummary(
@@ -722,7 +754,7 @@ mixin DatabaseBills {
     }
     final available =
         (productRows.single['quantity_cache'] as num?)?.toDouble() ?? 0;
-    if (item.quantity > available) {
+    if (exceedsStock(item.quantity, available)) {
       final name = productRows.single['name']?.toString() ?? item.productName;
       throw StateError(
         'Only ${_formatDbQuantity(available)} available for "$name"',
