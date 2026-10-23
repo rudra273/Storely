@@ -12,6 +12,8 @@ import 'notifications_screen.dart';
 import 'suppliers_screen.dart';
 import 'expenses_screen.dart';
 import 'shared/sync_status_widgets.dart';
+import 'shared/bill_quick_sheet.dart';
+import '../services/needs_action.dart';
 import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
@@ -42,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// False until the first load finishes, so zeros never flash as if the
   /// shop had no data.
   bool _loaded = false;
+  int _needsActionCount = 0;
   List<Product> _products = [];
   List<Bill> _unpaidBills = [];
   List<Bill> _bills = [];
@@ -120,11 +123,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final todaySales = await db.getTodaySales();
     final todayCollected = await db.getTodayCollected();
     final todayBillCount = await db.getTodayBillCount();
+    final needsAction = await NeedsAction.load();
     final unpaidBills = bills.where((bill) => bill.balanceDue > 0).toList();
     final pending = _buildCustomerPendingMaps(bills);
     if (!mounted) return;
     setState(() {
       _loaded = true;
+      _needsActionCount = needsAction.length;
       _products = products;
       _productCount = products.length;
       _supplierCount = suppliers.length;
@@ -205,16 +210,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     TestKeys.tag(
                       TestKeys.homeNotificationsBtn,
                       IconButton(
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const NotificationsScreen(),
+                        onPressed: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const NotificationsScreen(),
+                            ),
+                          );
+                          if (mounted) _loadData();
+                        },
+                        icon: Badge(
+                          isLabelVisible: _needsActionCount > 0,
+                          label: Text('$_needsActionCount'),
+                          child: const Icon(
+                            Icons.notifications_outlined,
+                            color: Colors.white,
+                            size: 22,
                           ),
-                        ),
-                        icon: const Icon(
-                          Icons.notifications_outlined,
-                          color: Colors.white,
-                          size: 22,
                         ),
                       ),
                       label: context.l10n.notifications,
@@ -275,7 +287,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onMenu: () => showUnpaidBillsSettings(context),
                               ),
                               const SizedBox(height: AppSpacing.md),
-                              _UnpaidBillsSection(bills: _displayedUnpaidBills),
+                              _UnpaidBillsSection(
+                                bills: _displayedUnpaidBills,
+                                onTap: (bill) async {
+                                  if (await showBillQuickSheet(context, bill) &&
+                                      mounted) {
+                                    _loadData();
+                                  }
+                                },
+                              ),
                             ] else ...[
                               const SizedBox(height: AppSpacing.xxl),
                               _HiddenSectionStrip(
@@ -1026,7 +1046,8 @@ class _QuickActionTile extends StatelessWidget {
 
 class _UnpaidBillsSection extends StatelessWidget {
   final List<Bill> bills;
-  const _UnpaidBillsSection({required this.bills});
+  final ValueChanged<Bill> onTap;
+  const _UnpaidBillsSection({required this.bills, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1040,6 +1061,7 @@ class _UnpaidBillsSection extends StatelessWidget {
       rows: bills
           .map(
             (bill) => CompactListRow(
+              onTap: () => onTap(bill),
               leading: const LeadingIconChip(
                 icon: Icons.pending_actions_outlined,
                 color: AppColors.error,
