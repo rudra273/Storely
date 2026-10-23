@@ -717,7 +717,9 @@ mixin DatabaseBills {
         'payment_method': status == Bill.statusUnpaid
             ? 'cash'
             : await _latestPaymentMethod(executor, billUuid),
-        'updated_at': _nowIso(),
+        // Derived from bill_payments (which sync on their own), so it does not
+        // bump updated_at: a payment on one phone must not overwrite another
+        // phone's edit or cancellation of the bill row.
       },
       where: 'id = ?',
       whereArgs: [billId],

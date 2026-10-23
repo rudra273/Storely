@@ -439,7 +439,8 @@ mixin DatabaseProducts {
         }
         await txn.update(
           'products',
-          {'selling_price': breakdown.sellingPrice, 'updated_at': _nowIso()},
+          // Display price derived from pricing rules; every device computes it.
+          {'selling_price': breakdown.sellingPrice},
           where: 'id = ?',
           whereArgs: [product.id],
         );
@@ -1060,7 +1061,9 @@ mixin DatabaseProducts {
     final quantity = await _ledgerQuantityForProduct(executor, productId);
     await executor.update(
       'products',
-      {'quantity_cache': quantity, 'updated_at': _nowIso()},
+      // Derived from the stock ledger: not an edit, so updated_at (the sync
+      // conflict clock) is left alone and the row is not queued for upload.
+      {'quantity_cache': quantity},
       where: 'id = ?',
       whereArgs: [productId],
     );
@@ -1077,12 +1080,9 @@ mixin DatabaseProducts {
             FROM stock_movements
             WHERE stock_movements.deleted_at IS NULL
               AND stock_movements.product_id = products.id
-          ), 0),
-          updated_at = ?
+          ), 0)
       WHERE deleted_at IS NULL
-      ''',
-      [_nowIso()],
-    );
+      ''');
   }
 }
 

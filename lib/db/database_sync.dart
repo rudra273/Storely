@@ -153,7 +153,9 @@ mixin DatabaseSync {
     String table,
     Map<String, dynamic> row,
   ) async {
-    final map = Map<String, dynamic>.from(row)..remove('id');
+    final map = Map<String, dynamic>.from(row)
+      ..remove('id')
+      ..remove('sync_dirty');
     switch (table) {
       case 'products':
         map
@@ -206,7 +208,9 @@ mixin DatabaseSync {
     String table,
     Map<String, dynamic> row,
   ) async {
-    final map = Map<String, dynamic>.from(row)..remove('id');
+    final map = Map<String, dynamic>.from(row)
+      ..remove('id')
+      ..['sync_dirty'] = DatabaseSchema.syncDirtyFromCloud;
     switch (table) {
       case 'products':
         map

@@ -51,6 +51,90 @@ mixin DatabaseSchema {
     await _ensureV16Columns(db);
     await _ensureV20Columns(db);
     await _runOneShotMigrations(db);
+    await _ensureSyncTracking(db);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cloud change tracking
+  //
+  // Every synced row carries sync_dirty: 1 = changed on this device and not
+  // yet uploaded, 0 = in sync. SQLite triggers maintain it, so no write path
+  // can forget to:
+  // - a local insert defaults to 1;
+  // - a local update of any synced column sets it to 1;
+  // - a row written by the cloud import sets sync_dirty = 2, which a trigger
+  //   turns into 0 (it came from the cloud, nothing to upload).
+  // Derived columns (stock cache, customer totals, payment summary...) are
+  // recomputed on every device, so changing them never queues an upload.
+  // ---------------------------------------------------------------------------
+
+  static const syncDirtyFromCloud = 2;
+
+  static const _syncTrackedTables = [
+    'shops',
+    ...storelyCloudTables,
+  ];
+
+  static const _localOnlyColumns = <String, Set<String>>{
+    'products': {'quantity_cache', 'selling_price'},
+    'customers': {'total_purchase_amount', 'bill_count', 'last_purchase_at'},
+    'bills': {
+      'paid_amount',
+      'balance_due',
+      'payment_status',
+      'is_paid',
+      'payment_method',
+      'customer_id',
+    },
+  };
+
+  Future<void> _ensureSyncTracking(DatabaseExecutor executor) async {
+    for (final table in _syncTrackedTables) {
+      await _ensureColumns(executor, table, {
+        'sync_dirty': 'INTEGER NOT NULL DEFAULT 1',
+      });
+      final info = await executor.rawQuery('PRAGMA table_info($table)');
+      final excluded = {
+        'id',
+        'sync_dirty',
+        ...?_localOnlyColumns[table],
+      };
+      final tracked = info
+          .map((row) => row['name'].toString())
+          .where((name) => !excluded.contains(name))
+          .join(', ');
+      await executor.execute('DROP TRIGGER IF EXISTS trg_${table}_dirty');
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_dirty
+        AFTER UPDATE OF $tracked ON $table
+        WHEN NEW.sync_dirty = OLD.sync_dirty
+        BEGIN
+          UPDATE $table SET sync_dirty = 1 WHERE rowid = NEW.rowid;
+        END
+      ''');
+      await executor.execute(
+        'DROP TRIGGER IF EXISTS trg_${table}_from_cloud_update',
+      );
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_from_cloud_update
+        AFTER UPDATE OF sync_dirty ON $table
+        WHEN NEW.sync_dirty = $syncDirtyFromCloud
+        BEGIN
+          UPDATE $table SET sync_dirty = 0 WHERE rowid = NEW.rowid;
+        END
+      ''');
+      await executor.execute(
+        'DROP TRIGGER IF EXISTS trg_${table}_from_cloud_insert',
+      );
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_from_cloud_insert
+        AFTER INSERT ON $table
+        WHEN NEW.sync_dirty = $syncDirtyFromCloud
+        BEGIN
+          UPDATE $table SET sync_dirty = 0 WHERE rowid = NEW.rowid;
+        END
+      ''');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -977,85 +1061,62 @@ mixin DatabaseSchema {
     }
 
     final existingCustomers = await executor.query('customers');
-    final customerIdsByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: customer['id'] as int,
-    };
-    final customerUuidsByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: customer['uuid'] as String,
-    };
-    final customerNamesByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: _normaliseName(
-            customer['name']?.toString(),
-          ),
-    };
     final now = _nowIso();
 
-    await executor.update('customers', {
-      'total_purchase_amount': 0,
-      'bill_count': 0,
-      'last_purchase_at': null,
-      'updated_at': now,
-    });
+    // Aggregates (total, count, last purchase) are derived from bills on
+    // every device, so they are written only when they change and never bump
+    // updated_at; bills are re-linked only when their link is wrong. This
+    // runs every time customers load, and used to re-stamp every customer and
+    // bill, which made them all "newer" and overwrote other phones' edits.
+    final customersByPhone = {
+      for (final customer in existingCustomers)
+        if (customer['phone'] != null) customer['phone'] as String: customer,
+    };
+    for (final customer in existingCustomers) {
+      final phone = customer['phone'] as String?;
+      if (phone != null && ledgers.containsKey(phone)) continue;
+      await _setCustomerAggregates(
+        executor,
+        customer,
+        total: 0,
+        count: 0,
+        lastPurchaseAt: null,
+      );
+    }
 
     for (final ledger in ledgers.values) {
-      final existingId = customerIdsByPhone[ledger.phone];
-      final existingName = customerNamesByPhone[ledger.phone];
-      final data = {
-        'name': existingName ?? ledger.name,
-        'phone': ledger.phone,
-        'total_purchase_amount': ledger.totalPurchaseAmount,
-        'bill_count': ledger.billCount,
-        'last_purchase_at': ledger.lastPurchaseAt,
-        'gstin': ledger.gstin,
-        'gst_legal_name': ledger.gstLegalName,
-        'gst_trade_name': ledger.gstTradeName,
-        'address': ledger.address,
-        'gst_source': ledger.gstin == null ? null : 'manual',
-        'gst_verified_at': ledger.gstin == null ? null : now,
-        'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
-        'updated_at': now,
-      };
-      if (existingId != null) {
-        data
-          ..remove('gstin')
-          ..remove('gst_legal_name')
-          ..remove('gst_trade_name')
-          ..remove('address')
-          ..remove('gst_source')
-          ..remove('gst_verified_at')
-          ..remove('place_of_supply_state_code');
-      }
-
-      final customerId =
-          existingId ??
-          await executor.insert('customers', {
-            ...data,
-            'uuid': _newUuid(),
-            'shop_id': await _activeShopId(executor),
-            'created_at': now,
-          });
-      final customerUuid =
-          customerUuidsByPhone[ledger.phone] ??
-          (await executor.query(
-                'customers',
-                columns: ['uuid'],
-                where: 'id = ?',
-                whereArgs: [customerId],
-                limit: 1,
-              )).single['uuid']
-              as String;
-      if (existingId != null) {
-        await executor.update(
-          'customers',
-          data,
-          where: 'id = ?',
-          whereArgs: [existingId],
+      final existing = customersByPhone[ledger.phone];
+      int customerId;
+      String customerUuid;
+      if (existing == null) {
+        customerUuid = _newUuid();
+        customerId = await executor.insert('customers', {
+          'uuid': customerUuid,
+          'shop_id': await _activeShopId(executor),
+          'name': ledger.name,
+          'phone': ledger.phone,
+          'total_purchase_amount': ledger.totalPurchaseAmount,
+          'bill_count': ledger.billCount,
+          'last_purchase_at': ledger.lastPurchaseAt,
+          'gstin': ledger.gstin,
+          'gst_legal_name': ledger.gstLegalName,
+          'gst_trade_name': ledger.gstTradeName,
+          'address': ledger.address,
+          'gst_source': ledger.gstin == null ? null : 'manual',
+          'gst_verified_at': ledger.gstin == null ? null : now,
+          'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
+          'created_at': now,
+          'updated_at': now,
+        });
+      } else {
+        customerId = existing['id'] as int;
+        customerUuid = existing['uuid'] as String;
+        await _setCustomerAggregates(
+          executor,
+          existing,
+          total: ledger.totalPurchaseAmount,
+          count: ledger.billCount,
+          lastPurchaseAt: ledger.lastPurchaseAt,
         );
       }
 
@@ -1063,11 +1124,37 @@ mixin DatabaseSchema {
         await executor.update(
           'bills',
           {'customer_id': customerId, 'customer_uuid': customerUuid},
-          where: 'id = ?',
-          whereArgs: [billId],
+          where: 'id = ? AND (customer_uuid IS NOT ? OR customer_id IS NOT ?)',
+          whereArgs: [billId, customerUuid, customerId],
         );
       }
     }
+  }
+
+  Future<void> _setCustomerAggregates(
+    DatabaseExecutor executor,
+    Map<String, Object?> customer, {
+    required double total,
+    required int count,
+    required String? lastPurchaseAt,
+  }) async {
+    final currentTotal =
+        (customer['total_purchase_amount'] as num?)?.toDouble() ?? 0;
+    if ((currentTotal - total).abs() < 0.005 &&
+        (customer['bill_count'] as num?)?.toInt() == count &&
+        customer['last_purchase_at'] == lastPurchaseAt) {
+      return;
+    }
+    await executor.update(
+      'customers',
+      {
+        'total_purchase_amount': total,
+        'bill_count': count,
+        'last_purchase_at': lastPurchaseAt,
+      },
+      where: 'id = ?',
+      whereArgs: [customer['id']],
+    );
   }
 }
 
