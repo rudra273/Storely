@@ -78,6 +78,7 @@ mixin DatabaseSchema {
   static const _localOnlyColumns = <String, Set<String>>{
     'products': {'quantity_cache', 'selling_price'},
     'customers': {'total_purchase_amount', 'bill_count', 'last_purchase_at'},
+    'invoice_series': {'next_sequence', 'last_sequence_key'},
     'bills': {
       'paid_amount',
       'balance_due',

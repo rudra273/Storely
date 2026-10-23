@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/invoice_numbering.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/product_purchase.dart';
 import 'package:storely/services/sync/cloud_sync_engine.dart';
@@ -221,6 +222,24 @@ void main() {
     expect(voids, hasLength(1));
   });
 
+  test('two phones billing offline get distinct bill numbers', () async {
+    await setUpShop();
+    await on('a', () => sell('Rice'));
+    await on('b', () => sell('Rice'));
+    for (final device in ['a', 'b', 'a']) {
+      await on(device, () async {
+        final result = await sync(admin: device == 'a');
+        expect(result.conflicts, isEmpty, reason: device);
+      });
+    }
+    await on('a', () async {
+      final numbers = (await db.getAllBills()).map((b) => b.billNumber).toSet();
+      final fy = InvoiceNumbering.financialYear(DateTime.now());
+      expect(numbers, {'INV/$fy/0001', 'INV/$fy/B0001'});
+      expect((await productNamed('Rice')).quantity, 8);
+    });
+  });
+
   test('pulls page through large tables', () async {
     await on('a', () async {
       server.memberShopId = await db.currentShopId();
@@ -288,10 +307,9 @@ void main() {
       expect(server.uploads, before);
       await sell('Rice');
       await sync();
-      // bill + bill item + stock movement + payment + the shared bill-number
-      // counter (made per-device in the next stage); the product is not
-      // re-uploaded by a sale.
-      expect(server.uploads - before, 5);
+      // bill + bill item + stock movement + payment; neither the product
+      // nor the (per-device) bill-number counter is re-uploaded by a sale.
+      expect(server.uploads - before, 4);
     });
   });
 }

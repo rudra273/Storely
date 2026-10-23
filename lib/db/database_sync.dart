@@ -64,6 +64,22 @@ mixin DatabaseSync {
   );
 
   static const _conflictsKey = 'sync_conflicts';
+  static const _deviceIdKey = 'device_id';
+
+  /// Permanent id of this install, used to register its bill-number letter.
+  Future<String> localDeviceId() async {
+    final existing = await getCloudSyncState(_deviceIdKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final id = _newUuid();
+    await setCloudSyncState(_deviceIdKey, id);
+    return id;
+  }
+
+  Future<bool> hasDeviceCode(String shopId) async =>
+      await getCloudSyncState(_deviceCodeKey(shopId)) != null;
+
+  Future<void> setDeviceCode(String shopId, String code) =>
+      setCloudSyncState(_deviceCodeKey(shopId), code);
 
   /// Rows changed on this device and not yet uploaded, in cloud shape.
   Future<List<Map<String, dynamic>>> cloudDirtyRows(String table) async {
@@ -395,6 +411,12 @@ mixin DatabaseSync {
             row['unit_uuid']?.toString(),
           );
         break;
+      case 'invoice_series':
+        // Sequence counters are per device (numbers carry a device letter).
+        map
+          ..remove('next_sequence')
+          ..remove('last_sequence_key');
+        break;
       case 'bills':
         map['customer_id'] = await _idForUuid(
           executor,
@@ -679,4 +701,19 @@ Future<int?> _idForUuid(
     limit: 1,
   );
   return rows.isEmpty ? null : rows.single['id'] as int?;
+}
+
+String _deviceCodeKey(String shopId) => 'device_code:$shopId';
+
+/// This device's bill-number letter for [shopId]: '' until the cloud assigns
+/// one (and always '' for a shop without cloud sync).
+Future<String> _deviceCodeFor(DatabaseExecutor executor, String shopId) async {
+  final rows = await executor.query(
+    'cloud_sync_state',
+    columns: ['value'],
+    where: 'key = ?',
+    whereArgs: [_deviceCodeKey(shopId)],
+    limit: 1,
+  );
+  return rows.isEmpty ? '' : rows.single['value']?.toString() ?? '';
 }

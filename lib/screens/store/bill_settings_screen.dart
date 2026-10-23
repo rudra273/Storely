@@ -154,7 +154,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       date: DateTime.now(),
       sequence: 1,
       padding: _padding,
-      deviceId: 'local',
+      deviceCode: '',
     );
     return 'First bill: $number  (${number.length}/${InvoiceNumbering.maxLength})'
         '\nTokens: {FY}, {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}';

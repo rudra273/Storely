@@ -21,7 +21,7 @@ void main() {
       date: DateTime(2026, 10, 23),
       sequence: 42,
       padding: InvoiceNumbering.defaultPadding,
-      deviceId: 'local',
+      deviceCode: '',
     );
     expect(number, 'INV/2627/0042');
     expect(_check(InvoiceNumbering.defaultTemplate), isNull);

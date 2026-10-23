@@ -24,18 +24,28 @@ class InvoiceNumbering {
     return '$yy$next';
   }
 
+  /// Worst-case device letter length assumed when checking pattern length.
+  static const _longestDeviceCode = 'BB';
+
+  /// [deviceCode] is this device's bill-number letter ('' for the shop's
+  /// first device or a shop without cloud sync). Patterns without {DEVICE}
+  /// get it right before the sequence, so two phones billing offline can
+  /// never issue the same number: INV/2627/0001 vs INV/2627/B0001.
   static String format({
     required String template,
     required DateTime date,
     required int sequence,
     required int padding,
-    required String deviceId,
+    required String deviceCode,
   }) {
     final year = date.year.toString().padLeft(4, '0');
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
-    return template
-        .replaceAll('{DEVICE}', deviceId)
+    final withDevice = template.contains('{DEVICE}')
+        ? template
+        : template.replaceFirst('{SEQ}', '{DEVICE}{SEQ}');
+    return withDevice
+        .replaceAll('{DEVICE}', deviceCode)
         .replaceAll('{FY}', financialYear(date))
         .replaceAll('{YYYY}', year)
         .replaceAll('{YY}', year.substring(2))
@@ -63,12 +73,11 @@ class InvoiceNumbering {
   }
 
   /// Returns a user-facing problem with the pattern, or null when it is
-  /// valid. [deviceId] is what `{DEVICE}` expands to on this device.
+  /// valid. Length is checked with the longest device letter a shop can get.
   static String? validate({
     required String template,
     required int padding,
     required String resetPeriod,
-    String deviceId = 'local',
     DateTime? sampleDate,
   }) {
     if (!template.contains('{SEQ}')) {
@@ -109,7 +118,7 @@ class InvoiceNumbering {
       date: sampleDate ?? DateTime(2026, 12, 31),
       sequence: 1,
       padding: padding,
-      deviceId: deviceId,
+      deviceCode: _longestDeviceCode,
     );
     if (sample.length > maxLength) {
       return 'Too long: ${sample.length} characters (GST allows $maxLength)';

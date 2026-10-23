@@ -114,6 +114,16 @@ class CloudSyncEngine {
       shopId = memberShopId;
     }
 
+    // Each device gets its own bill-number letter before it bills for the
+    // shop, so phones billing offline never issue the same number.
+    if (!await database.hasDeviceCode(shopId)) {
+      final code = await backend.registerDevice(
+        shopId,
+        await database.localDeviceId(),
+      );
+      await database.setDeviceCode(shopId, code);
+    }
+
     final lastSync = await database.getCloudSyncState(lastSyncStateKey);
     final canPushAdminTables =
         knownIsAdmin ?? await backend.isShopAdmin(shopId);

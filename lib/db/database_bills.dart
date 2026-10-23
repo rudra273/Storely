@@ -623,13 +623,13 @@ mixin DatabaseBills {
         series['format_template']?.toString() ??
         InvoiceNumbering.defaultTemplate;
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
-    final deviceId = series['device_id']?.toString() ?? 'local';
+    final deviceCode = await _deviceCodeFor(executor, shopId);
     String format(int seq) => InvoiceNumbering.format(
       template: template,
       date: createdAt,
       sequence: seq,
       padding: padding,
-      deviceId: deviceId,
+      deviceCode: deviceCode,
     );
 
     // A sequence reset can land on a number that already exists, e.g. a
@@ -652,11 +652,9 @@ mixin DatabaseBills {
 
     await executor.update(
       'invoice_series',
-      {
-        'next_sequence': sequence + 1,
-        'last_sequence_key': resetKey,
-        'updated_at': _nowIso(),
-      },
+      // This device's own counter (its numbers carry its device letter), so
+      // it is local-only: not synced and no updated_at bump.
+      {'next_sequence': sequence + 1, 'last_sequence_key': resetKey},
       where: 'id = ?',
       whereArgs: [series['id']],
     );
