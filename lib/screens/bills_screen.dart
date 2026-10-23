@@ -477,30 +477,29 @@ class _BillsScreenState extends State<BillsScreen> {
                     AppSpacing.lg,
                     96,
                   ),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Always shown so the Cancelled tab stays reachable even
-                        // when there are no cancelled bills yet (count shows 0).
-                        _BillFilterTabs(
-                          showCancelled: _showCancelled,
-                          activeCount: _bills.length,
-                          cancelledCount: _cancelledBills.length,
-                          onChanged: (showCancelled) =>
-                              setState(() => _showCancelled = showCancelled),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        if (_showCancelled) ...[
-                          ..._buildCancelledBillCards(),
-                        ] else ...[
-                          if (_searchQuery.isEmpty) ...[
-                            _UnpaidSummary(bills: _bills),
-                          ],
-                          ..._buildGroupedBillCards(),
+                  // A lazy list: only the bill cards on screen are built and
+                  // laid out, so shops with thousands of bills scroll fine.
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      // Always shown so the Cancelled tab stays reachable even
+                      // when there are no cancelled bills yet (count shows 0).
+                      _BillFilterTabs(
+                        showCancelled: _showCancelled,
+                        activeCount: _bills.length,
+                        cancelledCount: _cancelledBills.length,
+                        onChanged: (showCancelled) =>
+                            setState(() => _showCancelled = showCancelled),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      if (_showCancelled) ...[
+                        ..._buildCancelledBillCards(),
+                      ] else ...[
+                        if (_searchQuery.isEmpty) ...[
+                          _UnpaidSummary(bills: _bills),
                         ],
+                        ..._buildGroupedBillCards(),
                       ],
-                    ),
+                    ], addAutomaticKeepAlives: false),
                   ),
                 ),
             ],
