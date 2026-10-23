@@ -160,6 +160,13 @@ class ReceiptImage {
                 ),
               ],
             ),
+            if (!bill.isCreditNote &&
+                bill.items.any((item) => item.mrpSaving > 0))
+              pw.Text(
+                'You saved ${rupees(bill.items.fold<double>(0, (s, i) => s + i.mrpSaving))} on MRP',
+                textAlign: pw.TextAlign.center,
+                style: style(bold: true),
+              ),
             if (bill.isCreditNote)
               row(
                 bill.paymentMethod == 'credit_note' ? 'Adjusted' : 'Refunded',

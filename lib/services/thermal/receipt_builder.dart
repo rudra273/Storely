@@ -171,6 +171,17 @@ class ReceiptBuilder {
       ]),
     );
     bytes.addAll(gen.text('Items: ${bill.items.length}'));
+    final saved = bill.isCreditNote
+        ? 0.0
+        : bill.items.fold<double>(0, (sum, item) => sum + item.mrpSaving);
+    if (saved > 0.004) {
+      bytes.addAll(
+        gen.text(
+          'You saved ${money(saved)} on MRP',
+          styles: const PosStyles(align: PosAlign.center, bold: true),
+        ),
+      );
+    }
 
     // Payment
     if (bill.isCreditNote) {

@@ -88,6 +88,77 @@ class StockValueRow {
   });
 }
 
+/// Stock from one purchase batch that expires soon (or already has).
+class ExpiringBatch {
+  final int productId;
+  final String productName;
+  final String? unit;
+  final String? batchNo;
+  final DateTime expiry;
+
+  /// Estimated units of this batch still on the shelf (older stock is
+  /// assumed to sell first).
+  final double quantity;
+
+  const ExpiringBatch({
+    required this.productId,
+    required this.productName,
+    required this.unit,
+    required this.batchNo,
+    required this.expiry,
+    required this.quantity,
+  });
+
+  bool isExpired(DateTime today) =>
+      expiry.isBefore(DateTime(today.year, today.month, today.day));
+}
+
+/// One purchase line (stock received) for the purchase register.
+class PurchaseRow {
+  final DateTime date;
+  final String productName;
+  final String? unit;
+  final String? supplier;
+  final double quantity;
+  final double unitCost;
+  final String? batchNo;
+  final DateTime? expiry;
+  final bool imported;
+
+  const PurchaseRow({
+    required this.date,
+    required this.productName,
+    required this.unit,
+    required this.supplier,
+    required this.quantity,
+    required this.unitCost,
+    required this.batchNo,
+    required this.expiry,
+    required this.imported,
+  });
+
+  double get amount => roundMoney(quantity * unitCost);
+}
+
+/// Output tax for one GST rate in a period (net of credit notes).
+class TaxRateRow {
+  final double rate;
+  final double taxable;
+  final double cgst;
+  final double sgst;
+  final double igst;
+
+  const TaxRateRow({
+    required this.rate,
+    required this.taxable,
+    required this.cgst,
+    required this.sgst,
+    required this.igst,
+  });
+
+  double get tax => roundMoney(cgst + sgst + igst);
+}
+
 mixin DatabaseReports {
   Future<Database> get database;
   Future<List<Expense>> getExpenses({String? from, String? to});
@@ -234,6 +305,157 @@ mixin DatabaseReports {
     }
     return byCustomer.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
+  }
+
+  /// Batches expiring within [days] (and expired ones still in stock),
+  /// soonest first. Stock on hand is matched to the newest purchases, as
+  /// older stock normally sells first.
+  Future<List<ExpiringBatch>> expiringStock({int days = 30}) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final cutoff = DateTime.now().add(Duration(days: days));
+    final products = await db.rawQuery(
+      '''
+      SELECT p.id, p.name, p.quantity_cache AS qty, u.name AS unit
+      FROM products p
+      LEFT JOIN units u ON u.id = p.unit_id
+      WHERE p.shop_id = ? AND p.deleted_at IS NULL AND p.track_stock = 1
+        AND p.quantity_cache > 0
+        AND EXISTS (
+          SELECT 1 FROM stock_movements m
+          WHERE m.product_id = p.id AND m.expiry_date IS NOT NULL
+            AND m.deleted_at IS NULL
+        )
+    ''',
+      [shopId],
+    );
+    final result = <ExpiringBatch>[];
+    for (final p in products) {
+      var remaining = (p['qty'] as num).toDouble();
+      final purchases = await db.query(
+        'stock_movements',
+        columns: ['quantity_delta', 'batch_no', 'expiry_date'],
+        where:
+            "product_id = ? AND deleted_at IS NULL AND movement_type = 'purchase'",
+        whereArgs: [p['id']],
+        orderBy: 'created_at DESC, id DESC',
+      );
+      for (final m in purchases) {
+        if (remaining <= stockQuantityEpsilon) break;
+        final qty = (m['quantity_delta'] as num).toDouble();
+        final inStock = qty < remaining ? qty : remaining;
+        remaining -= inStock;
+        final expiry = DateTime.tryParse(m['expiry_date']?.toString() ?? '');
+        if (expiry == null || expiry.isAfter(cutoff)) continue;
+        result.add(
+          ExpiringBatch(
+            productId: p['id'] as int,
+            productName: p['name'] as String,
+            unit: p['unit'] as String?,
+            batchNo: m['batch_no'] as String?,
+            expiry: expiry,
+            quantity: inStock,
+          ),
+        );
+      }
+    }
+    return result..sort((a, b) => a.expiry.compareTo(b.expiry));
+  }
+
+  /// Stock received in [from]..[to], newest first. Opening stock entered
+  /// with a new product counts as a purchase.
+  Future<List<PurchaseRow>> purchaseRegister({
+    required String from,
+    required String to,
+  }) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final dates = _rangeWhere('m.created_at', from, to);
+    final rows = await db.rawQuery(
+      '''
+      SELECT m.created_at, m.quantity_delta, m.unit_cost, m.batch_no,
+             m.expiry_date, m.source_type, p.name, u.name AS unit,
+             s.name AS supplier
+      FROM stock_movements m
+      JOIN products p ON p.id = m.product_id
+      LEFT JOIN units u ON u.id = p.unit_id
+      LEFT JOIN suppliers s ON s.id = m.supplier_id
+      WHERE m.shop_id = ? AND m.deleted_at IS NULL
+        AND m.movement_type = 'purchase' ${dates.sql}
+      ORDER BY m.created_at DESC, m.id DESC
+    ''',
+      [shopId, ...dates.args],
+    );
+    return [
+      for (final r in rows)
+        PurchaseRow(
+          date: DateTime.parse(r['created_at'] as String),
+          productName: r['name'] as String,
+          unit: r['unit'] as String?,
+          supplier: r['supplier'] as String?,
+          quantity: (r['quantity_delta'] as num).toDouble(),
+          unitCost: (r['unit_cost'] as num?)?.toDouble() ?? 0,
+          batchNo: r['batch_no'] as String?,
+          expiry: DateTime.tryParse(r['expiry_date']?.toString() ?? ''),
+          imported: r['source_type'] == 'import',
+        ),
+    ];
+  }
+
+  /// Output GST by rate for bills dated [from]..[to] (credit notes count
+  /// negative), using each line's rounded tax.
+  Future<List<TaxRateRow>> taxSummary({
+    required String from,
+    required String to,
+  }) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final dates = _rangeWhere('b.created_at', from, to);
+    final rows = await db.rawQuery(
+      '''
+      SELECT bi.gst_percent_snapshot AS rate, bi.quantity,
+             bi.taxable_value_snapshot, bi.gst_snapshot,
+             bi.cgst_amount_snapshot, bi.igst_amount_snapshot
+      FROM bill_items bi
+      JOIN bills b ON b.id = bi.bill_id
+      WHERE b.shop_id = ? AND b.deleted_at IS NULL AND bi.deleted_at IS NULL
+        ${dates.sql}
+    ''',
+      [shopId, ...dates.args],
+    );
+    final byRate = <double, List<double>>{};
+    for (final r in rows) {
+      final rate = (r['rate'] as num?)?.toDouble() ?? 0;
+      final qty = (r['quantity'] as num).toDouble();
+      final taxable = roundMoney(
+        (r['taxable_value_snapshot'] as num).toDouble() * qty,
+      );
+      final lineAmount = roundMoney(
+        ((r['taxable_value_snapshot'] as num).toDouble() +
+                (r['gst_snapshot'] as num).toDouble()) *
+            qty,
+      );
+      final gst = roundMoney(lineAmount - taxable);
+      final isInter = ((r['igst_amount_snapshot'] as num?) ?? 0) > 0;
+      final isIntra = ((r['cgst_amount_snapshot'] as num?) ?? 0) > 0;
+      final cgst = isIntra ? roundMoney(gst / 2) : 0.0;
+      final sums = byRate.putIfAbsent(rate, () => [0, 0, 0, 0]);
+      sums[0] += taxable;
+      sums[1] += cgst;
+      sums[2] += isIntra ? roundMoney(gst - cgst) : 0.0;
+      sums[3] += isInter ? gst : 0.0;
+    }
+    final rates = byRate.keys.toList()..sort();
+    return [
+      for (final rate in rates)
+        TaxRateRow(
+          rate: rate,
+          taxable: roundMoney(byRate[rate]![0]),
+          cgst: roundMoney(byRate[rate]![1]),
+          sgst: roundMoney(byRate[rate]![2]),
+          igst: roundMoney(byRate[rate]![3]),
+        ),
+    ];
   }
 
   /// Tracked products with stock, highest cost value first.

@@ -71,6 +71,8 @@ class StockMovement {
   final int? importRowNumber;
   final String? notes;
   final String? reason;
+  final String? batchNo;
+  final DateTime? expiryDate;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -95,6 +97,8 @@ class StockMovement {
     this.importRowNumber,
     this.notes,
     this.reason,
+    this.batchNo,
+    this.expiryDate,
     this.deviceId,
     required this.createdAt,
     required this.updatedAt,
@@ -122,6 +126,8 @@ class StockMovement {
       importRowNumber: map['import_row_number'] as int?,
       notes: map['notes'] as String?,
       reason: map['reason'] as String?,
+      batchNo: map['batch_no'] as String?,
+      expiryDate: DateTime.tryParse(map['expiry_date']?.toString() ?? ''),
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

@@ -23,6 +23,7 @@ class ProductExport {
     'gst_percent',
     'purchase_price',
     'selling_price',
+    'mrp_price',
     'quantity',
     'reorder_level',
   ];
@@ -40,6 +41,7 @@ class ProductExport {
         p.gstPercent ?? '',
         _num(p.purchasePrice),
         _num(p.sellingPrice),
+        p.printedMrp == null ? '' : _num(p.printedMrp!),
         p.trackStock ? _num(p.quantity) : '',
         p.reorderLevel == null ? '' : _num(p.reorderLevel!),
       ],

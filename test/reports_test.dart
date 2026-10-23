@@ -141,4 +141,31 @@ void main() {
     expect(stock.single.quantity, 4);
     expect(stock.single.costValue, 400);
   });
+
+  test('tax summary is net of credit notes, by rate', () async {
+    await scenario();
+    final rows = await db.taxSummary(from: today(), to: today());
+    expect(rows.single.rate, 5);
+    expect(rows.single.taxable, closeTo(750, 0.01));
+    expect(rows.single.cgst, closeTo(18.75, 0.02));
+    expect(rows.single.sgst, closeTo(18.75, 0.02));
+    expect(rows.single.igst, 0);
+  });
+
+  test('purchase register lists stock received with cost', () async {
+    final id = await product(); // 10 opening stock at 100
+    final rice = (await db.getProductById(id))!;
+    await db.restockProduct(
+      rice.copyWith(purchasePrice: 110, purchaseBatchNo: 'R7'),
+      quantityAdded: 5,
+      purchaseDate: DateTime.now(),
+    );
+    final rows = await db.purchaseRegister(from: today(), to: today());
+    expect(rows, hasLength(2));
+    final restock = rows.firstWhere((r) => r.batchNo == 'R7');
+    expect(restock.quantity, 5);
+    expect(restock.unitCost, 110);
+    expect(restock.amount, 550);
+    expect(rows.fold<double>(0, (s, r) => s + r.amount), 1550);
+  });
 }

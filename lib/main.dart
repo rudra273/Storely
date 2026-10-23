@@ -17,6 +17,7 @@ import 'services/home_section_prefs.dart';
 import 'services/thermal/thermal_printer_service.dart';
 import 'services/kpi_prefs.dart';
 import 'services/sync_status.dart';
+import 'services/app_log.dart';
 import 'theme/app_theme.dart';
 import 'l10n/l10n.dart';
 import 'utils/test_keys.dart';
@@ -31,6 +32,7 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.light,
     ),
   );
+  await AppLog.init();
   await _start();
 }
 
@@ -48,12 +50,12 @@ Future<void> _start() async {
       await CloudService.instance.initialize();
     } catch (error, stack) {
       // Cloud sync is optional: the shop keeps working offline.
-      debugPrint('Cloud init failed: $error\n$stack');
+      AppLog.error('Cloud init', error, stack);
     }
     await ThermalPrinterService.instance.load();
     unawaited(SyncStatus.instance.refresh());
   } catch (error, stack) {
-    debugPrint('Startup failed: $error\n$stack');
+    AppLog.error('Startup', error, stack);
     await DatabaseHelper.instance.close().catchError((_) {});
     runApp(StartupErrorApp(error: error, stackTrace: stack, onRetry: _start));
     return;

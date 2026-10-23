@@ -127,6 +127,19 @@ mixin DatabaseSync {
     });
   }
 
+  /// Stops uploading one row (see `CloudSyncEngine.useCloudCopy`).
+  Future<void> markRowSynced(String table, String key) async {
+    if (!['shops', ...storelyCloudTables].contains(table)) return;
+    final db = await database;
+    await db.update(
+      table,
+      // Older than any real edit, so the cloud's copy wins when pulled.
+      {'sync_dirty': 0, 'updated_at': DatabaseHelper._placeholderTimestamp},
+      where: table == 'app_settings' ? 'key = ?' : 'uuid = ?',
+      whereArgs: [key],
+    );
+  }
+
   /// "Start fresh" first sync: existing local rows are not uploaded.
   Future<void> markAllCloudRowsClean() async {
     final db = await database;

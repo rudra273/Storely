@@ -85,6 +85,22 @@ class CloudSyncEngine {
 
   static String _cursorKey(String table) => 'pull_cursor:$table';
 
+  /// Gives up on this phone's version of one row that keeps failing to
+  /// sync: it is no longer uploaded, and its table is pulled again from the
+  /// start so the cloud's version (if any) replaces it on the next sync.
+  static Future<void> useCloudCopy(
+    DatabaseHelper database,
+    SyncConflict conflict,
+  ) async {
+    await database.markRowSynced(conflict.table, conflict.key);
+    await database.clearCloudSyncState(_cursorKey(conflict.table));
+    final remaining = [
+      for (final c in await database.getSyncConflicts())
+        if (c.table != conflict.table || c.key != conflict.key) c,
+    ];
+    await database.saveSyncConflicts(remaining);
+  }
+
   /// Forget sync progress so the next sync is a first sync again.
   static Future<void> resetProgress(DatabaseHelper database) async {
     await database.clearCloudSyncState(lastSyncStateKey);

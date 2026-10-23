@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../db/database_helper.dart';
 import '../../services/cloud_service.dart';
+import '../../services/sync/cloud_sync_engine.dart';
 import '../../services/sync_status.dart';
 import '../../theme/app_theme.dart';
 
@@ -60,6 +62,40 @@ Future<void> showSyncStatusSheet(BuildContext context) async {
 
 class _SyncStatusSheet extends StatelessWidget {
   const _SyncStatusSheet();
+
+  Future<void> _resolve(
+    BuildContext context,
+    SyncConflict conflict,
+    String action,
+  ) async {
+    if (action == 'cloud') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Use the cloud copy?'),
+          content: const Text(
+            "This phone's version of this record stops syncing. The "
+            "cloud's version replaces it on the next sync (if the cloud has "
+            'one). Use this when the record keeps failing to sync.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Use cloud copy'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      await CloudSyncEngine.useCloudCopy(DatabaseHelper.instance, conflict);
+    }
+    await CloudService.instance.syncNow(reason: 'Retry sync problems');
+    await SyncStatus.instance.refresh();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +177,20 @@ class _SyncStatusSheet extends StatelessWidget {
                         ),
                         title: Text(SyncStatus.label(c.table)),
                         subtitle: Text(c.message),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: 'Fix',
+                          onSelected: (action) => _resolve(context, c, action),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'retry',
+                              child: Text('Try again'),
+                            ),
+                            PopupMenuItem(
+                              value: 'cloud',
+                              child: Text('Use cloud copy'),
+                            ),
+                          ],
+                        ),
                       ),
                   ],
                   const SizedBox(height: AppSpacing.lg),

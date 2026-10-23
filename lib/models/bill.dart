@@ -73,6 +73,7 @@ class Bill {
       ],
     );
   }
+
   final double totalAmount;
   final int itemCount;
   final bool isPaid;
@@ -316,6 +317,17 @@ class BillItem {
 
   /// On a credit note line: the invoice line being returned.
   final String? originalItemUuid;
+
+  /// The printed MRP when the product has one above the selling price.
+  final double? mrpSnapshot;
+
+  /// What the customer saved against MRP on this line.
+  double get mrpSaving {
+    final m = mrpSnapshot;
+    if (m == null || m <= sellingPriceSnapshot + 0.004) return 0;
+    return roundMoney((m - sellingPriceSnapshot) * quantity);
+  }
+
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -390,6 +402,7 @@ class BillItem {
     this.wasDirectPrice = true,
     num quantity = 1,
     this.originalItemUuid,
+    this.mrpSnapshot,
     this.deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -436,6 +449,7 @@ class BillItem {
     'was_direct_price': wasDirectPrice ? 1 : 0,
     'quantity': quantity,
     'original_item_uuid': originalItemUuid,
+    'mrp_snapshot': mrpSnapshot,
     'subtotal': subtotal,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
@@ -478,6 +492,7 @@ class BillItem {
       wasDirectPrice: (map['was_direct_price'] as int? ?? 1) == 1,
       quantity: (map['quantity'] as num).toDouble(),
       originalItemUuid: map['original_item_uuid'] as String?,
+      mrpSnapshot: (map['mrp_snapshot'] as num?)?.toDouble(),
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

@@ -1169,6 +1169,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
           : '',
     );
     var trackStock = product?.trackStock ?? true;
+    final mrpCtrl = TextEditingController(
+      text: product?.printedMrp == null
+          ? ''
+          : product!.printedMrp!.toStringAsFixed(2),
+    );
+    final batchCtrl = TextEditingController(
+      text: product?.purchaseBatchNo ?? '',
+    );
+    DateTime? expiryDate = product?.purchaseExpiry;
     final reorderCtrl = TextEditingController(
       text: product?.reorderLevel == null
           ? ''
@@ -1474,6 +1483,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       quantity: existing.quantity,
                       trackStock: trackStock,
                       reorderLevel: double.tryParse(reorderCtrl.text.trim()),
+                      printedMrp: double.tryParse(mrpCtrl.text.trim()),
+                      purchaseBatchNo: batchCtrl.text.trim().isEmpty
+                          ? null
+                          : batchCtrl.text.trim(),
+                      purchaseExpiry: expiryDate,
                       source: existing.source,
                       createdAt: existing.createdAt,
                       updatedAt: existing.updatedAt,
@@ -1539,6 +1553,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     quantity: double.parse(qtyCtrl.text),
                     trackStock: trackStock,
                     reorderLevel: double.tryParse(reorderCtrl.text.trim()),
+                    printedMrp: double.tryParse(mrpCtrl.text.trim()),
+                    purchaseBatchNo: batchCtrl.text.trim().isEmpty
+                        ? null
+                        : batchCtrl.text.trim(),
+                    purchaseExpiry: expiryDate,
                     source: product?.source ?? ProductSource.mobile,
                     createdAt: product?.createdAt,
                     updatedAt: product?.updatedAt,
@@ -1997,6 +2016,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           },
                                         ),
                                         const SizedBox(height: 10),
+                                        _MrpAndBatchFields(
+                                          mrpController: mrpCtrl,
+                                          batchController: batchCtrl,
+                                          expiryDate: expiryDate,
+                                          showBatch: !isCatalogEditing,
+                                          onExpiryChanged: (value) {
+                                            markEdited();
+                                            setSheet(() => expiryDate = value);
+                                          },
+                                          onChanged: markEdited,
+                                        ),
+                                        const SizedBox(height: 10),
                                         _StockTrackingFields(
                                           trackStock: trackStock,
                                           reorderController: reorderCtrl,
@@ -2286,6 +2317,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
             marginCtrl.dispose();
             qtyCtrl.dispose();
             reorderCtrl.dispose();
+            mrpCtrl.dispose();
+            batchCtrl.dispose();
             totalCtrl.dispose();
           });
         });

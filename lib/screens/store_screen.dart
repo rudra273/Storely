@@ -4,7 +4,6 @@ import '../db/database_helper.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../models/bill_settings.dart';
-import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
@@ -15,14 +14,13 @@ import '../services/app_settings_service.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import 'store/printer_setup_sheet.dart';
 import 'store/backup_sheet.dart';
+import '../services/problem_report.dart';
 import '../l10n/l10n.dart';
 import 'shared/sync_status_widgets.dart';
 import '../services/sync_status.dart';
 import '../main.dart' show AppGate;
-import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
-import 'customers_screen.dart';
 import 'suppliers_screen.dart';
 import 'store/bill_settings_screen.dart';
 
@@ -51,7 +49,6 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _suppliers = [];
   List<SupplierProfile> _supplierProfiles = [];
   List<String> _units = [];
-  List<Customer> _customers = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
   InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
   int _lowStockThreshold = 5;
@@ -81,7 +78,6 @@ class _StoreScreenState extends State<StoreScreen> {
         .map((supplier) => supplier.name)
         .toList();
     final units = await db.getUnits();
-    final customers = await db.getAllCustomers();
     final pricingSettings = await db.getGlobalPricingSettings();
     final invoiceSeriesSettings = await db.getDefaultInvoiceSeriesSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
@@ -93,7 +89,6 @@ class _StoreScreenState extends State<StoreScreen> {
       _suppliers = suppliers;
       _supplierProfiles = supplierProfiles;
       _units = units;
-      _customers = customers;
       _pricingSettings = pricingSettings;
       _invoiceSeriesSettings = invoiceSeriesSettings;
       _lowStockThreshold = lowStockThreshold;
@@ -186,13 +181,6 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  void _openAnalytics() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
-    );
-  }
-
   Future<void> _showBackup() async {
     final restored = await showModalBottomSheet<bool>(
       context: context,
@@ -207,6 +195,22 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  Future<void> _reportProblem() async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (_) => const _ReportProblemDialog(),
+    );
+    if (note == null || !mounted) return;
+    try {
+      await ProblemReport.share(userNote: note);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+    }
+  }
+
   Future<void> _showAppSettings() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -214,13 +218,6 @@ class _StoreScreenState extends State<StoreScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => const _AppSettingsSheet(),
     );
-  }
-
-  Future<void> _showCustomerTable() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const CustomersScreen()));
-    if (mounted) await _loadStoreData();
   }
 
   Future<void> _showCategoryManager() {
@@ -521,7 +518,24 @@ class _StoreScreenState extends State<StoreScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Settings Configuration'),
+                  const _SectionLabel(title: 'Billing'),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Bill Settings',
+                    subtitle: _invoiceSeriesSettings.formatTemplate,
+                    icon: Icons.receipt_long_outlined,
+                    onTap: _showBillSettings,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Pricing Defaults',
+                    subtitle:
+                        'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
+                    icon: Icons.calculate_outlined,
+                    onTap: _showGlobalPricingSettings,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  const _SectionLabel(title: 'Catalog'),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Categories',
@@ -539,39 +553,19 @@ class _StoreScreenState extends State<StoreScreen> {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
-                    title: 'Pricing Defaults',
-                    subtitle:
-                        'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
-                    icon: Icons.calculate_outlined,
-                    onTap: _showGlobalPricingSettings,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Bill Settings',
-                    subtitle: _invoiceSeriesSettings.formatTemplate,
-                    icon: Icons.receipt_long_outlined,
-                    onTap: _showBillSettings,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Needs Attention',
+                    title: 'Low-stock alert',
                     subtitle: 'Show stock at $_lowStockThreshold or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
+                  const SizedBox(height: AppSpacing.xl),
+                  const _SectionLabel(title: 'Data & security'),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
-                    title: 'Customers',
-                    subtitle: '${_customers.length} saved',
-                    icon: Icons.people_outline_rounded,
-                    onTap: _showCustomerTable,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Analytics',
-                    subtitle: 'Revenue, profit, GST and unit volume',
-                    icon: Icons.analytics_outlined,
-                    onTap: _openAnalytics,
+                    title: 'Backup & restore',
+                    subtitle: 'Save all data to one file',
+                    icon: Icons.backup_outlined,
+                    onTap: _showBackup,
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   AnimatedBuilder(
@@ -579,17 +573,10 @@ class _StoreScreenState extends State<StoreScreen> {
                     builder: (context, _) => _StoreActionRow(
                       title: 'App Settings',
                       subtitle:
-                          'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'}',
+                          'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'} • ${AppSettingsService.instance.language.label}',
                       icon: Icons.settings_outlined,
                       onTap: _showAppSettings,
                     ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Backup & restore',
-                    subtitle: 'Save all data to one file',
-                    icon: Icons.backup_outlined,
-                    onTap: _showBackup,
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Account'),
@@ -600,7 +587,14 @@ class _StoreScreenState extends State<StoreScreen> {
                     onMembers: _openMembers,
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Legal & App Information'),
+                  const _SectionLabel(title: 'Help & about'),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Report a problem',
+                    subtitle: 'Send app details and recent errors to support',
+                    icon: Icons.bug_report_outlined,
+                    onTap: _reportProblem,
+                  ),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Privacy policy',
@@ -618,6 +612,64 @@ class _StoreScreenState extends State<StoreScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Asks what went wrong (optional) before sharing a problem report.
+class _ReportProblemDialog extends StatefulWidget {
+  const _ReportProblemDialog();
+
+  @override
+  State<_ReportProblemDialog> createState() => _ReportProblemDialogState();
+}
+
+class _ReportProblemDialogState extends State<_ReportProblemDialog> {
+  final _note = TextEditingController();
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Report a problem'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: const ValueKey('problem-note'),
+            controller: _note,
+            minLines: 3,
+            maxLines: 6,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'What happened? (optional)',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'The report has the app version, Android version, record counts, '
+            'sync status and recent errors. No customer names, numbers or '
+            'amounts.',
+            style: AppText.caption,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _note.text),
+          child: const Text('Share report'),
+        ),
+      ],
     );
   }
 }

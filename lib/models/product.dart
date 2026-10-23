@@ -56,6 +56,16 @@ class Product {
 
   /// Stock at or below this is "running low"; null uses the shop default.
   final double? reorderLevel;
+
+  /// Maximum retail price printed on the pack (optional). Not the selling
+  /// price: shops often sell below MRP. ([mrp] is a legacy alias for the
+  /// selling price.)
+  final double? printedMrp;
+
+  /// Batch and expiry of the stock being added in this purchase. Not stored
+  /// on the product: recorded on the purchase's stock movement.
+  final String? purchaseBatchNo;
+  final DateTime? purchaseExpiry;
   final int? unitId;
   final String? unit;
   final String source;
@@ -90,6 +100,9 @@ class Product {
     required num quantity,
     this.trackStock = true,
     this.reorderLevel,
+    this.printedMrp,
+    this.purchaseBatchNo,
+    this.purchaseExpiry,
     this.unitId,
     this.unit,
     this.source = ProductSource.mobile,
@@ -162,6 +175,7 @@ class Product {
     'quantity_cache': quantity,
     'track_stock': trackStock ? 1 : 0,
     'reorder_level': reorderLevel,
+    'mrp_price': printedMrp,
     'unit_id': unitId,
     'source': source,
     'device_id': deviceId,
@@ -208,6 +222,7 @@ class Product {
         0,
     trackStock: (map['track_stock'] as num? ?? 1) != 0,
     reorderLevel: (map['reorder_level'] as num?)?.toDouble(),
+    printedMrp: (map['mrp_price'] as num?)?.toDouble(),
     unitId: map['unit_id'] as int?,
     unit: _cleanOptional(map['unit_name'] as String? ?? map['unit'] as String?),
     source: map['source'] as String? ?? ProductSource.mobile,
@@ -235,6 +250,7 @@ class Product {
       hsnCode: row.hsnCode,
       gstPercent: row.gstPercent,
       reorderLevel: row.reorderLevel,
+      printedMrp: row.printedMrp,
       supplier: applySupplier ? row.supplier : null,
       directPriceToggle: sellingPrice == null ? null : true,
       manualPrice: sellingPrice,
@@ -281,6 +297,10 @@ class Product {
     bool? trackStock,
     bool clearReorderLevel = false,
     double? reorderLevel,
+    bool clearPrintedMrp = false,
+    double? printedMrp,
+    String? purchaseBatchNo,
+    DateTime? purchaseExpiry,
     bool clearUnit = false,
     int? unitId,
     String? unit,
@@ -320,6 +340,9 @@ class Product {
     quantity: quantity ?? this.quantity,
     trackStock: trackStock ?? this.trackStock,
     reorderLevel: clearReorderLevel ? null : reorderLevel ?? this.reorderLevel,
+    printedMrp: clearPrintedMrp ? null : printedMrp ?? this.printedMrp,
+    purchaseBatchNo: purchaseBatchNo ?? this.purchaseBatchNo,
+    purchaseExpiry: purchaseExpiry ?? this.purchaseExpiry,
     unitId: clearUnit ? null : unitId ?? this.unitId,
     unit: clearUnit ? null : unit ?? this.unit,
     source: source ?? this.source,
