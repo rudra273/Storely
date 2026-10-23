@@ -18,6 +18,7 @@ import 'services/thermal/thermal_printer_service.dart';
 import 'services/kpi_prefs.dart';
 import 'services/sync_status.dart';
 import 'theme/app_theme.dart';
+import 'l10n/l10n.dart';
 import 'utils/test_keys.dart';
 
 export 'theme/app_colors.dart';
@@ -75,6 +76,9 @@ class StorelyApp extends StatelessWidget {
         theme: StorelyTheme.light(),
         darkTheme: StorelyTheme.dark(),
         themeMode: AppSettingsService.instance.themeMode,
+        locale: AppSettingsService.instance.locale,
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
         navigatorKey: _navigatorKey,
         // App Lock sits above the Navigator so it covers every screen.
         builder: (context, child) => AppLockGate(
@@ -291,7 +295,7 @@ class _BottomNavBar extends StatelessWidget {
                 _NavItem(
                   icon: Icons.home_outlined,
                   activeIcon: Icons.home,
-                  label: 'Home',
+                  label: context.l10n.navHome,
                   isActive: currentIndex == 0,
                   onTap: () => onTabTap(0),
                 ),
@@ -302,7 +306,7 @@ class _BottomNavBar extends StatelessWidget {
                 _NavItem(
                   icon: Icons.inventory_2_outlined,
                   activeIcon: Icons.inventory_2,
-                  label: 'Products',
+                  label: context.l10n.navProducts,
                   isActive: currentIndex == 1,
                   onTap: () => onTabTap(1),
                 ),
@@ -334,7 +338,7 @@ class _BottomNavBar extends StatelessWidget {
                     ),
                   ),
                 ),
-                label: 'Scan',
+                label: context.l10n.navScan,
                 button: true,
               ),
               TestKeys.tag(
@@ -342,7 +346,7 @@ class _BottomNavBar extends StatelessWidget {
                 _NavItem(
                   icon: Icons.receipt_long_outlined,
                   activeIcon: Icons.receipt_long,
-                  label: 'Bills',
+                  label: context.l10n.navBills,
                   isActive: currentIndex == 2,
                   onTap: () => onTabTap(2),
                 ),
@@ -353,7 +357,7 @@ class _BottomNavBar extends StatelessWidget {
                 _NavItem(
                   icon: Icons.storefront_outlined,
                   activeIcon: Icons.storefront,
-                  label: 'Store',
+                  label: context.l10n.navStore,
                   isActive: currentIndex == 3,
                   onTap: () => onTabTap(3),
                 ),

@@ -104,7 +104,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       icon: const Icon(Icons.check_circle, color: AppColors.success, size: 48),
-      title: const Text('Bill Created!'),
+      title: Text(context.l10n.billCreated),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -130,7 +130,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.share_rounded),
-              label: const Text('Share PDF (WhatsApp, print…)'),
+              label: Text(context.l10n.sharePdf),
             ),
           ),
           if (ThermalPrinterService.instance.isConfigured) ...[
@@ -146,7 +146,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.print_rounded),
-                label: const Text('Print receipt'),
+                label: Text(context.l10n.printReceipt),
               ),
             ),
           ],
@@ -155,7 +155,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, true),
-          child: const Text('New Bill'),
+          child: Text(context.l10n.newBill),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, false),
@@ -165,7 +165,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
                 ? Colors.black
                 : Colors.white,
           ),
-          child: const Text('Done'),
+          child: Text(context.l10n.done),
         ),
       ],
     );
@@ -194,13 +194,13 @@ class _HeldBillsSheetState extends State<_HeldBillsSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Held bills', style: AppText.title),
+          Text(context.l10n.heldBills, style: AppText.title),
           const SizedBox(height: AppSpacing.sm),
           if (_held.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
               child: Text(
-                'No held bills',
+                context.l10n.noHeldBills,
                 textAlign: TextAlign.center,
                 style: AppText.caption,
               ),

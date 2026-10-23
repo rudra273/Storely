@@ -89,7 +89,7 @@ class _ManualProductTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    isOut ? 'Out' : product.quantityLabel,
+                    isOut ? context.l10n.outOfStock : product.quantityLabel,
                     style: TextStyle(
                       color: isOut
                           ? AppColors.error
@@ -149,7 +149,7 @@ class _ScannerUnavailable extends StatelessWidget {
               FilledButton.icon(
                 onPressed: onUseSearch,
                 icon: const Icon(Icons.search_rounded),
-                label: const Text('Search items'),
+                label: Text(context.l10n.searchItemsBtn),
               ),
             ],
           ),

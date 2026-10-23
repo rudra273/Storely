@@ -74,12 +74,18 @@ class _ProductCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 if (isOutOfStock)
-                  StatusPill(label: 'Out', variant: PillVariant.out)
+                  StatusPill(
+                    label: context.l10n.outOfStock,
+                    variant: PillVariant.out,
+                  )
                 else if (isLowStock)
-                  StatusPill(label: 'Low', variant: PillVariant.low),
+                  StatusPill(
+                    label: context.l10n.lowStock,
+                    variant: PillVariant.low,
+                  ),
                 if (!selectionMode) ...[
                   PopupMenuButton<VoidCallback>(
-                    tooltip: 'More',
+                    tooltip: context.l10n.more,
                     icon: Icon(
                       Icons.more_vert_rounded,
                       size: 20,
@@ -90,26 +96,26 @@ class _ProductCard extends StatelessWidget {
                       if (product.trackStock)
                         PopupMenuItem(
                           value: onAdjust,
-                          child: const ListTile(
+                          child: ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: Icon(Icons.tune_rounded),
-                            title: Text('Adjust stock'),
+                            title: Text(context.l10n.adjustStock),
                           ),
                         ),
                       PopupMenuItem(
                         value: onHistory,
-                        child: const ListTile(
+                        child: ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.history_rounded),
-                          title: Text('Stock history'),
+                          title: Text(context.l10n.stockHistory),
                         ),
                       ),
                       PopupMenuItem(
                         value: onDelete,
-                        child: const ListTile(
+                        child: ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.delete_outline),
-                          title: Text('Delete'),
+                          title: Text(context.l10n.delete),
                         ),
                       ),
                     ],

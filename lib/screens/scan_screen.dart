@@ -1,3 +1,4 @@
+import '../l10n/l10n.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -141,7 +142,7 @@ class _ScanScreenState extends State<ScanScreen> {
           'item${draft.length == 1 ? '' : 's'})',
         ),
         action: SnackBarAction(
-          label: 'Discard',
+          label: context.l10n.discard,
           onPressed: () {
             if (mounted) setState(() => _items.clear());
           },
@@ -680,16 +681,16 @@ class _ScanScreenState extends State<ScanScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: SegmentedButton<BillingEntryMode>(
-        segments: const [
+        segments: [
           ButtonSegment(
             value: BillingEntryMode.scan,
             icon: Icon(Icons.qr_code_scanner_rounded),
-            label: Text('Scan'),
+            label: Text(context.l10n.navScan),
           ),
           ButtonSegment(
             value: BillingEntryMode.manual,
             icon: Icon(Icons.search_rounded),
-            label: Text('Search'),
+            label: Text(context.l10n.search),
           ),
         ],
         selected: {_entryMode},
@@ -776,8 +777,8 @@ class _ScanScreenState extends State<ScanScreen> {
                     color: AppColors.success,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text(
-                    'Item added!',
+                  child: Text(
+                    context.l10n.itemAdded,
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
@@ -806,8 +807,8 @@ class _ScanScreenState extends State<ScanScreen> {
           TextField(
             controller: _productSearchCtrl,
             textInputAction: TextInputAction.search,
-            decoration: const InputDecoration(
-              labelText: 'Search products',
+            decoration: InputDecoration(
+              labelText: context.l10n.searchProducts,
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
@@ -816,7 +817,10 @@ class _ScanScreenState extends State<ScanScreen> {
               padding: const EdgeInsets.only(top: AppSpacing.sm),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Frequently sold first', style: AppText.caption),
+                child: Text(
+                  context.l10n.frequentlySold,
+                  style: AppText.caption,
+                ),
               ),
             ),
           const SizedBox(height: AppSpacing.sm),
@@ -826,12 +830,12 @@ class _ScanScreenState extends State<ScanScreen> {
                 : _allProducts.isEmpty
                 ? _ManualEmptyState(
                     icon: Icons.inventory_2_outlined,
-                    message: 'Add products before manual billing',
+                    message: context.l10n.addProductsFirst,
                   )
                 : _filteredProducts.isEmpty
                 ? _ManualEmptyState(
                     icon: Icons.search_off_rounded,
-                    message: 'No matching products',
+                    message: context.l10n.noMatchingProducts,
                   )
                 : ListView.separated(
                     itemCount: _filteredProducts.length,
@@ -853,11 +857,11 @@ class _ScanScreenState extends State<ScanScreen> {
   String _entryHintText() {
     if (_entryMode == BillingEntryMode.scan) {
       return _items.isEmpty
-          ? 'Point camera at product QR code'
+          ? context.l10n.pointCamera
           : '${_items.length} item${_items.length != 1 ? 's' : ''} added';
     }
     if (_items.isNotEmpty) {
-      return '${_items.length} item${_items.length != 1 ? 's' : ''} in bill';
+      return context.l10n.itemsInBill(_items.length);
     }
     return 'Search by product name, code, category or supplier';
   }
@@ -880,21 +884,21 @@ class _ScanScreenState extends State<ScanScreen> {
         appBar: AppBar(
           title: Text(
             widget.duplicateFromBill != null
-                ? 'Duplicate Bill'
+                ? context.l10n.duplicateBill
                 : _entryMode == BillingEntryMode.scan
                 ? 'Scan & Bill'
-                : 'Manual Bill',
+                : context.l10n.manualBill,
           ),
           backgroundColor: headerSurface,
           foregroundColor: Colors.white,
           actions: [
-            const AppInfoAction(
+            AppInfoAction(
               title: 'Billing Help',
               intro:
                   'Build the bill first, then complete checkout with customer and payment details.',
               sections: [
                 AppInfoSection(
-                  title: 'Add items',
+                  title: context.l10n.addItems,
                   points: [
                     'Scan mode reads Storely product labels and barcode values.',
                     'Manual mode lets you search by product name, code, category, or supplier.',
@@ -902,7 +906,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   ],
                 ),
                 AppInfoSection(
-                  title: 'Complete bill',
+                  title: context.l10n.completeBill,
                   points: [
                     'Before Generate Bill, this screen is your editable draft.',
                     'Complete Bill opens checkout for customer, discount, and payment details.',
@@ -921,13 +925,13 @@ class _ScanScreenState extends State<ScanScreen> {
                   color: AppColors.amber,
                 ),
                 label: Text(
-                  'Held ($_heldCount)',
+                  context.l10n.heldCount(_heldCount),
                   style: const TextStyle(color: AppColors.amber),
                 ),
               ),
             if (_items.isNotEmpty)
               IconButton(
-                tooltip: 'Hold bill',
+                tooltip: context.l10n.holdBill,
                 onPressed: _holdCart,
                 icon: const Icon(
                   Icons.pause_circle_outline_rounded,
@@ -937,8 +941,8 @@ class _ScanScreenState extends State<ScanScreen> {
             if (_items.isNotEmpty)
               TextButton(
                 onPressed: _clearWithUndo,
-                child: const Text(
-                  'Clear',
+                child: Text(
+                  context.l10n.clear,
                   style: TextStyle(color: AppColors.amber),
                 ),
               ),
@@ -1009,7 +1013,7 @@ class _ScanScreenState extends State<ScanScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Total',
+                              context.l10n.total,
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.7),
                                 fontSize: 12,
@@ -1031,8 +1035,8 @@ class _ScanScreenState extends State<ScanScreen> {
                           FilledButton.icon(
                             onPressed: _openBillSheet,
                             icon: const Icon(Icons.receipt_long_rounded),
-                            label: const Text(
-                              'Bill',
+                            label: Text(
+                              context.l10n.bill,
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             style: FilledButton.styleFrom(
@@ -1063,7 +1067,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final discard = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Discard this bill?'),
+        title: Text(context.l10n.discardBillQ),
         content: Text(
           '${_items.length} item${_items.length == 1 ? '' : 's'} in the cart '
           'will be removed.',
@@ -1071,12 +1075,12 @@ class _ScanScreenState extends State<ScanScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep Billing'),
+            child: Text(context.l10n.keepBilling),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Discard'),
+            child: Text(context.l10n.discard),
           ),
         ],
       ),
@@ -1095,7 +1099,7 @@ class _ScanScreenState extends State<ScanScreen> {
             'Cleared ${removed.length} item${removed.length == 1 ? '' : 's'}',
           ),
           action: SnackBarAction(
-            label: 'Undo',
+            label: context.l10n.undo,
             onPressed: () {
               if (!mounted || _items.isNotEmpty) return;
               setState(() => _items.addAll(removed));
@@ -1125,7 +1129,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'No items added yet',
+                    context.l10n.noItemsYet,
                     style: TextStyle(color: AppColors.textMuted, fontSize: 14),
                   ),
                 ],

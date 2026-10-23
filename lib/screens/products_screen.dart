@@ -1,3 +1,4 @@
+import '../l10n/l10n.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -475,12 +476,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -1040,7 +1041,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                   _PurchaseInitialAction.manual,
                                 ),
                                 icon: const Icon(Icons.add_rounded, size: 18),
-                                label: const Text('Add product'),
+                                label: Text(context.l10n.addProductLower),
                                 style: FilledButton.styleFrom(
                                   minimumSize: const Size.fromHeight(48),
                                 ),
@@ -1391,7 +1392,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         style: FilledButton.styleFrom(
                           backgroundColor: AppColors.error,
                         ),
-                        child: const Text('Discard'),
+                        child: Text(context.l10n.discard),
                       ),
                     ],
                   ),
@@ -1801,7 +1802,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                                       size: 18,
                                                     ),
                                                     suffixIcon: IconButton(
-                                                      tooltip: 'Scan barcode',
+                                                      tooltip: context
+                                                          .l10n
+                                                          .scanBarcode,
                                                       icon: const Icon(
                                                         Icons
                                                             .center_focus_strong,
@@ -1946,7 +1949,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         ),
                                         const SizedBox(height: 10),
                                         _OptionDropdown(
-                                          label: 'Unit',
+                                          label: context.l10n.unit,
                                           value: selectedUnit,
                                           options: _units,
                                           noValueLabel: 'No Unit',
@@ -2299,12 +2302,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -2365,7 +2368,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   ),
                   textField: true,
                 )
-              : const Text('Products'),
+              : Text(context.l10n.navProducts),
           actions: [
             if (_selectionMode) ...[
               IconButton(
@@ -2453,7 +2456,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       onPressed: _showQuickAdd,
                       child: const Icon(Icons.add_rounded),
                     ),
-                    label: 'Add product',
+                    label: context.l10n.addProductLower,
                     button: true,
                   ),
                 ],
@@ -2465,14 +2468,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Widget _buildEmpty() {
     return AppEmptyState(
       icon: Icons.inventory_2_outlined,
-      title: 'No products yet',
-      message: 'Add items one by one, or enter a purchase to import a list',
-      actionLabel: 'Add product',
+      title: context.l10n.noProductsYet,
+      message: context.l10n.addProductsHint,
+      actionLabel: context.l10n.addProductLower,
       onAction: _showQuickAdd,
       secondaryAction: OutlinedButton.icon(
         onPressed: _showNewPurchaseFlow,
         icon: const Icon(Icons.add_shopping_cart_rounded),
-        label: const Text('New purchase / import'),
+        label: Text(context.l10n.newPurchaseImport),
       ),
     );
   }

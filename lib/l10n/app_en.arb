@@ -1,0 +1,175 @@
+{
+  "@@locale": "en",
+  "navHome": "Home",
+  "navProducts": "Products",
+  "navBills": "Bills",
+  "navStore": "Store",
+  "navScan": "Scan",
+  "quickActions": "Quick Actions",
+  "scanAndBill": "Scan & Bill",
+  "addProduct": "Add Product",
+  "labels": "Labels",
+  "reports": "Reports",
+  "workspace": "Workspace",
+  "customers": "Customers",
+  "suppliers": "Suppliers",
+  "pricing": "Pricing",
+  "gstAndRates": "GST & rates",
+  "expenses": "Expenses",
+  "rentSalary": "Rent, salary",
+  "unpaidBills": "Unpaid Bills",
+  "needsAttention": "Needs Attention",
+  "viewAll": "View All →",
+  "billsToday": "Bills Today",
+  "products": "Products",
+  "searchItems": "Search items...",
+  "searchEverything": "Search products, bills, customers...",
+  "notifications": "Notifications",
+  "savedCount": "{count} saved",
+  "@savedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "searchProducts": "Search products",
+  "addItems": "Add items",
+  "completeBill": "Complete bill",
+  "holdBill": "Hold bill",
+  "discard": "Discard",
+  "discardBillQ": "Discard this bill?",
+  "undo": "Undo",
+  "customerName": "Customer name",
+  "phoneOptional": "Phone number (optional)",
+  "discountPercent": "Discount percentage",
+  "amountReceived": "Amount received",
+  "generateBill": "Generate Bill",
+  "grandTotal": "Grand Total",
+  "items": "Items",
+  "received": "Received",
+  "balance": "Balance",
+  "roundOff": "Round off",
+  "subtotal": "Subtotal",
+  "txnIdOptional": "Transaction ID (optional)",
+  "billCreated": "Bill Created!",
+  "printReceipt": "Print receipt",
+  "sharePdf": "Share PDF (WhatsApp, print…)",
+  "newBill": "New Bill",
+  "createBill": "Create Bill",
+  "noBillsYet": "No bills yet",
+  "createFirstBill": "Create your first bill to get started",
+  "searchBills": "Search bills...",
+  "active": "Active",
+  "cancelled": "Cancelled",
+  "duplicateAsNew": "Duplicate as New",
+  "history": "History",
+  "cancel": "Cancel",
+  "edit": "Edit",
+  "returnItems": "Return",
+  "markPaid": "Mark Paid",
+  "markUnpaid": "Mark Unpaid",
+  "recordPayment": "Record Payment",
+  "whatsapp": "WhatsApp",
+  "print": "Print",
+  "share": "Share",
+  "viewProfit": "View Profit",
+  "paid": "Paid",
+  "partial": "Partial",
+  "unpaid": "Unpaid",
+  "cash": "Cash",
+  "online": "Online",
+  "creditNote": "Credit note",
+  "waitingToSync": "Saved on this phone · waiting to sync",
+  "quickAddProduct": "Quick add product",
+  "productNameReq": "Product name *",
+  "sellingPriceReq": "Selling price *",
+  "unit": "Unit",
+  "openingStock": "Opening stock",
+  "notTracked": "Not tracked",
+  "costPrice": "Cost price",
+  "optional": "Optional",
+  "barcodeOptional": "Barcode (optional)",
+  "scanBarcode": "Scan barcode",
+  "trackStock": "Track stock",
+  "trackStockHint": "Turn off for services and loose items",
+  "save": "Save",
+  "saveAndAddAnother": "Save & add another",
+  "fullPurchaseEntry": "Full purchase entry (supplier, import)",
+  "lowStock": "Low",
+  "outOfStock": "Out",
+  "more": "More",
+  "adjustStock": "Adjust stock",
+  "stockHistory": "Stock history",
+  "delete": "Delete",
+  "stockNotTracked": "Stock not tracked",
+  "noProductsYet": "No products yet",
+  "addProductsHint": "Add items one by one, or enter a purchase to import a list",
+  "newPurchaseImport": "New purchase / import",
+  "addProductLower": "Add product",
+  "language": "Language",
+  "chooseLanguage": "Choose language",
+  "todaysBookedSales": "TODAY'S BOOKED SALES",
+  "noBillsToday": "No bills yet today",
+  "collectedBills": "{amount} collected, {count} bills created",
+  "itemCount": "{count, plural, =1{1 item} other{{count} items}}",
+  "allBillsPaid": "All bills are paid!",
+  "allStockedUp": "All stocked up!",
+  "walkIn": "Walk-in",
+  "@collectedBills": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@itemCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "search": "Search",
+  "frequentlySold": "Frequently sold first",
+  "manualBill": "Manual Bill",
+  "duplicateBill": "Duplicate Bill",
+  "clear": "Clear",
+  "total": "Total",
+  "bill": "Bill",
+  "keepBilling": "Keep Billing",
+  "noItemsYet": "No items added yet",
+  "itemAdded": "Item added!",
+  "addProductsFirst": "Add products before manual billing",
+  "noMatchingProducts": "No matching products",
+  "pointCamera": "Point camera at product QR code",
+  "heldBills": "Held bills",
+  "noHeldBills": "No held bills",
+  "done": "Done",
+  "paidFull": "Paid full",
+  "searchItemsBtn": "Search items",
+  "heldCount": "Held ({count})",
+  "itemsInBill": "{count, plural, =1{1 item in bill} other{{count} items in bill}}",
+  "customerGstin": "Customer GSTIN",
+  "legalName": "Legal business name",
+  "tradeNameOpt": "Trade name (optional)",
+  "businessAddress": "Business address",
+  "placeOfSupplyCode": "Place of supply state code",
+  "@heldCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@itemsInBill": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
+}

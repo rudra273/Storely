@@ -142,7 +142,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Quick add product', style: AppText.title),
+                Text(context.l10n.quickAddProduct, style: AppText.title),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   key: const ValueKey('quick-add-name'),
@@ -151,7 +151,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                   autofocus: true,
                   textCapitalization: TextCapitalization.words,
                   decoration: InputDecoration(
-                    labelText: 'Product name *',
+                    labelText: context.l10n.productNameReq,
                     errorText: _nameError,
                   ),
                   validator: _required,
@@ -166,8 +166,8 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                         controller: _priceController,
                         keyboardType: numberKeyboard,
                         inputFormatters: decimal,
-                        decoration: const InputDecoration(
-                          labelText: 'Selling price *',
+                        decoration: InputDecoration(
+                          labelText: context.l10n.sellingPriceReq,
                           prefixText: '₹ ',
                         ),
                         validator: _price,
@@ -177,7 +177,9 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: _unit,
-                        decoration: const InputDecoration(labelText: 'Unit'),
+                        decoration: InputDecoration(
+                          labelText: context.l10n.unit,
+                        ),
                         items: [
                           for (final unit in _unitOptions)
                             DropdownMenuItem(value: unit, child: Text(unit)),
@@ -213,9 +215,9 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                         controller: _costController,
                         keyboardType: numberKeyboard,
                         inputFormatters: decimal,
-                        decoration: const InputDecoration(
-                          labelText: 'Cost price',
-                          hintText: 'Optional',
+                        decoration: InputDecoration(
+                          labelText: context.l10n.costPrice,
+                          hintText: context.l10n.optional,
                           prefixText: '₹ ',
                         ),
                       ),
@@ -226,9 +228,9 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                 TextFormField(
                   controller: _barcodeController,
                   decoration: InputDecoration(
-                    labelText: 'Barcode (optional)',
+                    labelText: context.l10n.barcodeOptional,
                     suffixIcon: IconButton(
-                      tooltip: 'Scan barcode',
+                      tooltip: context.l10n.scanBarcode,
                       icon: const Icon(Icons.qr_code_scanner_rounded),
                       onPressed: _scan,
                     ),
@@ -236,7 +238,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Track stock'),
+                  title: Text(context.l10n.trackStock),
                   subtitle: Text(
                     'Turn off for services and loose items',
                     style: AppText.caption,
@@ -252,7 +254,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                         onPressed: _saving
                             ? null
                             : () => _save(addAnother: true),
-                        child: const Text('Save & add another'),
+                        child: Text(context.l10n.saveAndAddAnother),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
@@ -262,7 +264,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                         onPressed: _saving
                             ? null
                             : () => _save(addAnother: false),
-                        child: const Text('Save'),
+                        child: Text(context.l10n.save),
                       ),
                     ),
                   ],
@@ -273,7 +275,7 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                       : () =>
                             Navigator.pop(context, _QuickAddSheet.openPurchase),
                   icon: const Icon(Icons.add_shopping_cart_rounded),
-                  label: const Text('Full purchase entry (supplier, import)'),
+                  label: Text(context.l10n.fullPurchaseEntry),
                 ),
               ],
             ),

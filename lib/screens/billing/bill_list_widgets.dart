@@ -158,7 +158,7 @@ class _BillFilterTabs extends StatelessWidget {
         children: [
           Expanded(
             child: _FilterChip(
-              label: 'Active',
+              label: context.l10n.active,
               count: activeCount,
               selected: !showCancelled,
               onTap: () => onChanged(false),
@@ -166,7 +166,7 @@ class _BillFilterTabs extends StatelessWidget {
           ),
           Expanded(
             child: _FilterChip(
-              label: 'Cancelled',
+              label: context.l10n.cancelled,
               count: cancelledCount,
               selected: showCancelled,
               onTap: () => onChanged(true),
@@ -267,8 +267,8 @@ class _CancelledBillCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const StatusPill(
-                    label: 'Cancelled',
+                  StatusPill(
+                    label: context.l10n.cancelled,
                     variant: PillVariant.neutral,
                   ),
                   const SizedBox(height: 4),
@@ -303,13 +303,13 @@ class _CancelledBillCard extends StatelessWidget {
               _ActionButton(
                 onPressed: onDuplicate,
                 icon: Icons.copy_rounded,
-                label: 'Duplicate as New',
+                label: context.l10n.duplicateAsNew,
                 color: AppColors.brandOf(context),
               ),
               _ActionButton(
                 onPressed: () => showBillHistory(context, bill),
                 icon: Icons.history_rounded,
-                label: 'History',
+                label: context.l10n.history,
                 color: AppColors.inkMutedOf(context),
               ),
             ],

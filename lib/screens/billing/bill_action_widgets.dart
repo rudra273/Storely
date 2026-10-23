@@ -218,7 +218,11 @@ class _PaymentChip extends StatelessWidget {
     final isPaid = status == Bill.statusPaid;
     final isPartial = status == Bill.statusPartial;
     return StatusPill(
-      label: _paymentStatusLabel(status),
+      label: switch (status) {
+        Bill.statusPaid => context.l10n.paid,
+        Bill.statusPartial => context.l10n.partial,
+        _ => context.l10n.unpaid,
+      },
       variant: isPaid
           ? PillVariant.paid
           : isPartial

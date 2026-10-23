@@ -60,7 +60,7 @@ class _BillCardState extends State<_BillCard> {
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-              child: const Text('Mark Unpaid'),
+              child: Text(context.l10n.markUnpaid),
             ),
           ],
         ),
@@ -77,12 +77,12 @@ class _BillCardState extends State<_BillCard> {
           TextButton.icon(
             onPressed: () => Navigator.pop(ctx, 'cash'),
             icon: const Icon(Icons.payments_outlined),
-            label: const Text('Cash'),
+            label: Text(context.l10n.cash),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, 'online'),
             icon: const Icon(Icons.account_balance_wallet_outlined),
-            label: const Text('Online'),
+            label: Text(context.l10n.online),
           ),
         ],
       ),
@@ -320,7 +320,7 @@ class _BillCardState extends State<_BillCard> {
                     if (bill.discountAmount > 0 ||
                         bill.roundOffAmount != 0) ...[
                       _AmountRow(
-                        label: 'Subtotal',
+                        label: context.l10n.subtotal,
                         value: rupees(bill.subtotalAmount),
                       ),
                       if (bill.discountAmount > 0)
@@ -331,7 +331,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                       if (bill.roundOffAmount != 0)
                         _AmountRow(
-                          label: 'Round off',
+                          label: context.l10n.roundOff,
                           value: signedRupees(bill.roundOffAmount),
                         ),
                       const SizedBox(height: AppSpacing.xs),
@@ -350,9 +350,12 @@ class _BillCardState extends State<_BillCard> {
                     ),
                     if (bill.paidAmount > 0 || bill.balanceDue > 0) ...[
                       const SizedBox(height: AppSpacing.xs),
-                      _AmountRow(label: 'Paid', value: rupees(bill.paidAmount)),
                       _AmountRow(
-                        label: 'Balance',
+                        label: context.l10n.paid,
+                        value: rupees(bill.paidAmount),
+                      ),
+                      _AmountRow(
+                        label: context.l10n.balance,
                         value: rupees(bill.balanceDue),
                       ),
                     ],
@@ -372,21 +375,21 @@ class _BillCardState extends State<_BillCard> {
                           _ActionButton(
                             onPressed: widget.onCancel,
                             icon: Icons.block_rounded,
-                            label: 'Cancel',
+                            label: context.l10n.cancel,
                             color: AppColors.error,
                           ),
                           if (!bill.isCreditNote)
                             _ActionButton(
                               onPressed: widget.onEdit,
                               icon: Icons.edit_outlined,
-                              label: 'Edit',
+                              label: context.l10n.edit,
                               color: AppColors.brandOf(context),
                             ),
                           if (widget.onReturn != null)
                             _ActionButton(
                               onPressed: widget.onReturn!,
                               icon: Icons.assignment_return_outlined,
-                              label: 'Return',
+                              label: context.l10n.returnItems,
                               color: AppColors.amber,
                             ),
                         ],
@@ -407,40 +410,40 @@ class _BillCardState extends State<_BillCard> {
                           _ActionButton(
                             onPressed: widget.onRecordPayment,
                             icon: Icons.payments_outlined,
-                            label: 'Record Payment',
+                            label: context.l10n.recordPayment,
                             color: AppColors.amber,
                           ),
                         if (!bill.isCreditNote && bill.customerPhone != null)
                           _ActionButton(
                             onPressed: widget.onSendWhatsApp,
                             icon: Icons.send_outlined,
-                            label: 'WhatsApp',
+                            label: context.l10n.whatsapp,
                             color: AppColors.success,
                           ),
                         if (ThermalPrinterService.instance.isConfigured)
                           _ActionButton(
                             onPressed: _print,
                             icon: Icons.print_outlined,
-                            label: 'Print',
+                            label: context.l10n.print,
                             color: AppColors.brandOf(context),
                           ),
                         _ActionButton(
                           onPressed: widget.onSharePdf,
                           icon: Icons.ios_share_rounded,
-                          label: 'Share',
+                          label: context.l10n.share,
                           color: AppColors.brandOf(context),
                         ),
                         if (!bill.isCreditNote)
                           _ActionButton(
                             onPressed: _showProfitSummary,
                             icon: Icons.trending_up_rounded,
-                            label: 'View Profit',
+                            label: context.l10n.viewProfit,
                             color: AppColors.brandOf(context),
                           ),
                         _ActionButton(
                           onPressed: () => showBillHistory(context, bill),
                           icon: Icons.history_rounded,
-                          label: 'History',
+                          label: context.l10n.history,
                           color: AppColors.inkMutedOf(context),
                         ),
                       ],

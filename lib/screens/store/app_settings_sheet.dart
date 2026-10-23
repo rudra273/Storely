@@ -115,6 +115,37 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
           const SizedBox(height: AppSpacing.lg),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              const _PanelIcon(icon: Icons.translate_rounded),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(context.l10n.language, style: AppText.subtitle),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SegmentedButton<AppLanguage>(
+            key: const ValueKey('language-picker'),
+            segments: [
+              for (final language in AppLanguage.values)
+                ButtonSegment(
+                  value: language,
+                  label: Text(
+                    language == AppLanguage.system ? 'Auto' : language.label,
+                  ),
+                ),
+            ],
+            selected: {AppSettingsService.instance.language},
+            showSelectedIcon: false,
+            onSelectionChanged: (selection) async {
+              await AppSettingsService.instance.setLanguage(selection.first);
+              if (mounted) setState(() {});
+            },
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             secondary: const _PanelIcon(icon: Icons.lock_outline_rounded),

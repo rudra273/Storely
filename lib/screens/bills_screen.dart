@@ -1,3 +1,4 @@
+import '../l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -162,7 +163,7 @@ class _BillsScreenState extends State<BillsScreen> {
           SnackBar(
             content: Text('Credit note ${creditNote.billNumber} issued'),
             action: SnackBarAction(
-              label: 'Share',
+              label: context.l10n.share,
               onPressed: () => BillShare.sharePdf(creditNote),
             ),
           ),
@@ -401,7 +402,7 @@ class _BillsScreenState extends State<BillsScreen> {
                     cursorColor: AppColors.amber,
                     decoration: InputDecoration(
                       isCollapsed: true,
-                      hintText: 'Search bills...',
+                      hintText: context.l10n.searchBills,
                       hintStyle: TextStyle(
                         color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 16,
@@ -416,7 +417,7 @@ class _BillsScreenState extends State<BillsScreen> {
                   ),
                   textField: true,
                 )
-              : const Text('Bills'),
+              : Text(context.l10n.navBills),
           actions: [
             IconButton(
               onPressed: () {
@@ -524,7 +525,7 @@ class _BillsScreenState extends State<BillsScreen> {
                 FloatingActionButton.extended(
                   onPressed: () => _openBillCreator(BillingEntryMode.manual),
                   icon: const Icon(Icons.receipt_long_rounded),
-                  label: const Text('New Bill'),
+                  label: Text(context.l10n.newBill),
                 ),
                 button: true,
               ),
@@ -637,14 +638,14 @@ class _BillsScreenState extends State<BillsScreen> {
   Widget _buildEmpty() {
     return AppEmptyState(
       icon: Icons.receipt_long_outlined,
-      title: 'No bills yet',
-      message: 'Create your first bill to get started',
+      title: context.l10n.noBillsYet,
+      message: context.l10n.createFirstBill,
       secondaryAction: TestKeys.tag(
         TestKeys.createBillBtn,
         FilledButton.icon(
           onPressed: () => _openBillCreator(BillingEntryMode.manual),
           icon: const Icon(Icons.receipt_long_rounded),
-          label: const Text('Create Bill'),
+          label: Text(context.l10n.createBill),
         ),
         button: true,
       ),
