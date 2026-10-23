@@ -22,6 +22,7 @@ part 'products/product_import_widgets.dart';
 part 'products/stock_history_sheet.dart';
 part 'products/product_cards.dart';
 part 'products/stock_adjust_sheet.dart';
+part 'products/quick_add_sheet.dart';
 
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
@@ -161,7 +162,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       try {
         await _loadProducts();
         if (!mounted) return;
-        await _showNewPurchaseFlow();
+        await _showQuickAdd();
       } finally {
         _isOpeningRequestedPurchaseFlow = false;
         widget.onPurchaseFlowComplete?.call();
@@ -605,6 +606,19 @@ class _ProductsScreenState extends State<ProductsScreen> {
       context,
       MaterialPageRoute(builder: (_) => QrSheetScreen(products: _allProducts)),
     );
+  }
+
+  Future<void> _showQuickAdd() async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) =>
+          _QuickAddSheet(units: _units, scanBarcode: _scanBarcodeValue),
+    );
+    if (!mounted) return;
+    await _loadProducts();
+    if (!mounted || result != _QuickAddSheet.openPurchase) return;
+    await _showNewPurchaseFlow();
   }
 
   Future<void> _adjustStock(Product product) async {
@@ -2403,7 +2417,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     TestKeys.addProductBtn,
                     FloatingActionButton(
                       heroTag: 'add',
-                      onPressed: _showNewPurchaseFlow,
+                      onPressed: _showQuickAdd,
                       child: const Icon(Icons.add_rounded),
                     ),
                     label: 'Add product',
@@ -2439,15 +2453,21 @@ class _ProductsScreenState extends State<ProductsScreen> {
             Text('No products yet', style: AppText.title),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Create a purchase, then add or import products',
+              'Add items one by one, or enter a purchase to import a list',
               style: AppText.caption,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
+              onPressed: _showQuickAdd,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add product'),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            OutlinedButton.icon(
               onPressed: _showNewPurchaseFlow,
               icon: const Icon(Icons.add_shopping_cart_rounded),
-              label: const Text('New Purchase'),
+              label: const Text('New purchase / import'),
             ),
           ],
         ),
