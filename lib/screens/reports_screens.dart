@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+
+import 'package:excel/excel.dart' as xl;
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../db/database_helper.dart';
 import '../models/bill_totals.dart';
@@ -24,6 +29,12 @@ class ReportShortcuts extends StatelessWidget {
       (Icons.schedule_rounded, 'Dues ageing', const ReceivablesScreen()),
       (Icons.inventory_2_outlined, 'Stock value', const StockValueScreen()),
       (Icons.event_busy_outlined, 'Expiring', const ExpiringStockScreen()),
+      (
+        Icons.shopping_cart_outlined,
+        'Purchases',
+        const PurchaseRegisterScreen(),
+      ),
+      (Icons.percent_rounded, 'Tax summary', const TaxSummaryScreen()),
       (Icons.receipt_long_outlined, 'GSTR-1', const Gstr1Screen()),
     ];
     return SizedBox(
@@ -899,6 +910,349 @@ class _ExpiringStockScreenState extends State<ExpiringStockScreen> {
                         );
                       },
                     ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Month picker shared by monthly reports ─────────────────────────────────
+
+class _MonthBar extends StatelessWidget {
+  final DateTime month;
+  final ValueChanged<DateTime> onChanged;
+
+  const _MonthBar({required this.month, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final isCurrent = month.year == now.year && month.month == now.month;
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Previous month',
+          onPressed: () => onChanged(DateTime(month.year, month.month - 1)),
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Expanded(
+          child: Text(
+            DateFormat('MMMM yyyy').format(month),
+            textAlign: TextAlign.center,
+            style: AppText.subtitle,
+          ),
+        ),
+        IconButton(
+          tooltip: 'Next month',
+          onPressed: isCurrent
+              ? null
+              : () => onChanged(DateTime(month.year, month.month + 1)),
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+String _lastDay(DateTime month) =>
+    _day(DateTime(month.year, month.month + 1, 0));
+
+Future<void> _shareSheet(
+  String fileName,
+  String sheetName,
+  List<List<Object?>> rows,
+) async {
+  final book = xl.Excel.createExcel();
+  final defaultSheet = book.getDefaultSheet();
+  final sheet = book[sheetName];
+  for (final row in rows) {
+    sheet.appendRow([
+      for (final cell in row)
+        cell is num
+            ? xl.DoubleCellValue(cell.toDouble())
+            : xl.TextCellValue('${cell ?? ''}'),
+    ]);
+  }
+  if (defaultSheet != null && defaultSheet != sheetName) {
+    book.delete(defaultSheet);
+  }
+  final dir = await getTemporaryDirectory();
+  final file = File('${dir.path}/$fileName');
+  await file.writeAsBytes(book.encode()!);
+  await SharePlus.instance.share(
+    ShareParams(files: [XFile(file.path)], subject: fileName),
+  );
+}
+
+// ── Purchase register ───────────────────────────────────────────────────────
+
+class PurchaseRegisterScreen extends StatefulWidget {
+  const PurchaseRegisterScreen({super.key});
+
+  @override
+  State<PurchaseRegisterScreen> createState() => _PurchaseRegisterScreenState();
+}
+
+class _PurchaseRegisterScreenState extends State<PurchaseRegisterScreen> {
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+  List<PurchaseRow> _rows = const [];
+
+  static String _qty(double q) =>
+      q == q.roundToDouble() ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
+
+  Future<void> _export() async {
+    try {
+      await _shareSheet(
+        'Purchases_${DateFormat('MMM-yyyy').format(_month)}.xlsx',
+        'Purchases',
+        [
+          [
+            'Date',
+            'Product',
+            'Supplier',
+            'Quantity',
+            'Unit',
+            'Unit cost',
+            'Amount',
+            'Batch',
+            'Expiry',
+          ],
+          for (final r in _rows.reversed)
+            [
+              DateFormat('dd-MM-yyyy').format(r.date),
+              r.productName,
+              r.supplier ?? '',
+              r.quantity,
+              r.unit ?? '',
+              r.unitCost,
+              r.amount,
+              r.batchNo ?? '',
+              r.expiry == null
+                  ? ''
+                  : DateFormat('dd-MM-yyyy').format(r.expiry!),
+            ],
+        ],
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: navyAppBar(
+        title: 'Purchases',
+        actions: [
+          IconButton(
+            tooltip: 'Export to Excel',
+            onPressed: _rows.isEmpty ? null : _export,
+            icon: const Icon(Icons.ios_share_rounded),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _MonthBar(
+            month: _month,
+            onChanged: (m) => setState(() => _month = m),
+          ),
+          Expanded(
+            child: _ReportLoader<List<PurchaseRow>>(
+              reloadKey: _day(_month),
+              load: () async {
+                final rows = await DatabaseHelper.instance.purchaseRegister(
+                  from: _day(_month),
+                  to: _lastDay(_month),
+                );
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _rows = rows);
+                });
+                return rows;
+              },
+              builder: (rows) {
+                if (rows.isEmpty) {
+                  return const AppEmptyState(
+                    icon: Icons.shopping_cart_outlined,
+                    title: 'No purchases this month',
+                    message: 'Stock added through purchases shows up here.',
+                  );
+                }
+                final total = rows.fold(0.0, (s, r) => s + r.amount);
+                final suppliers = <String, double>{};
+                for (final r in rows) {
+                  final key = r.supplier ?? 'No supplier';
+                  suppliers[key] = (suppliers[key] ?? 0) + r.amount;
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.xxxl,
+                  ),
+                  itemCount: rows.length + 1,
+                  itemBuilder: (_, i) {
+                    if (i == 0) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: AppCard(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _Line(
+                                'Bought this month',
+                                rupees(roundMoney(total)),
+                                bold: true,
+                              ),
+                              for (final e in suppliers.entries)
+                                _Line(e.key, rupees(roundMoney(e.value))),
+                              Text(
+                                'At purchase cost, without GST.',
+                                style: AppText.caption,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    final r = rows[i - 1];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(r.productName),
+                      subtitle: Text(
+                        [
+                          DateFormat('dd MMM').format(r.date),
+                          '${_qty(r.quantity)} ${r.unit ?? ''} × '
+                              '${rupees(r.unitCost)}',
+                          ?r.supplier,
+                          if (r.batchNo != null) 'Batch ${r.batchNo}',
+                          if (r.expiry != null)
+                            'Exp ${DateFormat('MMM yy').format(r.expiry!)}',
+                        ].join(' · '),
+                        style: AppText.caption,
+                      ),
+                      trailing: Text(rupees(r.amount), style: AppText.subtitle),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Monthly tax summary ─────────────────────────────────────────────────────
+
+class TaxSummaryScreen extends StatefulWidget {
+  const TaxSummaryScreen({super.key});
+
+  @override
+  State<TaxSummaryScreen> createState() => _TaxSummaryScreenState();
+}
+
+class _TaxSummaryScreenState extends State<TaxSummaryScreen> {
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+
+  static String _rate(double r) =>
+      r == r.roundToDouble() ? '${r.toStringAsFixed(0)}%' : '$r%';
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: navyAppBar(title: 'Tax summary'),
+      body: Column(
+        children: [
+          _MonthBar(
+            month: _month,
+            onChanged: (m) => setState(() => _month = m),
+          ),
+          Expanded(
+            child: _ReportLoader<List<TaxRateRow>>(
+              reloadKey: _day(_month),
+              load: () => DatabaseHelper.instance.taxSummary(
+                from: _day(_month),
+                to: _lastDay(_month),
+              ),
+              builder: (rows) {
+                if (rows.isEmpty) {
+                  return const AppEmptyState(
+                    icon: Icons.percent_rounded,
+                    title: 'No sales this month',
+                  );
+                }
+                double sum(double Function(TaxRateRow r) f) =>
+                    roundMoney(rows.fold(0.0, (s, r) => s + f(r)));
+                final taxable = sum((r) => r.taxable);
+                final cgst = sum((r) => r.cgst);
+                final sgst = sum((r) => r.sgst);
+                final igst = sum((r) => r.igst);
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.xxxl,
+                  ),
+                  children: [
+                    AppCard(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _Line('Taxable sales', rupees(taxable), bold: true),
+                          _Line('CGST', rupees(cgst)),
+                          _Line('SGST', rupees(sgst)),
+                          _Line('IGST', rupees(igst)),
+                          const Divider(),
+                          _Line(
+                            'Output tax',
+                            rupees(roundMoney(cgst + sgst + igst)),
+                            bold: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Text('By GST rate', style: AppText.label),
+                    for (final r in rows)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          r.rate == 0 ? 'Nil / exempt' : 'GST ${_rate(r.rate)}',
+                        ),
+                        subtitle: Text(
+                          [
+                            'Taxable ${rupees(r.taxable)}',
+                            if (r.cgst != 0) 'CGST ${rupees(r.cgst)}',
+                            if (r.sgst != 0) 'SGST ${rupees(r.sgst)}',
+                            if (r.igst != 0) 'IGST ${rupees(r.igst)}',
+                          ].join(' · '),
+                          style: AppText.caption,
+                        ),
+                        trailing: Text(rupees(r.tax), style: AppText.subtitle),
+                      ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Sales net of credit notes. This is the tax you '
+                      'collected (output tax); purchase GST (input credit) '
+                      'is not tracked in Storely, so check it with your CA.',
+                      style: AppText.caption,
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
