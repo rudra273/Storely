@@ -14,6 +14,8 @@ import '../services/cloud_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import 'store/printer_setup_sheet.dart';
+import 'store/backup_sheet.dart';
+import '../main.dart' show AppGate;
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -185,6 +187,20 @@ class _StoreScreenState extends State<StoreScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+    );
+  }
+
+  Future<void> _showBackup() async {
+    final restored = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const BackupSheet(),
+    );
+    if (!mounted || restored != true) return;
+    // Every screen holds data from the old database: start over.
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const AppGate()),
+      (_) => false,
     );
   }
 
@@ -564,6 +580,13 @@ class _StoreScreenState extends State<StoreScreen> {
                       icon: Icons.settings_outlined,
                       onTap: _showAppSettings,
                     ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Backup & restore',
+                    subtitle: 'Save all data to one file',
+                    icon: Icons.backup_outlined,
+                    onTap: _showBackup,
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Account'),
