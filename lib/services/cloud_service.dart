@@ -1,4 +1,5 @@
 import 'sync_status.dart';
+import 'app_log.dart';
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -637,7 +638,8 @@ class CloudService with WidgetsBindingObserver {
             : 'Synced. ${result.conflicts.length} change(s) could not sync',
         clearError: true,
       );
-    } catch (error) {
+    } catch (error, stack) {
+      AppLog.error('Sync', error, stack);
       state.value = state.value.copyWith(
         phase: CloudSyncPhase.idle,
         error: error.toString(),

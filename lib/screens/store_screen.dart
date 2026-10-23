@@ -14,6 +14,7 @@ import '../services/app_settings_service.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import 'store/printer_setup_sheet.dart';
 import 'store/backup_sheet.dart';
+import '../services/problem_report.dart';
 import '../l10n/l10n.dart';
 import 'shared/sync_status_widgets.dart';
 import '../services/sync_status.dart';
@@ -192,6 +193,22 @@ class _StoreScreenState extends State<StoreScreen> {
       MaterialPageRoute<void>(builder: (_) => const AppGate()),
       (_) => false,
     );
+  }
+
+  Future<void> _reportProblem() async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (_) => const _ReportProblemDialog(),
+    );
+    if (note == null || !mounted) return;
+    try {
+      await ProblemReport.share(userNote: note);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+    }
   }
 
   Future<void> _showAppSettings() async {
@@ -573,6 +590,13 @@ class _StoreScreenState extends State<StoreScreen> {
                   const _SectionLabel(title: 'Help & about'),
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
+                    title: 'Report a problem',
+                    subtitle: 'Send app details and recent errors to support',
+                    icon: Icons.bug_report_outlined,
+                    onTap: _reportProblem,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
                     title: 'Privacy policy',
                     subtitle: 'Privacy policy and data usage details',
                     icon: Icons.privacy_tip_outlined,
@@ -588,6 +612,64 @@ class _StoreScreenState extends State<StoreScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Asks what went wrong (optional) before sharing a problem report.
+class _ReportProblemDialog extends StatefulWidget {
+  const _ReportProblemDialog();
+
+  @override
+  State<_ReportProblemDialog> createState() => _ReportProblemDialogState();
+}
+
+class _ReportProblemDialogState extends State<_ReportProblemDialog> {
+  final _note = TextEditingController();
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Report a problem'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: const ValueKey('problem-note'),
+            controller: _note,
+            minLines: 3,
+            maxLines: 6,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'What happened? (optional)',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'The report has the app version, Android version, record counts, '
+            'sync status and recent errors. No customer names, numbers or '
+            'amounts.',
+            style: AppText.caption,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _note.text),
+          child: const Text('Share report'),
+        ),
+      ],
     );
   }
 }
