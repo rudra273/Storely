@@ -130,3 +130,70 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
     );
   }
 }
+
+/// Parked carts: tap to resume, or delete.
+class _HeldBillsSheet extends StatefulWidget {
+  final List<HeldBill> held;
+  final Future<void> Function(HeldBill bill) onDelete;
+
+  const _HeldBillsSheet({required this.held, required this.onDelete});
+
+  @override
+  State<_HeldBillsSheet> createState() => _HeldBillsSheetState();
+}
+
+class _HeldBillsSheetState extends State<_HeldBillsSheet> {
+  late final List<HeldBill> _held = List.of(widget.held);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Held bills', style: AppText.title),
+          const SizedBox(height: AppSpacing.sm),
+          if (_held.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
+              child: Text(
+                'No held bills',
+                textAlign: TextAlign.center,
+                style: AppText.caption,
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _held.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, index) {
+                  final bill = _held[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(bill.label),
+                    subtitle: Text(
+                      '${bill.items.length} item${bill.items.length == 1 ? '' : 's'}'
+                      ' · ${rupees(bill.total)}',
+                    ),
+                    onTap: () => Navigator.pop(context, bill),
+                    trailing: IconButton(
+                      tooltip: 'Delete held bill',
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      onPressed: () async {
+                        await widget.onDelete(bill);
+                        if (mounted) setState(() => _held.removeAt(index));
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

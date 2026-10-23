@@ -9,6 +9,7 @@ import '../models/bill.dart';
 import '../models/bill_settings.dart';
 import '../models/invoice_numbering.dart';
 import '../models/customer.dart';
+import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/pricing.dart';

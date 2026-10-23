@@ -302,6 +302,28 @@ void main() {
       expect(await db.getProductSaleCounts(), {tea: 2, salt: 1});
     });
 
+    test('held bills and the auto-saved cart', () async {
+      final items = [
+        BillItem(productName: 'Tea', mrp: 120, quantity: 2),
+        BillItem(productName: 'Sugar', mrp: 45, quantity: 1.5, unit: 'kg'),
+      ];
+      final id = await db.holdBill('12:30 PM · Tea +1', items);
+      final held = await db.getHeldBills();
+      expect(held.single.id, id);
+      expect(held.single.label, '12:30 PM · Tea +1');
+      expect(held.single.items.map((i) => i.productName), ['Tea', 'Sugar']);
+      expect(held.single.items.last.quantity, 1.5);
+      expect(held.single.total, 307.5);
+      await db.deleteHeldBill(id);
+      expect(await db.getHeldBills(), isEmpty);
+
+      await db.saveCartDraft(items);
+      expect((await db.loadCartDraft()).length, 2);
+      expect(await db.getHeldBills(), isEmpty, reason: 'draft is not held');
+      await db.saveCartDraft(const []);
+      expect(await db.loadCartDraft(), isEmpty);
+    });
+
     test('only admins can mark a paid bill unpaid', () async {
       final billId = await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),

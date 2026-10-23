@@ -98,6 +98,74 @@ mixin DatabaseBills {
     ];
   }
 
+  // ── Held bills and the auto-saved cart (device-local) ──
+
+  Future<int> holdBill(String label, List<BillItem> items) async {
+    final db = await database;
+    final now = _localIso();
+    return db.insert('held_bills', {
+      'shop_id': await _activeShopId(db),
+      'kind': 'held',
+      'label': label,
+      'items_json': HeldBill.encodeItems(items),
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<List<HeldBill>> getHeldBills() async {
+    final db = await database;
+    final rows = await db.query(
+      'held_bills',
+      where: "kind = 'held' AND shop_id = ?",
+      whereArgs: [await _activeShopId(db)],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(HeldBill.fromMap).toList();
+  }
+
+  Future<void> deleteHeldBill(int id) async {
+    final db = await database;
+    await db.delete('held_bills', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Saves the cart being billed so it survives the app being closed.
+  /// An empty cart clears the draft.
+  Future<void> saveCartDraft(List<BillItem> items) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    await db.transaction((txn) async {
+      await txn.delete(
+        'held_bills',
+        where: "kind = 'draft' AND shop_id = ?",
+        whereArgs: [shopId],
+      );
+      if (items.isEmpty) return;
+      final now = _localIso();
+      await txn.insert('held_bills', {
+        'shop_id': shopId,
+        'kind': 'draft',
+        'label': 'Unsaved bill',
+        'items_json': HeldBill.encodeItems(items),
+        'created_at': now,
+        'updated_at': now,
+      });
+    });
+  }
+
+  Future<List<BillItem>> loadCartDraft() async {
+    final db = await database;
+    final rows = await db.query(
+      'held_bills',
+      where: "kind = 'draft' AND shop_id = ?",
+      whereArgs: [await _activeShopId(db)],
+      limit: 1,
+    );
+    return rows.isEmpty
+        ? const []
+        : HeldBill.decodeItems(rows.single['items_json'] as String);
+  }
+
   /// One bill with its items (including a cancelled one), or null.
   Future<Bill?> getBillById(int id) async {
     final db = await database;

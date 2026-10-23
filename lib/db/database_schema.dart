@@ -193,6 +193,23 @@ mixin DatabaseSchema {
     await _createPaymentTables(executor);
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
+    await _createHeldBillTables(executor);
+  }
+
+  /// Carts parked with "Hold" (kind 'held') and the auto-saved cart being
+  /// billed (kind 'draft'). Device-local: never synced.
+  Future<void> _createHeldBillTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS held_bills(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shop_id TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'held',
+        label TEXT NOT NULL,
+        items_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
   }
 
   /// Seed the local shop and preset reference data. Guarded so it is safe to

@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
@@ -10,6 +12,7 @@ import '../services/bill_share.dart';
 import '../models/bill.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
+import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../utils/money.dart';
 
@@ -69,16 +72,118 @@ class _ScanScreenState extends State<ScanScreen> {
                   : BillingEntryMode.scan);
     if (widget.duplicateFromBill != null) {
       _items.addAll(widget.duplicateFromBill!.items.map(_copyItemForNewBill));
+      _draftReady = true;
+    } else {
+      _restoreDraft();
     }
     _productSearchCtrl.addListener(_applyProductSearch);
     _loadProducts();
+    _loadHeldCount();
   }
 
   @override
   void dispose() {
+    _draftTimer?.cancel();
+    if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
     _productSearchCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Auto-saved cart and held bills ──
+  //
+  // Every rebuild checks whether the cart changed and, if so, saves it
+  // (debounced) so an app kill or a call mid-bill never loses the cart.
+
+  Timer? _draftTimer;
+  bool _draftReady = false;
+  String _savedDraft = HeldBill.encodeItems(const []);
+  int _heldCount = 0;
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    if (!_draftReady) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
+  }
+
+  void _saveDraftNow() {
+    final encoded = HeldBill.encodeItems(_items);
+    if (encoded == _savedDraft) return;
+    _savedDraft = encoded;
+    DatabaseHelper.instance.saveCartDraft(List.of(_items));
+  }
+
+  Future<void> _restoreDraft() async {
+    final draft = await DatabaseHelper.instance.loadCartDraft();
+    if (!mounted) return;
+    _savedDraft = HeldBill.encodeItems(draft);
+    _draftReady = true;
+    if (draft.isEmpty || _items.isNotEmpty) return;
+    setState(() => _items.addAll(draft));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Restored your unsaved bill (${draft.length} '
+          'item${draft.length == 1 ? '' : 's'})',
+        ),
+        action: SnackBarAction(
+          label: 'Discard',
+          onPressed: () {
+            if (mounted) setState(() => _items.clear());
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadHeldCount() async {
+    final held = await DatabaseHelper.instance.getHeldBills();
+    if (mounted) setState(() => _heldCount = held.length);
+  }
+
+  /// Parks the cart so the next customer can be billed.
+  Future<void> _holdCart() async {
+    if (_items.isEmpty) return;
+    final items = List<BillItem>.of(_items);
+    final first = items.first.productName;
+    final label =
+        '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
+        '${items.length > 1 ? ' +${items.length - 1}' : ''}';
+    await DatabaseHelper.instance.holdBill(label, items);
+    if (!mounted) return;
+    setState(() {
+      _items.clear();
+      _heldCount++;
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('Held: $label')));
+  }
+
+  Future<void> _openHeldBills() async {
+    final held = await DatabaseHelper.instance.getHeldBills();
+    if (!mounted) return;
+    final chosen = await showModalBottomSheet<HeldBill>(
+      context: context,
+      useSafeArea: true,
+      backgroundColor: AppColors.surfaceOf(context),
+      builder: (_) => _HeldBillsSheet(
+        held: held,
+        onDelete: (bill) async {
+          await DatabaseHelper.instance.deleteHeldBill(bill.id);
+          await _loadHeldCount();
+        },
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    // Swap: the cart being billed is held, so nothing is lost.
+    if (_items.isNotEmpty) await _holdCart();
+    await DatabaseHelper.instance.deleteHeldBill(chosen.id);
+    if (!mounted) return;
+    setState(() => _items.addAll(chosen.items));
+    await _loadHeldCount();
   }
 
   Future<void> _loadProducts() async {
@@ -796,6 +901,27 @@ class _ScanScreenState extends State<ScanScreen> {
                 ),
               ],
             ),
+            if (_heldCount > 0)
+              TextButton.icon(
+                onPressed: _openHeldBills,
+                icon: const Icon(
+                  Icons.inventory_rounded,
+                  color: AppColors.amber,
+                ),
+                label: Text(
+                  'Held ($_heldCount)',
+                  style: const TextStyle(color: AppColors.amber),
+                ),
+              ),
+            if (_items.isNotEmpty)
+              IconButton(
+                tooltip: 'Hold bill',
+                onPressed: _holdCart,
+                icon: const Icon(
+                  Icons.pause_circle_outline_rounded,
+                  color: AppColors.amber,
+                ),
+              ),
             if (_items.isNotEmpty)
               TextButton(
                 onPressed: _clearWithUndo,
