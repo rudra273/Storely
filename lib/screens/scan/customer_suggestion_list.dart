@@ -85,7 +85,7 @@ class _CustomerSuggestionList extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     subtitle: Text(
-                      '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
+                      '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ${rupees(customer.totalPurchaseAmount)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

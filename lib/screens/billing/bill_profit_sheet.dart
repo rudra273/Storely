@@ -213,7 +213,7 @@ class _ProfitRow extends StatelessWidget {
             ),
           ),
           Text(
-            '${value < 0 ? '−' : ''}₹${value.abs().toStringAsFixed(2)}',
+            '${value < 0 ? '−' : ''}${rupees(value.abs())}',
             style: TextStyle(
               fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
               fontSize: fontSize,

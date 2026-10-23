@@ -54,7 +54,7 @@ class _ProductSuggestionList extends StatelessWidget {
                 lastDate,
                 if (product.productCode != null) 'Code ${product.productCode}',
                 if (product.barcode != null) 'Barcode ${product.barcode}',
-                '₹${product.purchasePrice.toStringAsFixed(2)}',
+                rupees(product.purchasePrice),
               ].join(' • '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

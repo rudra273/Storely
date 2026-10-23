@@ -1,4 +1,5 @@
 import 'bill_totals.dart';
+import '../utils/money.dart';
 
 class Bill {
   static const typeB2c = 'b2c';
@@ -302,8 +303,8 @@ class BillItem {
   }
 
   String get priceLabel => unitLabel.isEmpty
-      ? '₹${sellingPriceSnapshot.toStringAsFixed(2)}'
-      : '₹${sellingPriceSnapshot.toStringAsFixed(2)} / $unitLabel';
+      ? rupees(sellingPriceSnapshot)
+      : '${rupees(sellingPriceSnapshot)} / $unitLabel';
   String get quantityLabel {
     final amount = quantity.toStringAsFixed(
       quantity == quantity.roundToDouble() ? 0 : 2,

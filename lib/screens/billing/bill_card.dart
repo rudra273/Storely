@@ -40,7 +40,7 @@ class _BillCardState extends State<_BillCard> {
           title: const Text('Mark as unpaid?'),
           content: Text(
             'This removes all recorded payments on this bill '
-            '(₹${bill.paidAmount.toStringAsFixed(2)}). '
+            '(${rupees(bill.paidAmount)}). '
             'Use this only to correct a mistake.',
           ),
           actions: [
@@ -168,7 +168,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          rupees(bill.totalAmount),
                           style: AppText.subtitle.copyWith(fontSize: 14),
                         ),
                       ],
@@ -261,7 +261,7 @@ class _BillCardState extends State<_BillCard> {
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Text(
-                              '₹${item.subtotal.toStringAsFixed(2)}',
+                              rupees(item.subtotal),
                               style: AppText.body.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),
@@ -275,18 +275,18 @@ class _BillCardState extends State<_BillCard> {
                         bill.roundOffAmount != 0) ...[
                       _AmountRow(
                         label: 'Subtotal',
-                        value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
+                        value: rupees(bill.subtotalAmount),
                       ),
                       if (bill.discountAmount > 0)
                         _AmountRow(
                           label:
                               'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
-                          value: '−₹${bill.discountAmount.toStringAsFixed(2)}',
+                          value: '−${rupees(bill.discountAmount)}',
                         ),
                       if (bill.roundOffAmount != 0)
                         _AmountRow(
                           label: 'Round off',
-                          value: _signedRupees(bill.roundOffAmount),
+                          value: signedRupees(bill.roundOffAmount),
                         ),
                       const SizedBox(height: AppSpacing.xs),
                     ],
@@ -295,7 +295,7 @@ class _BillCardState extends State<_BillCard> {
                       children: [
                         Text('Total', style: AppText.subtitle),
                         Text(
-                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          rupees(bill.totalAmount),
                           style: AppText.subtitle.copyWith(
                             color: AppColors.inkOf(context),
                           ),
@@ -304,13 +304,10 @@ class _BillCardState extends State<_BillCard> {
                     ),
                     if (bill.paidAmount > 0 || bill.balanceDue > 0) ...[
                       const SizedBox(height: AppSpacing.xs),
-                      _AmountRow(
-                        label: 'Paid',
-                        value: '₹${bill.paidAmount.toStringAsFixed(2)}',
-                      ),
+                      _AmountRow(label: 'Paid', value: rupees(bill.paidAmount)),
                       _AmountRow(
                         label: 'Balance',
-                        value: '₹${bill.balanceDue.toStringAsFixed(2)}',
+                        value: rupees(bill.balanceDue),
                       ),
                     ],
                     if (bill.transactionReference != null) ...[

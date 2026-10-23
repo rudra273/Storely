@@ -64,7 +64,7 @@ class _UnpaidSummary extends StatelessWidget {
                     children: [
                       Expanded(child: Text(e.key, style: AppText.body)),
                       Text(
-                        '₹${e.value.toStringAsFixed(2)}',
+                        rupees(e.value),
                         style: AppText.subtitle.copyWith(
                           color: AppColors.error,
                         ),
@@ -112,7 +112,7 @@ class _UnpaidSummary extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '₹${b.balanceDue.toStringAsFixed(0)}',
+                        rupees(b.balanceDue, decimals: 0),
                         style: AppText.body.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.error,
@@ -273,7 +273,7 @@ class _CancelledBillCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '₹${bill.totalAmount.toStringAsFixed(2)}',
+                    rupees(bill.totalAmount),
                     style: AppText.subtitle.copyWith(
                       fontSize: 14,
                       color: AppColors.inkMuted,

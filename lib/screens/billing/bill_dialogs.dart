@@ -136,7 +136,7 @@ class _RecordPaymentDialogState extends State<_RecordPaymentDialog> {
             decoration: InputDecoration(
               labelText: 'Amount received',
               prefixText: '₹ ',
-              helperText: 'Balance: ₹${widget.balanceDue.toStringAsFixed(2)}',
+              helperText: 'Balance: ${rupees(widget.balanceDue)}',
               errorText: _amountError,
             ),
           ),

@@ -9,6 +9,7 @@ import '../models/bill.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
 import '../models/product.dart';
+import '../utils/money.dart';
 
 part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
@@ -495,7 +496,7 @@ class _ScanScreenState extends State<ScanScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '₹${totalAmount.toStringAsFixed(2)}',
+                rupees(totalAmount),
                 style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.w800,
@@ -857,7 +858,7 @@ class _ScanScreenState extends State<ScanScreen> {
                             ),
                           ),
                           Text(
-                            '₹${_subtotal.toStringAsFixed(2)}',
+                            rupees(_subtotal),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 24,
@@ -1000,7 +1001,7 @@ class _ScanScreenState extends State<ScanScreen> {
                       const SizedBox(width: 12),
                       // Subtotal
                       Text(
-                        '₹${item.subtotal.toStringAsFixed(2)}',
+                        rupees(item.subtotal),
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,

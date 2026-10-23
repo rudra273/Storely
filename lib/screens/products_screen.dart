@@ -10,6 +10,7 @@ import '../models/product_purchase.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import 'qr_sheet_screen.dart';
+import '../utils/money.dart';
 
 part 'products/product_models.dart';
 part 'products/product_formatters.dart';

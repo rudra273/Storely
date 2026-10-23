@@ -381,7 +381,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               const SizedBox(height: 12),
               _BillSummaryRow(
                 label: 'Subtotal',
-                value: '₹${totals.subtotal.toStringAsFixed(2)}',
+                value: rupees(totals.subtotal),
               ),
               _BillSummaryRow(label: 'Items', value: '${widget.itemCount}'),
               const SizedBox(height: 12),
@@ -505,30 +505,29 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   children: [
                     _BillSummaryRow(
                       label: 'Discount (${percent.toStringAsFixed(2)}%)',
-                      value: '- ₹${discount.toStringAsFixed(2)}',
+                      value: '- ${rupees(discount)}',
                     ),
                     if (totals.roundOffAmount != 0)
                       _BillSummaryRow(
                         label: 'Round off',
                         value:
-                            '${totals.roundOffAmount > 0 ? '+' : '-'} ₹${totals.roundOffAmount.abs().toStringAsFixed(2)}',
+                            '${totals.roundOffAmount > 0 ? '+' : '-'} ${rupees(totals.roundOffAmount.abs())}',
                       ),
                     const Divider(height: 20),
                     _BillSummaryRow(
                       label: 'Grand Total',
-                      value: '₹${total.toStringAsFixed(2)}',
+                      value: rupees(total),
                       isTotal: true,
                     ),
                     if (paidAmount > 0) ...[
                       const Divider(height: 20),
                       _BillSummaryRow(
                         label: 'Received',
-                        value: '₹${paidAmount.toStringAsFixed(2)}',
+                        value: rupees(paidAmount),
                       ),
                       _BillSummaryRow(
                         label: 'Balance',
-                        value:
-                            '₹${(total - paidAmount).clamp(0, total).toStringAsFixed(2)}',
+                        value: rupees((total - paidAmount).clamp(0, total)),
                       ),
                     ],
                   ],

@@ -5,6 +5,7 @@ import '../models/bill.dart';
 import '../models/customer.dart';
 import '../services/cloud_service.dart';
 import 'customer_profile_sheet.dart';
+import '../utils/money.dart';
 
 /// The single Customers page, opened from both Home → Workspace and
 /// Settings → Customers. Full-screen (not a bottom sheet) and dark-mode aware.
@@ -361,12 +362,12 @@ class _CustomerSummaryRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '₹${customer.totalPurchaseAmount.toStringAsFixed(0)}',
+                rupees(customer.totalPurchaseAmount, decimals: 0),
                 style: AppText.subtitle.copyWith(fontSize: 14),
               ),
               Text(
                 pendingAmount > 0
-                    ? 'Due ₹${pendingAmount.toStringAsFixed(0)}'
+                    ? 'Due ${rupees(pendingAmount, decimals: 0)}'
                     : 'No due',
                 style: AppText.caption.copyWith(
                   color: pendingAmount > 0
@@ -491,7 +492,7 @@ class _CustomerDetailScreen extends StatelessWidget {
               Expanded(
                 child: _MiniStat(
                   label: 'Total billed',
-                  value: '₹${totalBilled.toStringAsFixed(0)}',
+                  value: rupees(totalBilled, decimals: 0),
                   color: AppColors.inkOf(context),
                 ),
               ),
@@ -500,7 +501,7 @@ class _CustomerDetailScreen extends StatelessWidget {
                 child: _MiniStat(
                   label: 'Pending',
                   value: pendingAmount > 0
-                      ? '₹${pendingAmount.toStringAsFixed(0)}'
+                      ? rupees(pendingAmount, decimals: 0)
                       : '₹0',
                   color: pendingAmount > 0
                       ? AppColors.error
@@ -609,7 +610,7 @@ class _CustomerBillRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '₹${bill.totalAmount.toStringAsFixed(0)}',
+                rupees(bill.totalAmount, decimals: 0),
                 style: AppText.subtitle.copyWith(fontSize: 14),
               ),
               const SizedBox(height: 4),

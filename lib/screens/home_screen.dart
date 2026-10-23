@@ -13,6 +13,7 @@ import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
 import '../services/home_section_prefs.dart';
+import '../utils/money.dart';
 
 class HomeScreen extends StatefulWidget {
   final int refreshToken;
@@ -328,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.navy,
           title: product.name,
           subtitle: 'Product · ${product.quantityLabel} in stock',
-          trailing: '₹${product.sellingPrice.toStringAsFixed(0)}',
+          trailing: rupees(product.sellingPrice, decimals: 0),
           onTap: () => widget.onNavigate(1),
         ),
       );
@@ -349,7 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.amber,
           title: _cleanBillNumber(bill),
           subtitle: 'Bill · ${bill.customerName}',
-          trailing: '₹${bill.totalAmount.toStringAsFixed(0)}',
+          trailing: rupees(bill.totalAmount, decimals: 0),
           onTap: () => widget.onNavigate(2),
         ),
       );
@@ -371,7 +372,9 @@ class _HomeScreenState extends State<HomeScreen> {
           title: customer.name,
           subtitle:
               'Customer · ${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
-          trailing: pending > 0 ? 'Due ₹${pending.toStringAsFixed(0)}' : 'Paid',
+          trailing: pending > 0
+              ? 'Due ${rupees(pending, decimals: 0)}'
+              : 'Paid',
           onTap: _openCustomers,
         ),
       );
@@ -727,7 +730,7 @@ class _SalesHero extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  '₹${sales.toStringAsFixed(2)}',
+                  rupees(sales),
                   style: AppText.display.copyWith(
                     color: Colors.white,
                     fontSize: 30,
@@ -737,7 +740,7 @@ class _SalesHero extends StatelessWidget {
                 Text(
                   billCount == 0
                       ? 'No bills yet today'
-                      : '₹${collected.toStringAsFixed(2)} collected, $billCount bill${billCount != 1 ? 's' : ''} created',
+                      : '${rupees(collected)} collected, $billCount bill${billCount != 1 ? 's' : ''} created',
                   style: AppText.caption.copyWith(color: Colors.white60),
                 ),
               ],
@@ -1012,7 +1015,7 @@ class _UnpaidBillsSection extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '₹${bill.balanceDue.toStringAsFixed(0)}',
+                    rupees(bill.balanceDue, decimals: 0),
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,

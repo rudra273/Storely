@@ -11,6 +11,7 @@ import '../services/cloud_service.dart';
 import '../utils/bill_pdf_generator.dart';
 import 'scan_screen.dart';
 import 'store/bill_settings_screen.dart';
+import '../utils/money.dart';
 
 part 'billing/bill_list_widgets.dart';
 part 'billing/bill_card.dart';
@@ -305,24 +306,24 @@ class _BillsScreenState extends State<BillsScreen> {
       ..writeln('Items:');
     for (final item in bill.items) {
       buffer.writeln(
-        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ₹${item.subtotal.toStringAsFixed(2)}',
+        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ${rupees(item.subtotal)}',
       );
     }
     buffer
       ..writeln('')
-      ..writeln('Subtotal: ₹${bill.subtotalAmount.toStringAsFixed(2)}');
+      ..writeln('Subtotal: ${rupees(bill.subtotalAmount)}');
     if (bill.discountAmount > 0) {
       buffer.writeln(
-        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -₹${bill.discountAmount.toStringAsFixed(2)}',
+        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -${rupees(bill.discountAmount)}',
       );
     }
     if (bill.roundOffAmount != 0) {
-      buffer.writeln('Round off: ${_signedRupees(bill.roundOffAmount)}');
+      buffer.writeln('Round off: ${signedRupees(bill.roundOffAmount)}');
     }
     buffer
-      ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Paid: ₹${bill.paidAmount.toStringAsFixed(2)}')
-      ..writeln('Balance: ₹${bill.balanceDue.toStringAsFixed(2)}')
+      ..writeln('Total: ${rupees(bill.totalAmount)}')
+      ..writeln('Paid: ${rupees(bill.paidAmount)}')
+      ..writeln('Balance: ${rupees(bill.balanceDue)}')
       ..writeln('Status: ${_paymentStatusLabel(bill.paymentStatus)}');
     if (bill.paidAmount > 0) {
       buffer.writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');

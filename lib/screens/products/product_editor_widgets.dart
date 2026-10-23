@@ -365,7 +365,7 @@ class _ProductSheetActionBar extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '₹${sellingPrice.toStringAsFixed(2)}$unitText',
+                    '${rupees(sellingPrice)}$unitText',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -696,7 +696,7 @@ class _PricingInputRow extends StatelessWidget {
                         ),
                       ),
                     Text(
-                      '₹${result.toStringAsFixed(2)}',
+                      rupees(result),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.end,

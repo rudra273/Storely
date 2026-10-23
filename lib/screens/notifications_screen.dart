@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../utils/money.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -80,7 +81,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           children: [
                             Text('PENDING', style: AppText.label),
                             Text(
-                              '₹${(data['amount'] as double).toStringAsFixed(2)}',
+                              rupees((data['amount'] as double)),
                               style: AppText.subtitle.copyWith(
                                 color: AppColors.error,
                               ),

@@ -433,7 +433,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
         title: p.name,
         subtitle:
             '${isRestock ? 'Restock' : 'New'} · '
-            'Qty $qtyLabel$unit · ₹${p.mrp.toStringAsFixed(2)}',
+            'Qty $qtyLabel$unit · ${rupees(p.mrp)}',
         onTap: _committing ? null : () => _editDraft(index),
         trailing: IconButton(
           tooltip: 'Remove',

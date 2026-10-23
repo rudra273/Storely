@@ -118,8 +118,7 @@ class _StockMovementRow extends StatelessWidget {
                   [
                     _formatFullDate(movement.createdAt),
                     if (movement.sourceType != null) movement.sourceType!,
-                    if (movement.unitCost != null)
-                      '₹${movement.unitCost!.toStringAsFixed(2)}',
+                    if (movement.unitCost != null) rupees(movement.unitCost!),
                   ].join(' • '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

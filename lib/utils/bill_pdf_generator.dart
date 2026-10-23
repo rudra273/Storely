@@ -10,6 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/bill.dart';
 import '../models/bill_settings.dart';
 import '../models/shop_profile.dart';
+import 'money.dart';
 
 class BillPdfGenerator {
   static Future<Uint8List> generate({
@@ -561,10 +562,7 @@ class BillPdfGenerator {
         : 'Bill #${bill.id ?? ''}';
   }
 
-  static String _money(double value) {
-    final sign = value < 0 ? '-' : '';
-    return '${sign}Rs. ${value.abs().toStringAsFixed(2)}';
-  }
+  static String _money(double value) => rupees(value);
 
   static String? _cleanText(String? value) {
     final trimmed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
