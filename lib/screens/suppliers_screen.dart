@@ -78,7 +78,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 34),
+        icon: const Icon(
+          Icons.delete_outline,
+          color: AppColors.error,
+          size: 34,
+        ),
         title: const Text('Delete Supplier'),
         content: Text('Remove "${supplier.name}"?'),
         actions: [
@@ -139,7 +143,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                 )
               : null,
           body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList()
               : _suppliers.isEmpty
               ? _EmptySuppliers(canManage: canManage, onAdd: _addSupplier)
               : ListView.separated(
@@ -176,38 +180,14 @@ class _EmptySuppliers extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.local_shipping_outlined,
-              size: 56,
-              color: AppColors.inkMutedOf(context),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text('No suppliers yet', style: AppText.subtitle),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              canManage
-                  ? 'Add your suppliers to track who you buy from.'
-                  : 'Your shop has not added any suppliers yet.',
-              textAlign: TextAlign.center,
-              style: AppText.caption,
-            ),
-            if (canManage) ...[
-              const SizedBox(height: AppSpacing.lg),
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add Supplier'),
-              ),
-            ],
-          ],
-        ),
-      ),
+    return AppEmptyState(
+      icon: Icons.local_shipping_outlined,
+      title: 'No suppliers yet',
+      message: canManage
+          ? 'Add your suppliers to track who you buy from.'
+          : 'Your shop has not added any suppliers yet.',
+      actionLabel: canManage ? 'Add Supplier' : null,
+      onAction: canManage ? onAdd : null,
     );
   }
 }
@@ -363,7 +343,9 @@ class _SupplierEditorSheetState extends State<_SupplierEditorSheet> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: Container(
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
@@ -408,8 +390,9 @@ class _SupplierEditorSheetState extends State<_SupplierEditorSheet> {
                       labelText: 'Supplier Name *',
                       prefixIcon: Icon(Icons.local_shipping_outlined, size: 18),
                     ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'Required' : null,
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Required'
+                        : null,
                   ),
                   const SizedBox(height: 10),
                   TextFormField(

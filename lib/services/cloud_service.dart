@@ -1,3 +1,4 @@
+import 'sync_status.dart';
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -7,6 +8,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
+import 'sync/cloud_sync_engine.dart';
+import 'sync/sync_backend.dart';
+
+export 'sync/cloud_sync_engine.dart' show FirstSyncMode, CloudSyncResult;
 
 /// Which Supabase backend the app talks to.
 ///
@@ -96,7 +101,6 @@ enum CloudMembership { unknown, member, needsRegistration }
 /// [uploadExisting] — push all current local data up to the cloud.
 /// [startFresh] — leave existing local data local-only; only data created/edited
 /// after this point syncs.
-enum FirstSyncMode { uploadExisting, startFresh }
 
 class CloudState {
   final CloudConfig? config;
@@ -190,7 +194,7 @@ class CloudService with WidgetsBindingObserver {
   static const _urlKey = 'storely_cloud_url';
   static const _anonKeyKey = 'storely_cloud_anon_key';
   static const _modeKey = 'storely_cloud_backend_mode';
-  static const _lastSyncStateKey = 'last_successful_cloud_sync_at';
+  static const _lastSyncStateKey = CloudSyncEngine.lastSyncStateKey;
 
   final state = ValueNotifier<CloudState>(const CloudState());
   final _connectivity = Connectivity();
@@ -212,6 +216,7 @@ class CloudService with WidgetsBindingObserver {
       }
     };
     DatabaseHelper.instance.isAdminMutationAllowed = () => state.value.isAdmin;
+    DatabaseHelper.instance.auditActor = () => state.value.user?.email;
     final prefs = await SharedPreferences.getInstance();
     final mode = _readMode(prefs);
     final lastSync = await DatabaseHelper.instance.getCloudSyncState(
@@ -244,6 +249,7 @@ class CloudService with WidgetsBindingObserver {
 
     DatabaseHelper.instance.onDatabaseChanged = () {
       if (!state.value.isConfigured || !state.value.isSignedIn) return;
+      SyncStatus.instance.refresh();
       _debounceTimer?.cancel();
       _debounceTimer = Timer(const Duration(seconds: 2), () {
         syncNow(reason: 'Local data changed');
@@ -346,7 +352,7 @@ class CloudService with WidgetsBindingObserver {
     // Reset the first-sync watermark so reconnecting cloud is a true fresh
     // start: the upload-vs-fresh choice will be offered again, instead of the
     // device assuming everything was already synced.
-    await DatabaseHelper.instance.clearCloudSyncState(_lastSyncStateKey);
+    await CloudSyncEngine.resetProgress(DatabaseHelper.instance);
     await _authSubscription?.cancel();
     _authSubscription = null;
     if (_clientReady) {
@@ -449,7 +455,7 @@ class CloudService with WidgetsBindingObserver {
   /// never uploaded (e.g. an earlier sync finalized without pushing). Re-running
   /// sync will surface the "upload existing vs start fresh" prompt again.
   Future<void> resyncExistingData() async {
-    await DatabaseHelper.instance.clearCloudSyncState(_lastSyncStateKey);
+    await CloudSyncEngine.resetProgress(DatabaseHelper.instance);
     state.value = state.value.copyWith(
       clearLastSyncedAt: true,
       message: 'Checking existing data…',
@@ -564,6 +570,7 @@ class CloudService with WidgetsBindingObserver {
     _syncInFlight = _sync(reason: reason, firstSyncMode: firstSyncMode)
         .whenComplete(() {
           _syncInFlight = null;
+          SyncStatus.instance.refresh();
         });
     return _syncInFlight!;
   }
@@ -588,7 +595,7 @@ class CloudService with WidgetsBindingObserver {
           ? null
           : (knownRole == 'owner' || knownRole == 'admin');
       final result = await CloudSyncEngine(
-        client: activeClient,
+        backend: SupabaseSyncBackend(activeClient),
         database: DatabaseHelper.instance,
         knownIsAdmin: knownIsAdmin,
       ).sync(firstSyncMode: firstSyncMode);
@@ -625,7 +632,9 @@ class CloudService with WidgetsBindingObserver {
         firstSyncChoicePending: false,
         lastSyncedAt: result.syncedAt,
         shopRole: role,
-        message: 'Cloud sync complete',
+        message: result.conflicts.isEmpty
+            ? 'Cloud sync complete'
+            : 'Synced. ${result.conflicts.length} change(s) could not sync',
         clearError: true,
       );
     } catch (error) {
@@ -685,348 +694,4 @@ class CloudService with WidgetsBindingObserver {
       }
     });
   }
-}
-
-/// Outcome of a sync attempt.
-///
-/// [syncedAt] is non-null only when a real sync ran. [needsRegistration] means
-/// the user belongs to no shop yet. [needsFirstSyncChoice] means this is the
-/// first sync and the device has existing local data, so the user must choose
-/// whether to upload it or start fresh.
-class CloudSyncResult {
-  final DateTime? syncedAt;
-  final bool needsRegistration;
-  final bool needsFirstSyncChoice;
-
-  const CloudSyncResult.synced(DateTime this.syncedAt)
-    : needsRegistration = false,
-      needsFirstSyncChoice = false;
-  const CloudSyncResult.needsRegistration()
-    : syncedAt = null,
-      needsRegistration = true,
-      needsFirstSyncChoice = false;
-  const CloudSyncResult.needsFirstSyncChoice()
-    : syncedAt = null,
-      needsRegistration = false,
-      needsFirstSyncChoice = true;
-}
-
-class CloudSyncEngine {
-  final SupabaseClient client;
-  final DatabaseHelper database;
-
-  /// Locally-known admin status, set when the caller already knows the user is
-  /// an owner/admin (e.g. immediately after registering their own shop). When
-  /// non-null it takes precedence over the [_isShopAdmin] cloud round-trip,
-  /// which can momentarily return false right after registration (RLS / role
-  /// propagation) and would otherwise wrongly skip the first-sync upload.
-  final bool? knownIsAdmin;
-
-  CloudSyncEngine({
-    required this.client,
-    required this.database,
-    this.knownIsAdmin,
-  });
-
-  static const _adminManagedTables = {
-    'app_settings',
-    'bill_settings',
-    'categories',
-    'units',
-    'suppliers',
-    'products',
-    'invoice_series',
-  };
-
-  Future<CloudSyncResult> sync({FirstSyncMode? firstSyncMode}) async {
-    final syncStartedAt = DateTime.now().toUtc();
-    var shopId = await database.currentShopId();
-
-    // Resolve which shop (if any) this user belongs to. Joining a shop the
-    // user was invited to also happens here.
-    final memberShopId = await _resolveMembershipShopId();
-
-    // Signed in but attached to no shop and no pending invite → the app should
-    // prompt the owner to register a shop. Stop cleanly (no RLS error).
-    if (memberShopId == null) {
-      return const CloudSyncResult.needsRegistration();
-    }
-
-    if (memberShopId != shopId) {
-      if (await database.hasLocalBusinessDataForCloud()) {
-        throw StateError(
-          'This user belongs to a different cloud shop, but this device already has local business data. Export or clear local data before joining that shop.',
-        );
-      }
-      await database.adoptCloudShopId(memberShopId);
-      shopId = memberShopId;
-    }
-    final lastSync = await database.getCloudSyncState(
-      CloudService._lastSyncStateKey,
-    );
-
-    // Prefer the locally-known role; only fall back to the cloud check when we
-    // don't already know (avoids the post-registration race that skipped the
-    // first-sync upload).
-    final canPushAdminTables = knownIsAdmin ?? await _isShopAdmin(shopId);
-    final pullFirst = lastSync == null;
-
-    // First sync on a device that already has local data: the user must decide
-    // whether to upload that data or start fresh. Ask once (unless they joined
-    // an existing shop as staff, where cloud is the source of truth).
-    if (pullFirst &&
-        firstSyncMode == null &&
-        canPushAdminTables &&
-        await database.hasLocalBusinessDataForCloud()) {
-      return const CloudSyncResult.needsFirstSyncChoice();
-    }
-
-    // Whether to push pre-existing local data on this first sync.
-    final uploadExisting =
-        pullFirst && firstSyncMode != FirstSyncMode.startFresh;
-
-    // Pull shop data (all members can read).
-    try {
-      final shopRows = await _pullTable(
-        'shops',
-        shopId: shopId,
-        updatedAfter: pullFirst ? null : lastSync,
-      );
-      await database.cloudImportRows('shops', shopRows);
-    } catch (_) {
-      // Staff might not see shop on first pull — not fatal.
-    }
-
-    // Push shop data only if user is admin/owner.
-    await _pushShopIfAdmin(shopId);
-
-    if (pullFirst) {
-      for (final table in storelyCloudTables) {
-        final rows = await _pullTable(table, shopId: shopId);
-        await database.cloudImportRows(table, rows);
-      }
-      // uploadExisting → push ALL local rows (updatedAfter: null).
-      // startFresh → push nothing now; only future edits sync (they will have
-      // updated_at > syncStartedAt, picked up by the lastSync baseline below).
-      if (uploadExisting) {
-        for (final table in storelyCloudTables) {
-          await _pushTable(
-            table,
-            updatedAfter: null,
-            canPushAdminTables: canPushAdminTables,
-          );
-        }
-      }
-    } else {
-      for (final table in storelyCloudTables) {
-        final rows = await _pullTable(
-          table,
-          shopId: shopId,
-          updatedAfter: lastSync,
-        );
-        await database.cloudImportRows(table, rows);
-      }
-      for (final table in storelyCloudTables) {
-        await _pushTable(
-          table,
-          updatedAfter: lastSync,
-          canPushAdminTables: canPushAdminTables,
-        );
-      }
-    }
-
-    await database.setCloudSyncState(
-      CloudService._lastSyncStateKey,
-      syncStartedAt.toIso8601String(),
-    );
-    return CloudSyncResult.synced(syncStartedAt);
-  }
-
-  /// Resolve which cloud shop the current user belongs to, or null when they
-  /// belong to none.
-  ///
-  /// Order of checks (no implicit owner creation — registration is explicit):
-  ///   1. Existing membership → return that shop id.
-  ///   2. A pending invite → redeem it via accept_invite, then return the shop.
-  ///   3. Otherwise null → caller prompts the owner to register a shop.
-  Future<String?> _resolveMembershipShopId() async {
-    final user = client.auth.currentUser;
-    if (user == null) return null;
-
-    // 1. Already a member?
-    final rows = await client
-        .from('shop_members')
-        .select('shop_id')
-        .eq('user_id', user.id)
-        .limit(1);
-    if ((rows as List).isNotEmpty) {
-      final value = rows.first['shop_id']?.toString();
-      if (value != null && value.isNotEmpty) return value;
-    }
-
-    // 2. Invited somewhere? Redeem the invite and join.
-    final invitedShopId = await _pendingInviteShopId();
-    if (invitedShopId != null) {
-      final result = await client.rpc(
-        'accept_invite',
-        params: {'target_shop_id': invitedShopId},
-      );
-      if (result == 'joined' || result == 'already_member') {
-        return invitedShopId;
-      }
-    }
-
-    // 3. No membership, no invite.
-    return null;
-  }
-
-  Future<String?> _pendingInviteShopId() async {
-    try {
-      final result = await client.rpc('my_pending_invite_shop');
-      final value = result?.toString();
-      return value == null || value.isEmpty ? null : value;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Push shop data only if the current user is admin/owner.
-  Future<void> _pushShopIfAdmin(String shopId) async {
-    if (!await _isShopAdmin(shopId)) return; // Staff — skip shop push.
-    final rows = await database.cloudExportRows('shops');
-    if (rows.isEmpty) return;
-    await client.from('shops').upsert(rows, onConflict: 'uuid');
-  }
-
-  Future<void> _pushTable(
-    String table, {
-    String? updatedAfter,
-    required bool canPushAdminTables,
-  }) async {
-    if (_adminManagedTables.contains(table) && !canPushAdminTables) return;
-    var rows = await database.cloudExportRows(
-      table,
-      updatedAfter: updatedAfter,
-    );
-    rows = await _onlyRowsNewerThanCloud(table, rows);
-    if (rows.isEmpty) return;
-    await client
-        .from(table)
-        .upsert(
-          rows,
-          onConflict: table == 'app_settings' ? 'shop_id,key' : 'uuid',
-        );
-  }
-
-  Future<bool> _isShopAdmin(String shopId) async {
-    try {
-      final result = await client.rpc(
-        'is_shop_admin',
-        params: {'target_shop_id': shopId},
-      );
-      return result == true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _onlyRowsNewerThanCloud(
-    String table,
-    List<Map<String, dynamic>> rows,
-  ) async {
-    if (rows.isEmpty) return rows;
-
-    if (table == 'app_settings') {
-      final shopIds = rows
-          .map((row) => row['shop_id']?.toString())
-          .whereType<String>()
-          .toSet();
-      final remoteRows = <Map<String, dynamic>>[];
-      for (final shopId in shopIds) {
-        final response = await client
-            .from(table)
-            .select('shop_id,key,updated_at')
-            .eq('shop_id', shopId);
-        remoteRows.addAll(
-          (response as List).map(
-            (row) => Map<String, dynamic>.from(row as Map),
-          ),
-        );
-      }
-      final remoteUpdatedByKey = {
-        for (final row in remoteRows)
-          '${row['shop_id']}::${row['key']}': row['updated_at']?.toString(),
-      };
-      return rows.where((row) {
-        final key = '${row['shop_id']}::${row['key']}';
-        return _timestampIsNewer(
-          row['updated_at']?.toString(),
-          remoteUpdatedByKey[key],
-        );
-      }).toList();
-    }
-
-    final uuids = rows
-        .map((row) => row['uuid']?.toString())
-        .whereType<String>()
-        .where((uuid) => uuid.isNotEmpty)
-        .toList();
-    if (uuids.isEmpty) return rows;
-
-    final remoteUpdatedByUuid = <String, String?>{};
-    for (var start = 0; start < uuids.length; start += 100) {
-      final end = start + 100 < uuids.length ? start + 100 : uuids.length;
-      final response = await client
-          .from(table)
-          .select('uuid,updated_at')
-          .inFilter('uuid', uuids.sublist(start, end));
-      for (final row in response as List) {
-        final map = Map<String, dynamic>.from(row as Map);
-        final uuid = map['uuid']?.toString();
-        if (uuid != null && uuid.isNotEmpty) {
-          remoteUpdatedByUuid[uuid] = map['updated_at']?.toString();
-        }
-      }
-    }
-
-    return rows.where((row) {
-      final uuid = row['uuid']?.toString();
-      if (uuid == null || uuid.isEmpty) return false;
-      return _timestampIsNewer(
-        row['updated_at']?.toString(),
-        remoteUpdatedByUuid[uuid],
-      );
-    }).toList();
-  }
-
-  Future<List<Map<String, dynamic>>> _pullTable(
-    String table, {
-    required String shopId,
-    String? updatedAfter,
-  }) async {
-    dynamic query = client.from(table).select();
-    if (table == 'shops') {
-      query = query.eq('uuid', shopId);
-    } else if (table != 'profiles') {
-      query = query.eq('shop_id', shopId);
-    }
-    if (updatedAfter != null) {
-      query = query.gt('updated_at', updatedAfter);
-    }
-    final response = await query.order('updated_at', ascending: true);
-    return (response as List)
-        .map((row) => Map<String, dynamic>.from(row as Map))
-        .toList();
-  }
-}
-
-bool _timestampIsNewer(String? candidate, String? existing) {
-  if (candidate == null || candidate.isEmpty) return false;
-  if (existing == null || existing.isEmpty) return true;
-  final candidateDate = DateTime.tryParse(candidate);
-  final existingDate = DateTime.tryParse(existing);
-  if (candidateDate != null && existingDate != null) {
-    return candidateDate.isAfter(existingDate);
-  }
-  return candidate.compareTo(existing) > 0;
 }

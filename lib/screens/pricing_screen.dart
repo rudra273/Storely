@@ -91,9 +91,9 @@ class _PricingScreenState extends State<PricingScreen> {
       await DatabaseHelper.instance.refreshAllProductSellingPrices();
       if (!mounted) return;
       setState(() => _settings = updated);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pricing defaults saved')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pricing defaults saved')));
     } catch (e) {
       _showError(e);
     } finally {
@@ -268,13 +268,19 @@ class _CategoryPricingRow extends StatelessWidget {
     if (p == null) return 'Using defaults';
     final parts = <String>[];
     if (p.gstPercent != null) {
-      parts.add('GST ${p.gstPercent!.toStringAsFixed(p.gstPercent! % 1 == 0 ? 0 : 2)}%');
+      parts.add(
+        'GST ${p.gstPercent!.toStringAsFixed(p.gstPercent! % 1 == 0 ? 0 : 2)}%',
+      );
     }
     if (p.profitMarginPercent != null) {
-      parts.add('Margin ${p.profitMarginPercent!.toStringAsFixed(p.profitMarginPercent! % 1 == 0 ? 0 : 2)}%');
+      parts.add(
+        'Margin ${p.profitMarginPercent!.toStringAsFixed(p.profitMarginPercent! % 1 == 0 ? 0 : 2)}%',
+      );
     }
     if (p.overheadCost != null) {
-      parts.add('OH ₹${p.overheadCost!.toStringAsFixed(p.overheadCost! % 1 == 0 ? 0 : 2)}');
+      parts.add(
+        'OH ₹${p.overheadCost!.toStringAsFixed(p.overheadCost! % 1 == 0 ? 0 : 2)}',
+      );
     }
     return parts.isEmpty ? 'Using defaults' : parts.join(' • ');
   }
@@ -296,7 +302,9 @@ class _CategoryPricingRow extends StatelessWidget {
         children: [
           LeadingIconChip(
             icon: Icons.sell_outlined,
-            color: hasOverride ? AppColors.amber : AppColors.inkMutedOf(context),
+            color: hasOverride
+                ? AppColors.amber
+                : AppColors.inkMutedOf(context),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -426,8 +434,7 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
         children: [
           _MoneyField(
             controller: _gstCtrl,
-            label:
-                'GST % (blank = ${g.defaultGstPercent.toStringAsFixed(2)}%)',
+            label: 'GST % (blank = ${g.defaultGstPercent.toStringAsFixed(2)}%)',
           ),
           const SizedBox(height: 10),
           _MoneyField(

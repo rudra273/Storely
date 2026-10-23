@@ -14,7 +14,16 @@ class _BillCard extends StatefulWidget {
   onStatusChanged;
   final VoidCallback onRecordPayment;
 
+  /// Admin action to issue a credit note (sales return); null when not
+  /// allowed for this bill.
+  final VoidCallback? onReturn;
+
+  /// Not uploaded to cloud yet (only set when the phone syncs).
+  final bool waitingToSync;
+
   const _BillCard({
+    this.onReturn,
+    this.waitingToSync = false,
     required this.bill,
     required this.onCancel,
     required this.onEdit,
@@ -34,7 +43,29 @@ class _BillCardState extends State<_BillCard> {
   Future<void> _togglePaidStatus() async {
     final bill = widget.bill;
     if (bill.isPaid) {
-      widget.onStatusChanged(false, null, null);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Mark as unpaid?'),
+          content: Text(
+            'This removes all recorded payments on this bill '
+            '(${rupees(bill.paidAmount)}). '
+            'Use this only to correct a mistake.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep Paid'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              child: Text(context.l10n.markUnpaid),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) widget.onStatusChanged(false, null, null);
       return;
     }
     final method = await showDialog<String>(
@@ -46,12 +77,12 @@ class _BillCardState extends State<_BillCard> {
           TextButton.icon(
             onPressed: () => Navigator.pop(ctx, 'cash'),
             icon: const Icon(Icons.payments_outlined),
-            label: const Text('Cash'),
+            label: Text(context.l10n.cash),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, 'online'),
             icon: const Icon(Icons.account_balance_wallet_outlined),
-            label: const Text('Online'),
+            label: Text(context.l10n.online),
           ),
         ],
       ),
@@ -69,35 +100,26 @@ class _BillCardState extends State<_BillCard> {
   /// Prompts for an optional online transaction id. Returns the entered value
   /// (may be empty/null); a dismissed dialog also yields null. The bill is still
   /// marked paid either way — the id is optional.
-  Future<String?> _promptTransactionId() async {
-    final ctrl = TextEditingController();
+  Future<String?> _promptTransactionId() {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => const _TransactionIdDialog(),
+    );
+  }
+
+  Future<void> _print() async {
     try {
-      return await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Transaction ID'),
-          content: TextField(
-            controller: ctrl,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(
-              labelText: 'Transaction ID (optional)',
-              prefixIcon: Icon(Icons.receipt_long_outlined),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Skip'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
+      await ThermalPrinterService.instance.printBill(widget.bill);
+    } on PrinterException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Printing failed. Try again.')),
       );
-    } finally {
-      ctrl.dispose();
     }
   }
 
@@ -162,8 +184,11 @@ class _BillCardState extends State<_BillCard> {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            _PaymentChip(status: bill.paymentStatus),
-                            if (bill.paidAmount > 0) ...[
+                            if (bill.isCreditNote)
+                              const _CreditNoteChip()
+                            else
+                              _PaymentChip(status: bill.paymentStatus),
+                            if (!bill.isCreditNote && bill.paidAmount > 0) ...[
                               const SizedBox(width: 4),
                               _MethodChip(method: bill.paymentMethod),
                             ],
@@ -171,7 +196,7 @@ class _BillCardState extends State<_BillCard> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          rupees(bill.totalAmount),
                           style: AppText.subtitle.copyWith(fontSize: 14),
                         ),
                       ],
@@ -181,7 +206,7 @@ class _BillCardState extends State<_BillCard> {
                       _expanded
                           ? Icons.keyboard_arrow_up
                           : Icons.keyboard_arrow_down,
-                      color: AppColors.inkFaint,
+                      color: AppColors.inkFaintOf(context),
                       size: 20,
                     ),
                   ],
@@ -194,6 +219,24 @@ class _BillCardState extends State<_BillCard> {
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Column(
                   children: [
+                    if (widget.waitingToSync)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _BillMetaRow(
+                          icon: Icons.cloud_upload_outlined,
+                          text: 'Saved on this phone · waiting to sync',
+                        ),
+                      ),
+                    if (bill.isCreditNote && bill.originalBillNumber != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _BillMetaRow(
+                          icon: Icons.undo_rounded,
+                          text:
+                              'Against ${bill.originalBillNumber}'
+                              '${bill.cancelReason == null ? '' : ' · ${bill.cancelReason}'}',
+                        ),
+                      ),
                     if (bill.customerPhone != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -202,7 +245,7 @@ class _BillCardState extends State<_BillCard> {
                             Icon(
                               Icons.phone_outlined,
                               size: 15,
-                              color: AppColors.inkMuted,
+                              color: AppColors.inkMutedOf(context),
                             ),
                             const SizedBox(width: AppSpacing.sm),
                             Text(bill.customerPhone!, style: AppText.caption),
@@ -264,7 +307,7 @@ class _BillCardState extends State<_BillCard> {
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Text(
-                              '₹${item.subtotal.toStringAsFixed(2)}',
+                              rupees(item.subtotal),
                               style: AppText.body.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),
@@ -274,16 +317,23 @@ class _BillCardState extends State<_BillCard> {
                       ),
                     ),
                     const Divider(height: AppSpacing.lg),
-                    if (bill.discountAmount > 0) ...[
+                    if (bill.discountAmount > 0 ||
+                        bill.roundOffAmount != 0) ...[
                       _AmountRow(
-                        label: 'Subtotal',
-                        value: '₹${bill.subtotalAmount.toStringAsFixed(2)}',
+                        label: context.l10n.subtotal,
+                        value: rupees(bill.subtotalAmount),
                       ),
-                      _AmountRow(
-                        label:
-                            'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
-                        value: '−₹${bill.discountAmount.toStringAsFixed(2)}',
-                      ),
+                      if (bill.discountAmount > 0)
+                        _AmountRow(
+                          label:
+                              'Discount ${bill.discountPercent.toStringAsFixed(2)}%',
+                          value: '−${rupees(bill.discountAmount)}',
+                        ),
+                      if (bill.roundOffAmount != 0)
+                        _AmountRow(
+                          label: context.l10n.roundOff,
+                          value: signedRupees(bill.roundOffAmount),
+                        ),
                       const SizedBox(height: AppSpacing.xs),
                     ],
                     Row(
@@ -291,7 +341,7 @@ class _BillCardState extends State<_BillCard> {
                       children: [
                         Text('Total', style: AppText.subtitle),
                         Text(
-                          '₹${bill.totalAmount.toStringAsFixed(2)}',
+                          rupees(bill.totalAmount),
                           style: AppText.subtitle.copyWith(
                             color: AppColors.inkOf(context),
                           ),
@@ -301,12 +351,12 @@ class _BillCardState extends State<_BillCard> {
                     if (bill.paidAmount > 0 || bill.balanceDue > 0) ...[
                       const SizedBox(height: AppSpacing.xs),
                       _AmountRow(
-                        label: 'Paid',
-                        value: '₹${bill.paidAmount.toStringAsFixed(2)}',
+                        label: context.l10n.paid,
+                        value: rupees(bill.paidAmount),
                       ),
                       _AmountRow(
-                        label: 'Balance',
-                        value: '₹${bill.balanceDue.toStringAsFixed(2)}',
+                        label: context.l10n.balance,
+                        value: rupees(bill.balanceDue),
                       ),
                     ],
                     if (bill.transactionReference != null) ...[
@@ -325,51 +375,76 @@ class _BillCardState extends State<_BillCard> {
                           _ActionButton(
                             onPressed: widget.onCancel,
                             icon: Icons.block_rounded,
-                            label: 'Cancel',
+                            label: context.l10n.cancel,
                             color: AppColors.error,
                           ),
-                          _ActionButton(
-                            onPressed: widget.onEdit,
-                            icon: Icons.edit_outlined,
-                            label: 'Edit',
-                            color: AppColors.brandOf(context),
-                          ),
+                          if (!bill.isCreditNote)
+                            _ActionButton(
+                              onPressed: widget.onEdit,
+                              icon: Icons.edit_outlined,
+                              label: context.l10n.edit,
+                              color: AppColors.brandOf(context),
+                            ),
+                          if (widget.onReturn != null)
+                            _ActionButton(
+                              onPressed: widget.onReturn!,
+                              icon: Icons.assignment_return_outlined,
+                              label: context.l10n.returnItems,
+                              color: AppColors.amber,
+                            ),
                         ],
-                        _ActionButton(
-                          onPressed: _togglePaidStatus,
-                          icon: bill.isPaid
-                              ? Icons.pending_actions_outlined
-                              : Icons.check_circle_outline,
-                          label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
-                          color: bill.isPaid
-                              ? AppColors.inkMuted
-                              : AppColors.success,
-                        ),
-                        if (bill.balanceDue > 0)
+                        if (!bill.isCreditNote &&
+                            (!bill.isPaid ||
+                                CloudService.instance.state.value.isAdmin))
+                          _ActionButton(
+                            onPressed: _togglePaidStatus,
+                            icon: bill.isPaid
+                                ? Icons.pending_actions_outlined
+                                : Icons.check_circle_outline,
+                            label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
+                            color: bill.isPaid
+                                ? AppColors.inkMutedOf(context)
+                                : AppColors.success,
+                          ),
+                        if (!bill.isCreditNote && bill.balanceDue > 0)
                           _ActionButton(
                             onPressed: widget.onRecordPayment,
                             icon: Icons.payments_outlined,
-                            label: 'Record Payment',
+                            label: context.l10n.recordPayment,
                             color: AppColors.amber,
                           ),
-                        if (bill.customerPhone != null)
+                        if (!bill.isCreditNote && bill.customerPhone != null)
                           _ActionButton(
                             onPressed: widget.onSendWhatsApp,
                             icon: Icons.send_outlined,
-                            label: 'WhatsApp',
+                            label: context.l10n.whatsapp,
                             color: AppColors.success,
+                          ),
+                        if (ThermalPrinterService.instance.isConfigured)
+                          _ActionButton(
+                            onPressed: _print,
+                            icon: Icons.print_outlined,
+                            label: context.l10n.print,
+                            color: AppColors.brandOf(context),
                           ),
                         _ActionButton(
                           onPressed: widget.onSharePdf,
                           icon: Icons.ios_share_rounded,
-                          label: 'Share',
+                          label: context.l10n.share,
                           color: AppColors.brandOf(context),
                         ),
+                        if (!bill.isCreditNote)
+                          _ActionButton(
+                            onPressed: _showProfitSummary,
+                            icon: Icons.trending_up_rounded,
+                            label: context.l10n.viewProfit,
+                            color: AppColors.brandOf(context),
+                          ),
                         _ActionButton(
-                          onPressed: _showProfitSummary,
-                          icon: Icons.trending_up_rounded,
-                          label: 'View Profit',
-                          color: AppColors.brandOf(context),
+                          onPressed: () => showBillHistory(context, bill),
+                          icon: Icons.history_rounded,
+                          label: context.l10n.history,
+                          color: AppColors.inkMutedOf(context),
                         ),
                       ],
                     ),
@@ -397,7 +472,7 @@ class _BillMetaRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 15, color: AppColors.inkMuted),
+          Icon(icon, size: 15, color: AppColors.inkMutedOf(context)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(child: Text(text, style: AppText.caption)),
         ],
@@ -407,3 +482,25 @@ class _BillMetaRow extends StatelessWidget {
 }
 
 // ── Profit sheet ──────────────────────────────────────────────────────────────
+
+class _CreditNoteChip extends StatelessWidget {
+  const _CreditNoteChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.15),
+        borderRadius: AppRadius.smRadius,
+      ),
+      child: Text(
+        'Credit note',
+        style: AppText.caption.copyWith(
+          color: AppColors.amber,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}

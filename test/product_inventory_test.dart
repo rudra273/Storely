@@ -64,7 +64,10 @@ void main() {
         expect(second.updated, 1);
         expect(products, hasLength(1));
         expect(products.single.quantity, 15);
-        expect(products.single.purchasePrice, 310);
+        expect(
+          products.single.purchasePrice,
+          closeTo(303.3333, 0.001),
+        ); // weighted average
         expect(rows, hasLength(2));
         expect(summaries[products.single.id]!.lastPurchaseDate, secondDate);
         expect(summaries[products.single.id]!.lastPurchasePrice, 310);
@@ -134,7 +137,10 @@ void main() {
 
         expect(result.added, 1);
         expect(products.single.quantity, 15);
-        expect(products.single.purchasePrice, 310);
+        expect(
+          products.single.purchasePrice,
+          closeTo(303.3333, 0.001),
+        ); // weighted average
         expect(rows, hasLength(2));
         expect(rows.map((row) => row['quantity_delta']), [10, 5]);
         expect(rows.map((row) => row['import_row_number']), [1, 2]);
@@ -365,13 +371,123 @@ void main() {
       );
       final rows = await db.cloudExportRows('products');
       final cloudRow = Map<String, dynamic>.from(rows.single)
-        ..['quantity_cache'] = 7.0
+        ..['name'] = 'Synced Item (cloud)'
         ..['updated_at'] = '2026-04-30T06:01:00.000Z';
 
       await db.cloudImportRows('products', [cloudRow]);
 
       final product = await db.getProductById(productId);
-      expect(product!.quantity, 7);
+      expect(product!.name, 'Synced Item (cloud)');
+    });
+  });
+
+  test('re-importing the same purchase file is detected', () async {
+    final date = DateTime(2026, 10, 20);
+    final rows = [
+      Product(
+        name: 'Atta 5kg',
+        mrp: 0,
+        purchasePrice: 230,
+        quantity: 4,
+        source: ProductSource.imported,
+      ),
+    ];
+    expect(await db.wouldImportDuplicate(rows, purchaseDate: date), isFalse);
+
+    await db.commitProductPurchaseBatch(
+      [ProductPurchaseCommit(product: rows.single, quantityAdded: 4)],
+      purchaseDate: date,
+      importedRows: rows,
+    );
+
+    expect(await db.wouldImportDuplicate(rows, purchaseDate: date), isTrue);
+    // Same file on another day is still flagged.
+    expect(
+      await db.wouldImportDuplicate(rows, purchaseDate: DateTime(2026, 10, 21)),
+      isTrue,
+    );
+  });
+
+  group('Inventory controls', () {
+    test('weighted average cost', () {
+      expect(
+        weightedAverageCost(
+          onHand: 10,
+          currentCost: 100,
+          added: 10,
+          addedCost: 120,
+        ),
+        110,
+      );
+      // Nothing on hand (or negative): the new cost wins.
+      expect(
+        weightedAverageCost(
+          onHand: -2,
+          currentCost: 50,
+          added: 4,
+          addedCost: 60,
+        ),
+        60,
+      );
+      expect(
+        weightedAverageCost(
+          onHand: 5,
+          currentCost: 50,
+          added: 0,
+          addedCost: 60,
+        ),
+        50,
+      );
+    });
+
+    test('stock adjustment records a reason and keeps the cost', () async {
+      final id = await db.insertProduct(
+        Product(name: 'Milk', mrp: 30, purchasePrice: 25, quantity: 10),
+      );
+
+      await db.adjustStock(id, delta: -2, reason: StockAdjustmentReason.damage);
+      await db.adjustStock(
+        id,
+        delta: 1,
+        reason: StockAdjustmentReason.returnIn,
+        note: 'Returned unopened',
+      );
+
+      final product = await db.getProductById(id);
+      expect(product!.quantity, 9);
+      expect(product.purchasePrice, 25);
+      final movements = await db.getStockMovementsForProduct(id);
+      final adjustments = movements
+          .where((m) => m.movementType == StockMovementType.adjustment)
+          .toList();
+      expect(adjustments.map((m) => m.reason).toSet(), {
+        StockAdjustmentReason.damage,
+        StockAdjustmentReason.returnIn,
+      });
+      expect(adjustments.map((m) => m.notes).toSet(), {
+        'Damaged',
+        'Returned unopened',
+      });
+    });
+
+    test('reorder level and untracked products for low stock', () async {
+      await db.insertProduct(
+        Product(name: 'Rice', mrp: 60, quantity: 8, reorderLevel: 10),
+      );
+      await db.insertProduct(Product(name: 'Sugar', mrp: 45, quantity: 8));
+      await db.insertProduct(
+        Product(name: 'Tailoring', mrp: 200, quantity: 0, trackStock: false),
+      );
+
+      final products = {for (final p in await db.getAllProducts()) p.name: p};
+      expect(products['Rice']!.isLowStock(5), isTrue);
+      expect(products['Sugar']!.isLowStock(5), isFalse);
+      expect(products['Tailoring']!.isLowStock(5), isFalse);
+      expect(products['Tailoring']!.trackStock, isFalse);
+
+      final low = await db.kpiLowStockProducts(threshold: 5);
+      expect(low.map((r) => r['name']), ['Rice']);
+      expect(await db.kpiOutOfStockCount(), 0);
     });
   });
 }

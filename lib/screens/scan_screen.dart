@@ -1,31 +1,38 @@
+import '../l10n/l10n.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
+import '../services/app_settings_service.dart';
+import '../services/bill_share.dart';
+import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
+import '../models/bill_totals.dart';
 import '../models/customer.dart';
+import '../models/held_bill.dart';
 import '../models/product.dart';
+import '../utils/money.dart';
 
 part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
 part 'scan/bill_summary_widgets.dart';
 part 'scan/bill_draft.dart';
 part 'scan/bill_checkout_sheet.dart';
+part 'scan/quantity_input.dart';
 
 enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
-  final BillingEntryMode initialMode;
+  /// Null opens the mode the shop used last (Scan or Search).
+  final BillingEntryMode? initialMode;
   final Bill? duplicateFromBill;
 
-  const ScanScreen({
-    super.key,
-    this.initialMode = BillingEntryMode.scan,
-    this.duplicateFromBill,
-  });
+  const ScanScreen({super.key, this.initialMode, this.duplicateFromBill});
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -33,17 +40,24 @@ class ScanScreen extends StatefulWidget {
 class _ScanScreenState extends State<ScanScreen> {
   static const _scanCooldown = Duration(seconds: 1);
   static const _invalidScanCooldown = Duration(seconds: 2);
+  // The scanner reports a code ~every 250ms while it stays in frame. The same
+  // code only counts again once it has been out of view for this long, so a
+  // product held under the camera is added once, not once per cooldown.
+  static const _sameCodeHoldWindow = Duration(milliseconds: 1500);
 
   final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
+  Map<int, int> _saleCounts = const {};
   late BillingEntryMode _entryMode;
   bool _isProcessing = false;
   bool _isSavingBill = false;
+  bool _isOpeningBillSheet = false;
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   String? _lastScanned;
+  DateTime? _lastScannedSeenAt;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
   int get _itemCount =>
@@ -52,28 +66,153 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _entryMode = widget.duplicateFromBill == null
-        ? widget.initialMode
-        : BillingEntryMode.manual;
+    _entryMode = widget.duplicateFromBill != null
+        ? BillingEntryMode.manual
+        : widget.initialMode ??
+              (AppSettingsService.instance.billingSearchFirst
+                  ? BillingEntryMode.manual
+                  : BillingEntryMode.scan);
     if (widget.duplicateFromBill != null) {
       _items.addAll(widget.duplicateFromBill!.items.map(_copyItemForNewBill));
+      _draftReady = true;
+    } else {
+      _restoreDraft();
     }
     _productSearchCtrl.addListener(_applyProductSearch);
     _loadProducts();
+    _loadHeldCount();
+  }
+
+  ScaffoldMessengerState? _messenger;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _messenger = ScaffoldMessenger.maybeOf(context);
   }
 
   @override
   void dispose() {
+    // Billing snackbars (e.g. "Restored your unsaved bill") belong to this
+    // screen; the app-wide messenger would otherwise keep showing them.
+    _messenger?.removeCurrentSnackBar();
+    _draftTimer?.cancel();
+    if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
     _productSearchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _loadProducts() async {
-    final products = await DatabaseHelper.instance.getAllProducts();
+  // ── Auto-saved cart and held bills ──
+  //
+  // Every rebuild checks whether the cart changed and, if so, saves it
+  // (debounced) so an app kill or a call mid-bill never loses the cart.
+
+  Timer? _draftTimer;
+  bool _draftReady = false;
+  String _savedDraft = HeldBill.encodeItems(const []);
+  int _heldCount = 0;
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    if (!_draftReady) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
+  }
+
+  void _saveDraftNow() {
+    final encoded = HeldBill.encodeItems(_items);
+    if (encoded == _savedDraft) return;
+    _savedDraft = encoded;
+    DatabaseHelper.instance.saveCartDraft(List.of(_items));
+  }
+
+  Future<void> _restoreDraft() async {
+    final draft = await DatabaseHelper.instance.loadCartDraft();
+    if (!mounted) return;
+    _savedDraft = HeldBill.encodeItems(draft);
+    _draftReady = true;
+    if (draft.isEmpty || _items.isNotEmpty) return;
+    setState(() => _items.addAll(draft));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Restored your unsaved bill (${draft.length} '
+          'item${draft.length == 1 ? '' : 's'})',
+        ),
+        action: SnackBarAction(
+          label: context.l10n.discard,
+          onPressed: () {
+            if (mounted) setState(() => _items.clear());
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadHeldCount() async {
+    final held = await DatabaseHelper.instance.getHeldBills();
+    if (mounted) setState(() => _heldCount = held.length);
+  }
+
+  /// Parks the cart so the next customer can be billed.
+  Future<void> _holdCart() async {
+    if (_items.isEmpty) return;
+    final items = List<BillItem>.of(_items);
+    final first = items.first.productName;
+    final label =
+        '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
+        '${items.length > 1 ? ' +${items.length - 1}' : ''}';
+    await DatabaseHelper.instance.holdBill(label, items);
     if (!mounted) return;
     setState(() {
+      _items.clear();
+      _heldCount++;
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('Held: $label')));
+  }
+
+  Future<void> _openHeldBills() async {
+    final held = await DatabaseHelper.instance.getHeldBills();
+    if (!mounted) return;
+    final chosen = await showModalBottomSheet<HeldBill>(
+      context: context,
+      useSafeArea: true,
+      backgroundColor: AppColors.surfaceOf(context),
+      builder: (_) => _HeldBillsSheet(
+        held: held,
+        onDelete: (bill) async {
+          await DatabaseHelper.instance.deleteHeldBill(bill.id);
+          await _loadHeldCount();
+        },
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    // Swap: the cart being billed is held, so nothing is lost.
+    if (_items.isNotEmpty) await _holdCart();
+    await DatabaseHelper.instance.deleteHeldBill(chosen.id);
+    if (!mounted) return;
+    setState(() => _items.addAll(chosen.items));
+    await _loadHeldCount();
+  }
+
+  Future<void> _loadProducts() async {
+    final products = await DatabaseHelper.instance.getAllProducts();
+    final saleCounts = await DatabaseHelper.instance.getProductSaleCounts();
+    if (!mounted) return;
+    // Frequently sold items first, so the usual items are one tap away.
+    products.sort((a, b) {
+      final byCount = (saleCounts[b.id] ?? 0).compareTo(saleCounts[a.id] ?? 0);
+      return byCount != 0
+          ? byCount
+          : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    setState(() {
       _allProducts = products;
+      _saleCounts = saleCounts;
       _isLoadingProducts = false;
     });
     _applyProductSearch();
@@ -97,16 +236,41 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_isProcessing) return;
     final barcode = capture.barcodes.firstOrNull;
     if (barcode == null || barcode.rawValue == null) return;
 
     final raw = barcode.rawValue!;
-    if (raw == _lastScanned) return; // Avoid duplicate rapid scans
+    final now = DateTime.now();
+    final lastSeenAt = _lastScannedSeenAt;
+    final sameCodeStillInView =
+        raw == _lastScanned &&
+        lastSeenAt != null &&
+        now.difference(lastSeenAt) < _sameCodeHoldWindow;
+    if (raw == _lastScanned) _lastScannedSeenAt = now;
+    if (sameCodeStillInView || _isProcessing) return;
 
     setState(() => _isProcessing = true);
     _lastScanned = raw;
+    _lastScannedSeenAt = now;
 
+    try {
+      await _handleScannedCode(raw);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _showAddedStatus = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not read this code. Try again.'),
+            duration: _invalidScanCooldown,
+          ),
+        );
+      _allowNextScanAfter(_invalidScanCooldown);
+    }
+  }
+
+  Future<void> _handleScannedCode(String raw) async {
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final name = data['name'] as String? ?? 'Unknown';
@@ -180,6 +344,8 @@ class _ScanScreenState extends State<ScanScreen> {
     if (!mounted) return;
     _addBillItem(item);
     HapticFeedback.selectionClick();
+    // Ready for the next item: clear the search after an add.
+    if (_productSearchCtrl.text.isNotEmpty) _productSearchCtrl.clear();
   }
 
   BillItem _copyItemForNewBill(BillItem item) {
@@ -219,9 +385,8 @@ class _ScanScreenState extends State<ScanScreen> {
     final available = _availableStockForItem(item);
     if (available != null) {
       final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
-      if (available <= 0 || currentQty + 1 > available) {
+      if (exceedsStock(currentQty + 1, available)) {
         _showStockLimitMessage(item.productName, available);
-        return;
       }
     }
 
@@ -240,20 +405,25 @@ class _ScanScreenState extends State<ScanScreen> {
     final productId = item.productId;
     if (productId == null) return null;
     for (final product in _allProducts) {
-      if (product.id == productId) return product.quantity;
+      if (product.id == productId) {
+        return product.trackStock ? product.quantity : null;
+      }
     }
     return null;
   }
 
+  /// Selling past the recorded stock is allowed (counts often lag the
+  /// shelf); this only warns, and stock goes negative.
   void _showStockLimitMessage(String productName, double available) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(
-            available <= 0
-                ? '"$productName" is out of stock'
-                : 'Only ${_formatQuantityInput(available)} available for "$productName"',
+            available <= stockQuantityEpsilon
+                ? '"$productName" shows no stock. Added anyway.'
+                : 'Only ${_formatQuantityInput(available)} in stock for '
+                      '"$productName". Added anyway.',
           ),
         ),
       );
@@ -265,12 +435,11 @@ class _ScanScreenState extends State<ScanScreen> {
       setState(() {
         _isProcessing = false;
         _showAddedStatus = false;
-        _lastScanned = null;
       });
     });
   }
 
-  Future<int?> _completeBill({
+  Future<({int id, BillTotals totals})?> _completeBill({
     required String customerName,
     required String? customerPhone,
     required String billType,
@@ -288,11 +457,9 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_isSavingBill) return null;
 
     setState(() => _isSavingBill = true);
-    final subtotal = _subtotal;
     final percent = discountPercent.clamp(0, 100).toDouble();
-    final discount = subtotal * percent / 100;
-    final total = subtotal - discount;
     final shop = await DatabaseHelper.instance.getShopProfile();
+    final settings = await DatabaseHelper.instance.getBillSettings();
     final gstRegistered = shop?.gstRegistered ?? false;
     final shopStateCode = _stateCodeFromGstin(shop?.gstin);
     final supplyStateCode =
@@ -305,7 +472,7 @@ class _ScanScreenState extends State<ScanScreen> {
         shopStateCode != supplyStateCode;
     final itemCopies = _items
         .map(
-          (item) => _taxAdjustedItemCopy(
+          (item) => BillTotals.taxedItem(
             item,
             discountPercent: percent,
             gstRegistered: gstRegistered,
@@ -313,14 +480,12 @@ class _ScanScreenState extends State<ScanScreen> {
           ),
         )
         .toList();
-    final received = paidAmount.clamp(0, total).toDouble();
-    final taxableTotal = itemCopies.fold(
-      0.0,
-      (sum, item) => sum + item.totalTaxableValue,
+    final totals = BillTotals.fromTaxedItems(
+      itemCopies,
+      roundOff: settings.roundOffTotal,
     );
-    final cgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalCgst);
-    final sgstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalSgst);
-    final igstTotal = itemCopies.fold(0.0, (sum, item) => sum + item.totalIgst);
+    final total = totals.grandTotal;
+    final received = paidAmount.clamp(0, total).toDouble();
 
     final bill = Bill(
       billType: billType,
@@ -333,16 +498,17 @@ class _ScanScreenState extends State<ScanScreen> {
       customerGstTradeName: _cleanOptionalText(customerGstTradeName),
       customerAddressSnapshot: _cleanOptionalText(customerAddress),
       placeOfSupplyStateCode: supplyStateCode,
-      subtotalAmount: subtotal,
+      subtotalAmount: totals.subtotal,
       discountPercent: percent,
-      discountAmount: discount,
-      taxableAmount: taxableTotal,
-      cgstAmount: cgstTotal,
-      sgstAmount: sgstTotal,
-      igstAmount: igstTotal,
+      discountAmount: totals.discountAmount,
+      taxableAmount: totals.taxableAmount,
+      cgstAmount: totals.cgstAmount,
+      sgstAmount: totals.sgstAmount,
+      igstAmount: totals.igstAmount,
+      roundOffAmount: totals.roundOffAmount,
       totalAmount: total,
       itemCount: _itemCount,
-      isPaid: received >= total,
+      isPaid: received >= total - 0.005,
       paymentMethod: paymentMethod,
       paidAmount: received,
       transactionReference: transactionReference,
@@ -350,63 +516,37 @@ class _ScanScreenState extends State<ScanScreen> {
     );
 
     try {
-      return await DatabaseHelper.instance.insertBill(bill, itemCopies);
+      final id = await DatabaseHelper.instance.insertBill(bill, itemCopies);
+      return (id: id, totals: totals);
     } finally {
       if (mounted) setState(() => _isSavingBill = false);
     }
   }
 
-  BillItem _taxAdjustedItemCopy(
-    BillItem item, {
-    required double discountPercent,
-    required bool gstRegistered,
-    required bool interState,
-  }) {
-    final quantity = item.quantity;
-    final gstPercent = item.gstPercentSnapshot ?? 0.0;
-    final discountFactor = (1 - discountPercent / 100).clamp(0.0, 1.0);
-    final discountedUnitGross = item.sellingPriceSnapshot * discountFactor;
-    final taxableUnit = gstRegistered && gstPercent > 0
-        ? discountedUnitGross / (1 + gstPercent / 100)
-        : discountedUnitGross;
-    final gstUnit = gstRegistered
-        ? (discountedUnitGross - taxableUnit).clamp(0.0, double.infinity)
-        : 0.0;
-    final cgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
-    final sgstUnit = gstRegistered && !interState ? gstUnit / 2 : 0.0;
-    final igstUnit = gstRegistered && interState ? gstUnit : 0.0;
-
-    return BillItem(
-      uuid: item.uuid,
-      shopId: item.shopId,
-      productId: item.productId,
-      productUuid: item.productUuid,
-      productName: item.productName,
-      hsnCodeSnapshot: item.hsnCodeSnapshot,
-      hsnTypeSnapshot: item.hsnTypeSnapshot,
-      mrp: item.mrp,
-      unit: item.unit,
-      purchasePriceSnapshot: item.purchasePriceSnapshot,
-      sellingPriceSnapshot: item.sellingPriceSnapshot,
-      costSnapshot: item.costSnapshot,
-      profitSnapshot: item.profitSnapshot,
-      commissionSnapshot: item.commissionSnapshot,
-      gstSnapshot: _roundMoney(gstUnit),
-      gstPercentSnapshot: item.gstPercentSnapshot,
-      taxableValueSnapshot: _roundMoney(taxableUnit),
-      cgstAmountSnapshot: _roundMoney(cgstUnit),
-      sgstAmountSnapshot: _roundMoney(sgstUnit),
-      igstAmountSnapshot: _roundMoney(igstUnit),
-      wasDirectPrice: item.wasDirectPrice,
-      quantity: quantity,
-    );
+  Future<void> _openBillSheet() async {
+    if (_items.isEmpty || _isOpeningBillSheet || _isSavingBill) return;
+    _isOpeningBillSheet = true;
+    try {
+      await _runBillCheckout();
+    } finally {
+      _isOpeningBillSheet = false;
+    }
   }
 
-  Future<void> _openBillSheet() async {
-    if (_items.isEmpty) return;
-
+  Future<void> _runBillCheckout() async {
     final customers = await DatabaseHelper.instance.getAllCustomers();
+    final settings = await DatabaseHelper.instance.getBillSettings();
     if (!mounted) return;
+    final cartItems = List<BillItem>.of(_items);
+    // GST-inclusive prices: the payable total does not depend on GST
+    // registration or inter-state supply, only on discount and round-off.
+    BillTotals totalsFor(double discountPercent) => BillTotals.forCart(
+      cartItems,
+      discountPercent: discountPercent,
+      gstRegistered: false,
+      interState: false,
+      roundOff: settings.roundOffTotal,
+    );
 
     try {
       final draft = await showModalBottomSheet<_BillDraft>(
@@ -419,13 +559,13 @@ class _ScanScreenState extends State<ScanScreen> {
         ),
         builder: (_) => _BillCheckoutSheet(
           customers: customers,
-          subtotal: _subtotal,
+          totalsFor: totalsFor,
           itemCount: _itemCount,
           initialBill: widget.duplicateFromBill,
         ),
       );
       if (draft == null) return;
-      final billId = await _completeBill(
+      final saved = await _completeBill(
         customerName: draft.customerName,
         customerPhone: draft.customerPhone,
         billType: draft.billType,
@@ -439,19 +579,27 @@ class _ScanScreenState extends State<ScanScreen> {
         paymentMethod: draft.paymentMethod,
         transactionReference: draft.transactionReference,
       );
-      if (billId == null || !mounted) return;
-      await _showBillCreatedDialog(
-        billId: billId,
+      if (saved == null || !mounted) return;
+      final totalAmount = saved.totals.grandTotal;
+      final itemCount = _itemCount;
+      // The bill is saved: empty the cart now so no path back to this screen
+      // (e.g. Android back on the success dialog) can save it a second time.
+      setState(() => _items.clear());
+      final startNewBill = await _showBillCreatedDialog(
+        billId: saved.id,
         customerName: draft.customerName.trim().isEmpty
             ? 'Walk-in Customer'
             : draft.customerName.trim(),
-        totalAmount:
-            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
-        itemCount: _itemCount,
-        isPaid:
-            draft.paidAmount >=
-            _subtotal * (1 - draft.discountPercent.clamp(0, 100) / 100),
+        totalAmount: totalAmount,
+        itemCount: itemCount,
+        isPaid: draft.paidAmount >= totalAmount - 0.005,
       );
+      if (!mounted) return;
+      if (startNewBill) {
+        _loadProducts(); // stock changed
+      } else {
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (!mounted) return;
       final message = e.toString().replaceFirst('Bad state: ', '');
@@ -461,73 +609,38 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _showBillCreatedDialog({
+  /// Returns true when the user wants to start another bill right away.
+  Future<bool> _showBillCreatedDialog({
     required int billId,
     required String customerName,
     required double totalAmount,
     required int itemCount,
     required bool isPaid,
   }) async {
-    final bills = await DatabaseHelper.instance.getAllBills();
-    final bill = bills.where((bill) => bill.id == billId).firstOrNull;
+    final bill = await DatabaseHelper.instance.getBillById(billId);
     final billLabel = bill?.billNumber.isNotEmpty == true
-        ? bill!.billNumber.replaceFirst(RegExp(r'^SHOP-LOCAL-local-'), 'INV-')
+        ? bill!.billNumber
         : 'Bill #$billId';
-    if (mounted) {
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          icon: const Icon(
-            Icons.check_circle,
-            color: AppColors.success,
-            size: 48,
-          ),
-          title: const Text('Bill Created!'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '₹${totalAmount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
-                style: TextStyle(color: AppColors.textMuted),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.pop(context);
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.brandOf(ctx),
-                foregroundColor: AppColors.isDark(ctx)
-                    ? Colors.black
-                    : Colors.white,
-              ),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      );
-    }
+    if (!mounted) return false;
+    final newBill = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _BillCreatedDialog(
+        bill: bill,
+        totalAmount: totalAmount,
+        summary:
+            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+      ),
+    );
+    return newBill == true;
   }
 
   void _updateQty(int index, int delta) {
     if (delta > 0) {
       final available = _availableStockForItem(_items[index]);
-      if (available != null && _items[index].quantity + delta > available) {
+      if (available != null &&
+          exceedsStock(_items[index].quantity + delta, available)) {
         _showStockLimitMessage(_items[index].productName, available);
-        return;
       }
     }
     setState(() {
@@ -539,10 +652,8 @@ class _ScanScreenState extends State<ScanScreen> {
   void _setQty(int index, double quantity) {
     if (quantity <= 0) return;
     final available = _availableStockForItem(_items[index]);
-    if (available != null && quantity > available) {
+    if (available != null && exceedsStock(quantity, available)) {
       _showStockLimitMessage(_items[index].productName, available);
-      setState(() => _items[index].quantity = available);
-      return;
     }
     setState(() => _items[index].quantity = quantity);
   }
@@ -566,22 +677,20 @@ class _ScanScreenState extends State<ScanScreen> {
     return digits.padLeft(2, '0').substring(0, 2);
   }
 
-  double _roundMoney(double value) => double.parse(value.toStringAsFixed(2));
-
   Widget _buildModeSelector() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: SegmentedButton<BillingEntryMode>(
-        segments: const [
+        segments: [
           ButtonSegment(
             value: BillingEntryMode.scan,
             icon: Icon(Icons.qr_code_scanner_rounded),
-            label: Text('Scan'),
+            label: Text(context.l10n.navScan),
           ),
           ButtonSegment(
             value: BillingEntryMode.manual,
             icon: Icon(Icons.search_rounded),
-            label: Text('Search'),
+            label: Text(context.l10n.search),
           ),
         ],
         selected: {_entryMode},
@@ -598,6 +707,9 @@ class _ScanScreenState extends State<ScanScreen> {
             _entryMode = selection.first;
             _showAddedStatus = false;
           });
+          AppSettingsService.instance.setBillingSearchFirst(
+            selection.first == BillingEntryMode.manual,
+          );
         },
       ),
     );
@@ -623,7 +735,20 @@ class _ScanScreenState extends State<ScanScreen> {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          MobileScanner(onDetect: _onDetect),
+          MobileScanner(
+            onDetect: _onDetect,
+            errorBuilder: (context, error, _) => _ScannerUnavailable(
+              message:
+                  error.errorCode == MobileScannerErrorCode.permissionDenied
+                  ? 'Camera permission is off. Allow it in Settings, or add '
+                        'items by search.'
+                  : 'Camera is not available. Add items by search.',
+              onUseSearch: () {
+                setState(() => _entryMode = BillingEntryMode.manual);
+                AppSettingsService.instance.setBillingSearchFirst(true);
+              },
+            ),
+          ),
           Center(
             child: Container(
               width: 200,
@@ -652,8 +777,8 @@ class _ScanScreenState extends State<ScanScreen> {
                     color: AppColors.success,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text(
-                    'Item added!',
+                  child: Text(
+                    context.l10n.itemAdded,
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
@@ -682,11 +807,22 @@ class _ScanScreenState extends State<ScanScreen> {
           TextField(
             controller: _productSearchCtrl,
             textInputAction: TextInputAction.search,
-            decoration: const InputDecoration(
-              labelText: 'Search products',
+            decoration: InputDecoration(
+              labelText: context.l10n.searchProducts,
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
+          if (_productSearchCtrl.text.isEmpty && _saleCounts.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  context.l10n.frequentlySold,
+                  style: AppText.caption,
+                ),
+              ),
+            ),
           const SizedBox(height: AppSpacing.sm),
           Expanded(
             child: _isLoadingProducts
@@ -694,12 +830,12 @@ class _ScanScreenState extends State<ScanScreen> {
                 : _allProducts.isEmpty
                 ? _ManualEmptyState(
                     icon: Icons.inventory_2_outlined,
-                    message: 'Add products before manual billing',
+                    message: context.l10n.addProductsFirst,
                   )
                 : _filteredProducts.isEmpty
                 ? _ManualEmptyState(
                     icon: Icons.search_off_rounded,
-                    message: 'No matching products',
+                    message: context.l10n.noMatchingProducts,
                   )
                 : ListView.separated(
                     itemCount: _filteredProducts.length,
@@ -721,11 +857,11 @@ class _ScanScreenState extends State<ScanScreen> {
   String _entryHintText() {
     if (_entryMode == BillingEntryMode.scan) {
       return _items.isEmpty
-          ? 'Point camera at product QR code'
+          ? context.l10n.pointCamera
           : '${_items.length} item${_items.length != 1 ? 's' : ''} added';
     }
     if (_items.isNotEmpty) {
-      return '${_items.length} item${_items.length != 1 ? 's' : ''} in bill';
+      return context.l10n.itemsInBill(_items.length);
     }
     return 'Search by product name, code, category or supplier';
   }
@@ -734,166 +870,243 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget build(BuildContext context) {
     final isDark = AppColors.isDark(context);
     final headerSurface = isDark ? AppColors.darkBg : AppColors.navy;
-    return Scaffold(
-      backgroundColor: headerSurface,
-      appBar: AppBar(
-        title: Text(
-          widget.duplicateFromBill != null
-              ? 'Duplicate Bill'
-              : _entryMode == BillingEntryMode.scan
-              ? 'Scan & Bill'
-              : 'Manual Bill',
-        ),
+    return PopScope(
+      canPop: _items.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final discard = await _confirmDiscard();
+        if (!discard || !context.mounted) return;
+        setState(() => _items.clear());
+        Navigator.pop(context);
+      },
+      child: Scaffold(
         backgroundColor: headerSurface,
-        foregroundColor: Colors.white,
-        actions: [
-          const AppInfoAction(
-            title: 'Billing Help',
-            intro:
-                'Build the bill first, then complete checkout with customer and payment details.',
-            sections: [
-              AppInfoSection(
-                title: 'Add items',
-                points: [
-                  'Scan mode reads Storely product labels and barcode values.',
-                  'Manual mode lets you search by product name, code, category, or supplier.',
-                  'Use quantity controls on each bill row before completing the bill.',
-                ],
-              ),
-              AppInfoSection(
-                title: 'Complete bill',
-                points: [
-                  'Before Generate Bill, this screen is your editable draft.',
-                  'Complete Bill opens checkout for customer, discount, and payment details.',
-                  'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
-                  'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
-                  'If stock is insufficient, bill creation is blocked before saving.',
-                ],
-              ),
-            ],
+        appBar: AppBar(
+          title: Text(
+            widget.duplicateFromBill != null
+                ? context.l10n.duplicateBill
+                : _entryMode == BillingEntryMode.scan
+                ? 'Scan & Bill'
+                : context.l10n.manualBill,
           ),
-          if (_items.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() => _items.clear()),
-              child: const Text(
-                'Clear',
-                style: TextStyle(color: AppColors.amber),
-              ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxHeight < 520;
-                final panelHeight = (constraints.maxHeight * 0.42).clamp(
-                  180.0,
-                  280.0,
-                );
-
-                return Column(
-                  children: [
-                    const SizedBox(height: 8),
-                    _buildModeSelector(),
-                    _buildEntryPanel(panelHeight),
-                    if (!compact) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _entryHintText(),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 13,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ] else
-                      const SizedBox(height: 8),
-                    Expanded(child: _buildBillItemsPanel()),
+          backgroundColor: headerSurface,
+          foregroundColor: Colors.white,
+          actions: [
+            AppInfoAction(
+              title: 'Billing Help',
+              intro:
+                  'Build the bill first, then complete checkout with customer and payment details.',
+              sections: [
+                AppInfoSection(
+                  title: context.l10n.addItems,
+                  points: [
+                    'Scan mode reads Storely product labels and barcode values.',
+                    'Manual mode lets you search by product name, code, category, or supplier.',
+                    'Use quantity controls on each bill row before completing the bill.',
                   ],
-                );
-              },
+                ),
+                AppInfoSection(
+                  title: context.l10n.completeBill,
+                  points: [
+                    'Before Generate Bill, this screen is your editable draft.',
+                    'Complete Bill opens checkout for customer, discount, and payment details.',
+                    'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
+                    'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
+                    'Selling more than the recorded stock shows a warning; stock then goes negative.',
+                  ],
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      // ── Bottom Total + Complete Button ──
-      bottomNavigationBar: _items.isNotEmpty
-          ? Container(
-              color: AppColors.bgOf(context),
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.sm,
-              ),
-              child: SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xl,
-                    vertical: AppSpacing.md,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.isDark(context)
-                        ? AppColors.darkSurfaceRaised
-                        : AppColors.navy,
-                    borderRadius: AppRadius.lgRadius,
-                  ),
-                  child: Row(
-                    children: [
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Total',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            '₹${_subtotal.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      TestKeys.tag(
-                        TestKeys.scanBillBtn,
-                        FilledButton.icon(
-                          onPressed: _openBillSheet,
-                          icon: const Icon(Icons.receipt_long_rounded),
-                          label: const Text(
-                            'Bill',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.amber,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                        button: true,
-                      ),
-                    ],
-                  ),
+            if (_heldCount > 0)
+              TextButton.icon(
+                onPressed: _openHeldBills,
+                icon: const Icon(
+                  Icons.inventory_rounded,
+                  color: AppColors.amber,
+                ),
+                label: Text(
+                  context.l10n.heldCount(_heldCount),
+                  style: const TextStyle(color: AppColors.amber),
                 ),
               ),
-            )
-          : null,
+            if (_items.isNotEmpty)
+              IconButton(
+                tooltip: context.l10n.holdBill,
+                onPressed: _holdCart,
+                icon: const Icon(
+                  Icons.pause_circle_outline_rounded,
+                  color: AppColors.amber,
+                ),
+              ),
+            if (_items.isNotEmpty)
+              TextButton(
+                onPressed: _clearWithUndo,
+                child: Text(
+                  context.l10n.clear,
+                  style: TextStyle(color: AppColors.amber),
+                ),
+              ),
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxHeight < 520;
+                  final panelHeight = (constraints.maxHeight * 0.42).clamp(
+                    180.0,
+                    280.0,
+                  );
+
+                  return Column(
+                    children: [
+                      const SizedBox(height: 8),
+                      _buildModeSelector(),
+                      _buildEntryPanel(panelHeight),
+                      if (!compact) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _entryHintText(),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ] else
+                        const SizedBox(height: 8),
+                      Expanded(child: _buildBillItemsPanel()),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        // ── Bottom Total + Complete Button ──
+        bottomNavigationBar: _items.isNotEmpty
+            ? Container(
+                color: AppColors.bgOf(context),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                ),
+                child: SafeArea(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl,
+                      vertical: AppSpacing.md,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.isDark(context)
+                          ? AppColors.darkSurfaceRaised
+                          : AppColors.navy,
+                      borderRadius: AppRadius.lgRadius,
+                    ),
+                    child: Row(
+                      children: [
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context.l10n.total,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.7),
+                                fontSize: 12,
+                              ),
+                            ),
+                            Text(
+                              rupees(_subtotal),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        TestKeys.tag(
+                          TestKeys.scanBillBtn,
+                          FilledButton.icon(
+                            onPressed: _openBillSheet,
+                            icon: const Icon(Icons.receipt_long_rounded),
+                            label: Text(
+                              context.l10n.bill,
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.amber,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                          button: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : null,
+      ),
     );
+  }
+
+  Future<bool> _confirmDiscard() async {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(context.l10n.discardBillQ),
+        content: Text(
+          '${_items.length} item${_items.length == 1 ? '' : 's'} in the cart '
+          'will be removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(context.l10n.keepBilling),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: Text(context.l10n.discard),
+          ),
+        ],
+      ),
+    );
+    return discard == true;
+  }
+
+  void _clearWithUndo() {
+    final removed = List<BillItem>.of(_items);
+    setState(() => _items.clear());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cleared ${removed.length} item${removed.length == 1 ? '' : 's'}',
+          ),
+          action: SnackBarAction(
+            label: context.l10n.undo,
+            onPressed: () {
+              if (!mounted || _items.isNotEmpty) return;
+              setState(() => _items.addAll(removed));
+            },
+          ),
+        ),
+      );
   }
 
   Widget _buildBillItemsPanel() {
@@ -916,7 +1129,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'No items added yet',
+                    context.l10n.noItemsYet,
                     style: TextStyle(color: AppColors.textMuted, fontSize: 14),
                   ),
                 ],
@@ -971,56 +1184,24 @@ class _ScanScreenState extends State<ScanScreen> {
                               onPressed: () => _updateQty(i, -1),
                               icon: const Icon(Icons.remove, size: 18),
                               constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                                minWidth: 48,
+                                minHeight: 48,
                               ),
                             ),
                             SizedBox(
                               width: 44,
-                              child: TextFormField(
-                                key: ValueKey(
-                                  '${item.productName}-${item.mrp}-${item.quantity}',
-                                ),
-                                initialValue: _formatQuantityInput(
-                                  item.quantity,
-                                ),
-                                textAlign: TextAlign.center,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'^\d*\.?\d{0,3}'),
-                                  ),
-                                ],
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  filled: false,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 8,
-                                  ),
-                                  border: InputBorder.none,
-                                ),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                ),
-                                onChanged: (value) {
-                                  final quantity = double.tryParse(value);
-                                  if (quantity != null) {
-                                    _setQty(i, quantity);
-                                  }
-                                },
+                              child: _QuantityInput(
+                                key: ObjectKey(item),
+                                quantity: item.quantity,
+                                onChanged: (quantity) => _setQty(i, quantity),
                               ),
                             ),
                             IconButton(
                               onPressed: () => _updateQty(i, 1),
                               icon: const Icon(Icons.add, size: 18),
                               constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                                minWidth: 48,
+                                minHeight: 48,
                               ),
                             ),
                           ],
@@ -1029,7 +1210,7 @@ class _ScanScreenState extends State<ScanScreen> {
                       const SizedBox(width: 12),
                       // Subtotal
                       Text(
-                        '₹${item.subtotal.toStringAsFixed(2)}',
+                        rupees(item.subtotal),
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,

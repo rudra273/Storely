@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/bill_settings.dart';
 import 'package:storely/models/customer.dart';
 import 'package:storely/models/pricing.dart';
 import 'package:storely/models/product.dart';
@@ -22,6 +23,7 @@ void main() {
   });
 
   tearDown(() async {
+    db.assertAdminMutation = null;
     await db.close();
     await _deleteStorelyDb();
   });
@@ -169,10 +171,260 @@ void main() {
 
       final bills = await db.getAllBills();
       final numbers = bills.map((bill) => bill.billNumber).toList();
-      expect(numbers, contains(endsWith('-0002')));
-      expect(numbers, contains(endsWith('-0003')));
-      expect(numbers, isNot(contains(endsWith('-0001'))));
+      expect(numbers, contains(endsWith('/0002')));
+      expect(numbers, contains(endsWith('/0003')));
+      expect(numbers, isNot(contains(endsWith('/0001'))));
     });
+
+    test('sequence reset onto an existing bill number skips forward', () async {
+      // A pattern without date tokens on a daily reset restarts at 0001
+      // every day. That number already exists, which used to fail the
+      // insert and roll back the sequence, blocking all later bills.
+      // Bill Settings now rejects this pattern, so write it directly the
+      // way an older install could have stored it.
+      await db.getDefaultInvoiceSeriesSettings();
+      final raw = await db.database;
+      await raw.update('invoice_series', {
+        'format_template': 'INV-{SEQ}',
+        'reset_period': 'daily',
+      });
+      Future<void> billOn(DateTime day) => db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          totalAmount: 10,
+          itemCount: 1,
+          createdAt: day,
+        ),
+        [BillItem(productName: 'Item', mrp: 10)],
+      );
+
+      await billOn(DateTime(2026, 10, 22, 10));
+      final cancelled = (await db.getAllBills()).single;
+      await db.cancelBill(cancelled.id!, reason: 'test');
+      await billOn(DateTime(2026, 10, 22, 11));
+      await billOn(DateTime(2026, 10, 23, 10));
+      await billOn(DateTime(2026, 10, 23, 11));
+
+      final numbers = (await db.getAllBills())
+          .map((bill) => bill.billNumber)
+          .toList();
+      expect(numbers, containsAll(['INV-0002', 'INV-0003', 'INV-0004']));
+    });
+
+    test('round-off amount is stored and loaded with the bill', () async {
+      await db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          subtotalAmount: 58.6,
+          roundOffAmount: 0.4,
+          totalAmount: 59,
+          itemCount: 1,
+        ),
+        [BillItem(productName: 'Item', mrp: 58.6)],
+      );
+      final bill = (await db.getAllBills()).single;
+      expect(bill.roundOffAmount, 0.4);
+      expect(bill.totalAmount, 59);
+      expect(bill.paidAmount, 59);
+      expect(bill.balanceDue, 0);
+    });
+
+    test('payment and stock dates are stored in local time', () async {
+      final productId = await db.insertProduct(
+        Product(name: 'Tea', mrp: 0, purchasePrice: 10, quantity: 5),
+      );
+      final product = await db.getProductById(productId);
+      final item = await db.buildBillItemForProduct(product!);
+      final billId = await db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          subtotalAmount: item.subtotal,
+          totalAmount: item.subtotal,
+          itemCount: 1,
+          isPaid: false,
+        ),
+        [item],
+      );
+      // An instant given in UTC must land on the shop's local calendar day.
+      final paidAt = DateTime.utc(2026, 1, 10, 20, 0);
+      await db.recordBillPayment(billId, amount: 1, receivedAt: paidAt);
+      await db.updateBillPaidStatus(billId, true);
+
+      final raw = await db.database;
+      final received = (await raw.query(
+        'bill_payments',
+        orderBy: 'id',
+      )).map((row) => row['received_at'] as String).toList();
+      expect(received.first, paidAt.toLocal().toIso8601String());
+      expect(received.every((value) => !value.endsWith('Z')), isTrue);
+
+      final movements = await raw.query('stock_movements');
+      expect(
+        movements.every((row) => !(row['created_at'] as String).endsWith('Z')),
+        isTrue,
+      );
+
+      final day = paidAt.toLocal().toIso8601String().substring(0, 10);
+      expect(await db.kpiCollected(from: day, to: day), 1);
+    });
+
+    test('getBillById and frequently-sold counts', () async {
+      final tea = await db.insertProduct(
+        Product(name: 'Tea', mrp: 0, purchasePrice: 10, quantity: 50),
+      );
+      final salt = await db.insertProduct(
+        Product(name: 'Salt', mrp: 0, purchasePrice: 10, quantity: 50),
+      );
+      Future<int> sell(int productId) async {
+        final item = await db.buildBillItemForProduct(
+          (await db.getProductById(productId))!,
+        );
+        return db.insertBill(
+          Bill(
+            customerName: 'C',
+            subtotalAmount: item.subtotal,
+            totalAmount: item.subtotal,
+            itemCount: 1,
+          ),
+          [item],
+        );
+      }
+
+      final first = await sell(tea);
+      await sell(tea);
+      await sell(salt);
+
+      final bill = await db.getBillById(first);
+      expect(bill!.items.single.productId, tea);
+      expect(await db.getBillById(99999), isNull);
+      expect(await db.getProductSaleCounts(), {tea: 2, salt: 1});
+    });
+
+    test('held bills and the auto-saved cart', () async {
+      final items = [
+        BillItem(productName: 'Tea', mrp: 120, quantity: 2),
+        BillItem(productName: 'Sugar', mrp: 45, quantity: 1.5, unit: 'kg'),
+      ];
+      final id = await db.holdBill('12:30 PM · Tea +1', items);
+      final held = await db.getHeldBills();
+      expect(held.single.id, id);
+      expect(held.single.label, '12:30 PM · Tea +1');
+      expect(held.single.items.map((i) => i.productName), ['Tea', 'Sugar']);
+      expect(held.single.items.last.quantity, 1.5);
+      expect(held.single.total, 307.5);
+      await db.deleteHeldBill(id);
+      expect(await db.getHeldBills(), isEmpty);
+
+      await db.saveCartDraft(items);
+      expect((await db.loadCartDraft()).length, 2);
+      expect(await db.getHeldBills(), isEmpty, reason: 'draft is not held');
+      await db.saveCartDraft(const []);
+      expect(await db.loadCartDraft(), isEmpty);
+    });
+
+    test('only admins can mark a paid bill unpaid', () async {
+      final billId = await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),
+        [BillItem(productName: 'Item', mrp: 50)],
+      );
+      db.assertAdminMutation = () async =>
+          throw StateError('Only shop admins can do this');
+
+      await expectLater(
+        db.updateBillPaidStatus(billId, false),
+        throwsA(isA<StateError>()),
+      );
+      final stillPaid = (await db.getAllBills()).single;
+      expect(stillPaid.isPaid, isTrue);
+      expect(stillPaid.paidAmount, 50);
+
+      db.assertAdminMutation = null;
+      await db.updateBillPaidStatus(billId, false);
+      final unpaid = (await db.getAllBills()).single;
+      expect(unpaid.isPaid, isFalse);
+
+      // Staff can still collect payment.
+      db.assertAdminMutation = () async =>
+          throw StateError('Only shop admins can do this');
+      await db.updateBillPaidStatus(billId, true);
+      expect((await db.getAllBills()).single.isPaid, isTrue);
+    });
+
+    test('default bill numbers are GST-safe and reset each April', () async {
+      Future<void> billOn(DateTime day) => db.insertBill(
+        Bill(
+          customerName: 'Customer',
+          totalAmount: 10,
+          itemCount: 1,
+          createdAt: day,
+        ),
+        [BillItem(productName: 'Item', mrp: 10)],
+      );
+      await billOn(DateTime(2026, 3, 30));
+      await billOn(DateTime(2026, 3, 31));
+      await billOn(DateTime(2026, 4, 1));
+
+      final numbers = (await db.getAllBills())
+          .map((bill) => bill.billNumber)
+          .toList();
+      expect(
+        numbers,
+        containsAll(['INV/2526/0001', 'INV/2526/0002', 'INV/2627/0001']),
+      );
+      expect(numbers.every((n) => n.length <= 16), isTrue);
+    });
+
+    test('invalid bill number patterns are rejected on save', () async {
+      await expectLater(
+        db.saveDefaultInvoiceSeriesSettings(
+          const InvoiceSeriesSettings(
+            formatTemplate: 'INV-{YYYY}{MM}{DD}-{SEQ}',
+            resetPeriod: 'daily',
+          ),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+      await db.saveDefaultInvoiceSeriesSettings(
+        const InvoiceSeriesSettings(
+          formatTemplate: 'SK/{FY}/{SEQ}',
+          resetPeriod: 'financial_year',
+        ),
+      );
+      final saved = await db.getDefaultInvoiceSeriesSettings();
+      expect(saved.formatTemplate, 'SK/{FY}/{SEQ}');
+    });
+
+    test(
+      'selling decimal stock down to zero is not blocked by drift',
+      () async {
+        final productId = await db.insertProduct(
+          Product(
+            name: 'Loose Dal',
+            mrp: 0,
+            purchasePrice: 100,
+            quantity: 0.3,
+            unit: 'kg',
+          ),
+        );
+        for (var i = 0; i < 3; i++) {
+          final product = await db.getProductById(productId);
+          final item = await db.buildBillItemForProduct(product!);
+          item.quantity = 0.1;
+          await db.insertBill(
+            Bill(
+              customerName: 'Customer',
+              subtotalAmount: item.subtotal,
+              totalAmount: item.subtotal,
+              itemCount: 1,
+            ),
+            [item],
+          );
+        }
+
+        final product = await db.getProductById(productId);
+        expect(product!.quantity, closeTo(0, 1e-9));
+      },
+    );
 
     test('non-GST shop bill items do not snapshot output GST', () async {
       await db.saveGlobalPricingSettings(
@@ -419,27 +671,24 @@ void main() {
       },
     );
 
-    test(
-      'cancelled bills stay traceable via getCancelledBills',
-      () async {
-        final billId = await db.insertBill(
-          Bill(customerName: 'Customer', totalAmount: 120, itemCount: 1),
-          [BillItem(productName: 'Item A', mrp: 120)],
-        );
+    test('cancelled bills stay traceable via getCancelledBills', () async {
+      final billId = await db.insertBill(
+        Bill(customerName: 'Customer', totalAmount: 120, itemCount: 1),
+        [BillItem(productName: 'Item A', mrp: 120)],
+      );
 
-        await db.cancelBill(billId, reason: 'Customer returned');
+      await db.cancelBill(billId, reason: 'Customer returned');
 
-        // Absent from active bills, but recoverable for reference/audit.
-        expect(await db.getAllBills(), isEmpty);
-        final cancelled = await db.getCancelledBills();
-        expect(cancelled, hasLength(1));
-        expect(cancelled.single.id, billId);
-        expect(cancelled.single.cancelReason, 'Customer returned');
-        expect(cancelled.single.lifecycleStatus, Bill.lifecycleCancelled);
-        // Line items are preserved on the cancelled record.
-        expect(cancelled.single.items, hasLength(1));
-      },
-    );
+      // Absent from active bills, but recoverable for reference/audit.
+      expect(await db.getAllBills(), isEmpty);
+      final cancelled = await db.getCancelledBills();
+      expect(cancelled, hasLength(1));
+      expect(cancelled.single.id, billId);
+      expect(cancelled.single.cancelReason, 'Customer returned');
+      expect(cancelled.single.lifecycleStatus, Bill.lifecycleCancelled);
+      // Line items are preserved on the cancelled record.
+      expect(cancelled.single.items, hasLength(1));
+    });
 
     test(
       'saved bill customer snapshots are not changed by customer edit',
@@ -540,31 +789,37 @@ void main() {
     );
 
     test(
-      'bill creation rejects product quantity above available stock',
+      'selling more than the recorded stock is allowed and goes negative',
       () async {
         final productId = await db.insertProduct(
           Product(name: 'Low Stock Item', mrp: 25, quantity: 2),
         );
 
-        expect(
-          () => db.insertBill(
-            Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
-            [
-              BillItem(
-                productId: productId,
-                productName: 'Low Stock Item',
-                mrp: 25,
-                quantity: 5,
-              ),
-            ],
-          ),
-          throwsA(isA<StateError>()),
+        await db.insertBill(
+          Bill(customerName: 'Customer', totalAmount: 125, itemCount: 5),
+          [
+            BillItem(
+              productId: productId,
+              productName: 'Low Stock Item',
+              mrp: 25,
+              quantity: 5,
+            ),
+          ],
         );
 
         final product = await db.getProductById(productId);
-        final bills = await db.getAllBills();
-        expect(product!.quantity, 2);
-        expect(bills, isEmpty);
+        expect(product!.quantity, -3);
+        expect(await db.getAllBills(), hasLength(1));
+
+        // Restocking from negative: the new purchase sets the cost.
+        await db.restockProduct(
+          product.copyWith(purchasePrice: 20),
+          quantityAdded: 10,
+          purchaseDate: DateTime(2026, 10, 23),
+        );
+        final restocked = await db.getProductById(productId);
+        expect(restocked!.quantity, 7);
+        expect(restocked.purchasePrice, 20);
       },
     );
   });

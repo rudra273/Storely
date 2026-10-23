@@ -22,6 +22,8 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
     await _seedBaseData(db);
     await _markMigrationDone(db, _v16BillingBackfillKey);
+    await _markMigrationDone(db, _v21IndexRebuildKey);
+    await _markMigrationDone(db, _gstInvoiceNumberKey);
   }
 
   Future<void> _configureDB(Database db) async {
@@ -33,6 +35,8 @@ mixin DatabaseSchema {
     // one-shot data migrations (each gated by its own marker so it runs once).
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
+    await _ensureV20Columns(db);
+    await _ensureInventoryColumns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -46,7 +50,87 @@ mixin DatabaseSchema {
   Future<void> _ensureSchema(Database db) async {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
+    await _ensureV20Columns(db);
+    await _ensureInventoryColumns(db);
     await _runOneShotMigrations(db);
+    await _ensureSyncTracking(db);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cloud change tracking
+  //
+  // Every synced row carries sync_dirty: 1 = changed on this device and not
+  // yet uploaded, 0 = in sync. SQLite triggers maintain it, so no write path
+  // can forget to:
+  // - a local insert defaults to 1;
+  // - a local update of any synced column sets it to 1;
+  // - a row written by the cloud import sets sync_dirty = 2, which a trigger
+  //   turns into 0 (it came from the cloud, nothing to upload).
+  // Derived columns (stock cache, customer totals, payment summary...) are
+  // recomputed on every device, so changing them never queues an upload.
+  // ---------------------------------------------------------------------------
+
+  static const syncDirtyFromCloud = 2;
+
+  static const _syncTrackedTables = ['shops', ...storelyCloudTables];
+
+  static const _localOnlyColumns = <String, Set<String>>{
+    'products': {'quantity_cache', 'selling_price'},
+    'customers': {'total_purchase_amount', 'bill_count', 'last_purchase_at'},
+    'invoice_series': {'next_sequence', 'last_sequence_key'},
+    'bills': {
+      'paid_amount',
+      'balance_due',
+      'payment_status',
+      'is_paid',
+      'payment_method',
+      'customer_id',
+    },
+  };
+
+  Future<void> _ensureSyncTracking(DatabaseExecutor executor) async {
+    for (final table in _syncTrackedTables) {
+      await _ensureColumns(executor, table, {
+        'sync_dirty': 'INTEGER NOT NULL DEFAULT 1',
+      });
+      final info = await executor.rawQuery('PRAGMA table_info($table)');
+      final excluded = {'id', 'sync_dirty', ...?_localOnlyColumns[table]};
+      final tracked = info
+          .map((row) => row['name'].toString())
+          .where((name) => !excluded.contains(name))
+          .join(', ');
+      await executor.execute('DROP TRIGGER IF EXISTS trg_${table}_dirty');
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_dirty
+        AFTER UPDATE OF $tracked ON $table
+        WHEN NEW.sync_dirty = OLD.sync_dirty
+        BEGIN
+          UPDATE $table SET sync_dirty = 1 WHERE rowid = NEW.rowid;
+        END
+      ''');
+      await executor.execute(
+        'DROP TRIGGER IF EXISTS trg_${table}_from_cloud_update',
+      );
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_from_cloud_update
+        AFTER UPDATE OF sync_dirty ON $table
+        WHEN NEW.sync_dirty = $syncDirtyFromCloud
+        BEGIN
+          UPDATE $table SET sync_dirty = 0 WHERE rowid = NEW.rowid;
+        END
+      ''');
+      await executor.execute(
+        'DROP TRIGGER IF EXISTS trg_${table}_from_cloud_insert',
+      );
+      await executor.execute('''
+        CREATE TRIGGER trg_${table}_from_cloud_insert
+        AFTER INSERT ON $table
+        WHEN NEW.sync_dirty = $syncDirtyFromCloud
+        BEGIN
+          UPDATE $table SET sync_dirty = 0 WHERE rowid = NEW.rowid;
+        END
+      ''');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -59,11 +143,21 @@ mixin DatabaseSchema {
 
   static const _migrationMarkerPrefix = 'migration_done:';
   static const _v16BillingBackfillKey = 'v16_billing_backfill';
+  static const _v21IndexRebuildKey = 'v21_index_rebuild';
+  static const _gstInvoiceNumberKey = 'v2_gst_invoice_number_default';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
     if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
       await _backfillV16Billing(executor);
       await _markMigrationDone(executor, _v16BillingBackfillKey);
+    }
+    if (!await _isMigrationDone(executor, _v21IndexRebuildKey)) {
+      await _rebuildV21Indexes(executor);
+      await _markMigrationDone(executor, _v21IndexRebuildKey);
+    }
+    if (!await _isMigrationDone(executor, _gstInvoiceNumberKey)) {
+      await _moveLegacyInvoiceDefault(executor);
+      await _markMigrationDone(executor, _gstInvoiceNumberKey);
     }
   }
 
@@ -101,6 +195,25 @@ mixin DatabaseSchema {
     await _createPaymentTables(executor);
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
+    await _createHeldBillTables(executor);
+    await _createExpenseTables(executor);
+    await _createAuditTables(executor);
+  }
+
+  /// Carts parked with "Hold" (kind 'held') and the auto-saved cart being
+  /// billed (kind 'draft'). Device-local: never synced.
+  Future<void> _createHeldBillTables(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS held_bills(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shop_id TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'held',
+        label TEXT NOT NULL,
+        items_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
   }
 
   /// Seed the local shop and preset reference data. Guarded so it is safe to
@@ -191,6 +304,14 @@ mixin DatabaseSchema {
         show_gst_total INTEGER NOT NULL DEFAULT 1,
         show_grand_total INTEGER NOT NULL DEFAULT 1,
         show_footer_text INTEGER NOT NULL DEFAULT 1,
+        round_off_total INTEGER NOT NULL DEFAULT 1,
+        paper_size TEXT NOT NULL DEFAULT 'a4',
+        upi_id TEXT,
+        show_upi_qr INTEGER NOT NULL DEFAULT 1,
+        show_amount_in_words INTEGER NOT NULL DEFAULT 1,
+        show_hsn_summary INTEGER NOT NULL DEFAULT 1,
+        terms_text TEXT,
+        bank_details TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT
@@ -426,6 +547,10 @@ mixin DatabaseSchema {
         cgst_amount REAL NOT NULL DEFAULT 0,
         sgst_amount REAL NOT NULL DEFAULT 0,
         igst_amount REAL NOT NULL DEFAULT 0,
+        round_off_amount REAL NOT NULL DEFAULT 0,
+        document_type TEXT NOT NULL DEFAULT 'invoice',
+        original_bill_uuid TEXT,
+        original_bill_number TEXT,
         total_amount REAL NOT NULL,
         item_count INTEGER NOT NULL,
         is_paid INTEGER NOT NULL DEFAULT 1,
@@ -470,6 +595,7 @@ mixin DatabaseSchema {
         igst_amount_snapshot REAL NOT NULL DEFAULT 0,
         was_direct_price INTEGER NOT NULL DEFAULT 1,
         quantity REAL NOT NULL DEFAULT 0,
+        original_item_uuid TEXT,
         subtotal REAL NOT NULL,
         device_id TEXT,
         created_at TEXT NOT NULL,
@@ -668,9 +794,9 @@ mixin DatabaseSchema {
       'uuid': _newUuid(),
       'shop_id': shopId,
       'name': 'Default',
-      'format_template': 'INV-{YYYY}{MM}{DD}-{SEQ}',
+      'format_template': InvoiceNumbering.defaultTemplate,
       'sequence_padding': 4,
-      'reset_period': 'daily',
+      'reset_period': InvoiceNumbering.defaultResetPeriod,
       'allocation_mode': 'local_device',
       'next_sequence': 1,
       'is_default': 1,
@@ -715,6 +841,10 @@ mixin DatabaseSchema {
       'cgst_amount': 'REAL NOT NULL DEFAULT 0',
       'sgst_amount': 'REAL NOT NULL DEFAULT 0',
       'igst_amount': 'REAL NOT NULL DEFAULT 0',
+      'round_off_amount': 'REAL NOT NULL DEFAULT 0',
+      'document_type': "TEXT NOT NULL DEFAULT 'invoice'",
+      'original_bill_uuid': 'TEXT',
+      'original_bill_number': 'TEXT',
       'paid_amount': 'REAL NOT NULL DEFAULT 0',
       'balance_due': 'REAL NOT NULL DEFAULT 0',
       'payment_status': "TEXT NOT NULL DEFAULT 'unpaid'",
@@ -724,6 +854,7 @@ mixin DatabaseSchema {
       'duplicated_from_bill_uuid': 'TEXT',
     });
     await _ensureColumns(executor, 'bill_items', {
+      'original_item_uuid': 'TEXT',
       'hsn_code_snapshot': 'TEXT',
       'hsn_type_snapshot': 'TEXT',
       'gst_percent_snapshot': 'REAL',
@@ -758,7 +889,111 @@ mixin DatabaseSchema {
       'show_gst_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_grand_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_footer_text': 'INTEGER NOT NULL DEFAULT 1',
+      'round_off_total': 'INTEGER NOT NULL DEFAULT 1',
+      'paper_size': "TEXT NOT NULL DEFAULT 'a4'",
+      'upi_id': "TEXT",
+      'show_upi_qr': "INTEGER NOT NULL DEFAULT 1",
+      'show_amount_in_words': "INTEGER NOT NULL DEFAULT 1",
+      'show_hsn_summary': "INTEGER NOT NULL DEFAULT 1",
+      'terms_text': "TEXT",
+      'bank_details': "TEXT",
     });
+  }
+
+  /// Columns added by the v20 stock_movements redesign. Installs that created
+  /// the table before v20 (DB <= 16) never get them from CREATE TABLE IF NOT
+  /// EXISTS, and every stock write references them — without this, upgraded
+  /// devices throw "no such column" on the first bill or purchase entry.
+  Future<void> _ensureV20Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'stock_movements', {
+      'supplier_id': 'INTEGER REFERENCES suppliers(id)',
+      'supplier_uuid': 'TEXT',
+      'source_document_type': 'TEXT',
+      'source_document_id': 'INTEGER',
+      'source_document_uuid': 'TEXT',
+      'import_row_number': 'INTEGER',
+    });
+  }
+
+  /// 2.0 inventory controls: per-product stock tracking and reorder level,
+  /// and a reason on manual stock adjustments.
+  Future<void> _ensureInventoryColumns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'products', {
+      'track_stock': 'INTEGER NOT NULL DEFAULT 1',
+      'reorder_level': 'REAL',
+    });
+    await _ensureColumns(executor, 'stock_movements', {'reason': 'TEXT'});
+  }
+
+  /// v20 changed these index definitions but kept their names, so the CREATE
+  /// INDEX IF NOT EXISTS in [_createCleanSchema] silently keeps the old
+  /// definitions on upgraded devices. Drop and recreate them once. Duplicate
+  /// product codes/barcodes that the old non-unique indexes allowed are
+  /// cleared (the newest row keeps the value) so the UNIQUE indexes can build.
+  Future<void> _rebuildV21Indexes(DatabaseExecutor executor) async {
+    await executor.execute('DROP INDEX IF EXISTS idx_stock_movements_source');
+    await executor.execute('''
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_source
+      ON stock_movements(source_document_type, source_document_uuid)
+    ''');
+
+    await _clearDuplicateProductValues(executor, 'product_code');
+    await executor.execute(
+      'DROP INDEX IF EXISTS idx_products_shop_product_code',
+    );
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_product_code
+      ON products(shop_id, LOWER(product_code))
+      WHERE product_code IS NOT NULL AND TRIM(product_code) != '' AND deleted_at IS NULL
+    ''');
+
+    await _clearDuplicateProductValues(executor, 'barcode');
+    await executor.execute('DROP INDEX IF EXISTS idx_products_shop_barcode');
+    await executor.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_barcode
+      ON products(shop_id, LOWER(barcode))
+      WHERE barcode IS NOT NULL AND TRIM(barcode) != '' AND deleted_at IS NULL
+    ''');
+  }
+
+  /// The pre-2.0 default bill number (INV-20261023-0001) is 17 characters,
+  /// over the GST limit of 16, and resets daily. Series nobody customised
+  /// move to the GST-safe financial-year default; custom patterns are kept.
+  Future<void> _moveLegacyInvoiceDefault(DatabaseExecutor executor) async {
+    await executor.update(
+      'invoice_series',
+      {
+        'format_template': InvoiceNumbering.defaultTemplate,
+        'reset_period': InvoiceNumbering.defaultResetPeriod,
+        'next_sequence': 1,
+        'last_sequence_key': null,
+        'updated_at': _nowIso(),
+      },
+      where: 'format_template = ? AND deleted_at IS NULL',
+      whereArgs: [InvoiceNumbering.legacyTemplate],
+    );
+  }
+
+  /// The predicate and grouping here must mirror the partial UNIQUE index
+  /// expression exactly — that is what guarantees the index build cannot fail
+  /// after this runs.
+  Future<void> _clearDuplicateProductValues(
+    DatabaseExecutor executor,
+    String column,
+  ) async {
+    await executor.rawUpdate(
+      '''
+      UPDATE products
+      SET $column = NULL, updated_at = ?
+      WHERE $column IS NOT NULL AND TRIM($column) != '' AND deleted_at IS NULL
+        AND id NOT IN (
+          SELECT MAX(id) FROM products
+          WHERE $column IS NOT NULL AND TRIM($column) != '' AND deleted_at IS NULL
+          GROUP BY shop_id, LOWER($column)
+        )
+    ''',
+      [_nowIso()],
+    );
   }
 
   Future<void> _ensureColumns(
@@ -873,85 +1108,62 @@ mixin DatabaseSchema {
     }
 
     final existingCustomers = await executor.query('customers');
-    final customerIdsByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: customer['id'] as int,
-    };
-    final customerUuidsByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: customer['uuid'] as String,
-    };
-    final customerNamesByPhone = {
-      for (final customer in existingCustomers)
-        if (customer['phone'] != null)
-          customer['phone'] as String: _normaliseName(
-            customer['name']?.toString(),
-          ),
-    };
     final now = _nowIso();
 
-    await executor.update('customers', {
-      'total_purchase_amount': 0,
-      'bill_count': 0,
-      'last_purchase_at': null,
-      'updated_at': now,
-    });
+    // Aggregates (total, count, last purchase) are derived from bills on
+    // every device, so they are written only when they change and never bump
+    // updated_at; bills are re-linked only when their link is wrong. This
+    // runs every time customers load, and used to re-stamp every customer and
+    // bill, which made them all "newer" and overwrote other phones' edits.
+    final customersByPhone = {
+      for (final customer in existingCustomers)
+        if (customer['phone'] != null) customer['phone'] as String: customer,
+    };
+    for (final customer in existingCustomers) {
+      final phone = customer['phone'] as String?;
+      if (phone != null && ledgers.containsKey(phone)) continue;
+      await _setCustomerAggregates(
+        executor,
+        customer,
+        total: 0,
+        count: 0,
+        lastPurchaseAt: null,
+      );
+    }
 
     for (final ledger in ledgers.values) {
-      final existingId = customerIdsByPhone[ledger.phone];
-      final existingName = customerNamesByPhone[ledger.phone];
-      final data = {
-        'name': existingName ?? ledger.name,
-        'phone': ledger.phone,
-        'total_purchase_amount': ledger.totalPurchaseAmount,
-        'bill_count': ledger.billCount,
-        'last_purchase_at': ledger.lastPurchaseAt,
-        'gstin': ledger.gstin,
-        'gst_legal_name': ledger.gstLegalName,
-        'gst_trade_name': ledger.gstTradeName,
-        'address': ledger.address,
-        'gst_source': ledger.gstin == null ? null : 'manual',
-        'gst_verified_at': ledger.gstin == null ? null : now,
-        'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
-        'updated_at': now,
-      };
-      if (existingId != null) {
-        data
-          ..remove('gstin')
-          ..remove('gst_legal_name')
-          ..remove('gst_trade_name')
-          ..remove('address')
-          ..remove('gst_source')
-          ..remove('gst_verified_at')
-          ..remove('place_of_supply_state_code');
-      }
-
-      final customerId =
-          existingId ??
-          await executor.insert('customers', {
-            ...data,
-            'uuid': _newUuid(),
-            'shop_id': await _activeShopId(executor),
-            'created_at': now,
-          });
-      final customerUuid =
-          customerUuidsByPhone[ledger.phone] ??
-          (await executor.query(
-                'customers',
-                columns: ['uuid'],
-                where: 'id = ?',
-                whereArgs: [customerId],
-                limit: 1,
-              )).single['uuid']
-              as String;
-      if (existingId != null) {
-        await executor.update(
-          'customers',
-          data,
-          where: 'id = ?',
-          whereArgs: [existingId],
+      final existing = customersByPhone[ledger.phone];
+      int customerId;
+      String customerUuid;
+      if (existing == null) {
+        customerUuid = _newUuid();
+        customerId = await executor.insert('customers', {
+          'uuid': customerUuid,
+          'shop_id': await _activeShopId(executor),
+          'name': ledger.name,
+          'phone': ledger.phone,
+          'total_purchase_amount': ledger.totalPurchaseAmount,
+          'bill_count': ledger.billCount,
+          'last_purchase_at': ledger.lastPurchaseAt,
+          'gstin': ledger.gstin,
+          'gst_legal_name': ledger.gstLegalName,
+          'gst_trade_name': ledger.gstTradeName,
+          'address': ledger.address,
+          'gst_source': ledger.gstin == null ? null : 'manual',
+          'gst_verified_at': ledger.gstin == null ? null : now,
+          'place_of_supply_state_code': ledger.placeOfSupplyStateCode,
+          'created_at': now,
+          'updated_at': now,
+        });
+      } else {
+        customerId = existing['id'] as int;
+        customerUuid = existing['uuid'] as String;
+        await _setCustomerAggregates(
+          executor,
+          existing,
+          total: ledger.totalPurchaseAmount,
+          count: ledger.billCount,
+          lastPurchaseAt: ledger.lastPurchaseAt,
         );
       }
 
@@ -959,11 +1171,37 @@ mixin DatabaseSchema {
         await executor.update(
           'bills',
           {'customer_id': customerId, 'customer_uuid': customerUuid},
-          where: 'id = ?',
-          whereArgs: [billId],
+          where: 'id = ? AND (customer_uuid IS NOT ? OR customer_id IS NOT ?)',
+          whereArgs: [billId, customerUuid, customerId],
         );
       }
     }
+  }
+
+  Future<void> _setCustomerAggregates(
+    DatabaseExecutor executor,
+    Map<String, Object?> customer, {
+    required double total,
+    required int count,
+    required String? lastPurchaseAt,
+  }) async {
+    final currentTotal =
+        (customer['total_purchase_amount'] as num?)?.toDouble() ?? 0;
+    if ((currentTotal - total).abs() < 0.005 &&
+        (customer['bill_count'] as num?)?.toInt() == count &&
+        customer['last_purchase_at'] == lastPurchaseAt) {
+      return;
+    }
+    await executor.update(
+      'customers',
+      {
+        'total_purchase_amount': total,
+        'bill_count': count,
+        'last_purchase_at': lastPurchaseAt,
+      },
+      where: 'id = ?',
+      whereArgs: [customer['id']],
+    );
   }
 }
 

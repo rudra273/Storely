@@ -1,3 +1,6 @@
+import 'bill_totals.dart';
+import '../utils/money.dart';
+
 class Bill {
   static const typeB2c = 'b2c';
   static const typeB2b = 'b2b';
@@ -6,6 +9,8 @@ class Bill {
   static const statusPaid = 'paid';
   static const lifecycleFinalized = 'finalized';
   static const lifecycleCancelled = 'cancelled';
+  static const documentInvoice = 'invoice';
+  static const documentCreditNote = 'credit_note';
 
   final int? id;
   final String uuid;
@@ -30,6 +35,44 @@ class Bill {
   final double cgstAmount;
   final double sgstAmount;
   final double igstAmount;
+
+  /// Added to the line total to reach a whole-rupee grand total (+/- < 0.50).
+  final double roundOffAmount;
+
+  /// [documentInvoice] or [documentCreditNote]. A credit note (sales return)
+  /// carries negative quantities and amounts, so sales and GST totals are
+  /// net of returns, and points at the invoice it reverses.
+  final String documentType;
+  final String? originalBillUuid;
+  final String? originalBillNumber;
+
+  bool get isCreditNote => documentType == documentCreditNote;
+
+  /// The same document with every amount and quantity sign-flipped, so a
+  /// credit note can be printed with positive figures.
+  Bill negated() {
+    double neg(double v) => v == 0 ? 0 : -v;
+    return Bill.fromMap(
+      {
+        ...toMap(),
+        'subtotal_amount': neg(subtotalAmount),
+        'discount_amount': neg(discountAmount),
+        'taxable_amount': neg(taxableAmount),
+        'cgst_amount': neg(cgstAmount),
+        'sgst_amount': neg(sgstAmount),
+        'igst_amount': neg(igstAmount),
+        'round_off_amount': neg(roundOffAmount),
+        'total_amount': neg(totalAmount),
+        'paid_amount': neg(paidAmount),
+        'balance_due': neg(balanceDue),
+        'transaction_reference': transactionReference,
+      },
+      [
+        for (final item in items)
+          BillItem.fromMap({...item.toMap(0), 'quantity': -item.quantity}),
+      ],
+    );
+  }
   final double totalAmount;
   final int itemCount;
   final bool isPaid;
@@ -76,6 +119,10 @@ class Bill {
     this.cgstAmount = 0,
     this.sgstAmount = 0,
     this.igstAmount = 0,
+    this.roundOffAmount = 0,
+    this.documentType = documentInvoice,
+    this.originalBillUuid,
+    this.originalBillNumber,
     required this.totalAmount,
     required this.itemCount,
     this.isPaid = true,
@@ -142,6 +189,10 @@ class Bill {
     'cgst_amount': cgstAmount,
     'sgst_amount': sgstAmount,
     'igst_amount': igstAmount,
+    'round_off_amount': roundOffAmount,
+    'document_type': documentType,
+    'original_bill_uuid': originalBillUuid,
+    'original_bill_number': originalBillNumber,
     'total_amount': totalAmount,
     'item_count': itemCount,
     'is_paid': isPaid ? 1 : 0,
@@ -199,6 +250,12 @@ class Bill {
       cgstAmount: (map['cgst_amount'] as num?)?.toDouble() ?? 0,
       sgstAmount: (map['sgst_amount'] as num?)?.toDouble() ?? 0,
       igstAmount: (map['igst_amount'] as num?)?.toDouble() ?? 0,
+      roundOffAmount: (map['round_off_amount'] as num?)?.toDouble() ?? 0,
+      documentType: map['document_type'] == documentCreditNote
+          ? documentCreditNote
+          : documentInvoice,
+      originalBillUuid: map['original_bill_uuid'] as String?,
+      originalBillNumber: map['original_bill_number'] as String?,
       totalAmount: totalAmount,
       itemCount: map['item_count'] as int,
       isPaid: legacyPaid,
@@ -256,30 +313,49 @@ class BillItem {
   final double igstAmountSnapshot;
   final bool wasDirectPrice;
   double quantity;
+
+  /// On a credit note line: the invoice line being returned.
+  final String? originalItemUuid;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
 
   double get mrp => sellingPriceSnapshot;
-  double get subtotal => sellingPriceSnapshot * quantity;
+
+  /// Line value before bill discount (selling price x qty).
+  double get subtotal => roundMoney(sellingPriceSnapshot * quantity);
   double get totalCost => costSnapshot * quantity;
   double get totalProfit => profitSnapshot * quantity;
   double get totalCommission => commissionSnapshot * quantity;
-  double get totalGst => gstSnapshot * quantity;
-  double get totalTaxableValue => taxableValueSnapshot * quantity;
-  double get totalCgst => cgstAmountSnapshot * quantity;
-  double get totalSgst => sgstAmountSnapshot * quantity;
-  double get totalIgst => igstAmountSnapshot * quantity;
+
+  // Line tax amounts. Each is computed for the whole line and rounded once
+  // (never rounded per unit and then multiplied), and GST is derived as
+  // line amount - taxable so the two always add up. See [BillTotals].
+
+  /// Line value after bill discount, including tax.
+  double get lineAmount =>
+      roundMoney((taxableValueSnapshot + gstSnapshot) * quantity);
+  double get totalTaxableValue => roundMoney(taxableValueSnapshot * quantity);
+  double get totalGst => roundMoney(lineAmount - totalTaxableValue);
+  double get totalIgst => igstAmountSnapshot > 0 ? totalGst : 0;
+  double get totalCgst => cgstAmountSnapshot > 0 ? roundMoney(totalGst / 2) : 0;
+  double get totalSgst =>
+      sgstAmountSnapshot > 0 ? roundMoney(totalGst - totalCgst) : 0;
   double get totalNetProfit => totalProfit - totalCommission;
+
+  /// Profit actually made on this line: taxable value after the bill
+  /// discount minus cost (GST is never profit).
+  double get lineProfit =>
+      roundMoney((taxableValueSnapshot - costSnapshot) * quantity);
   String get unitLabel {
     final value = unit?.trim();
     return value == null || value.isEmpty ? '' : value;
   }
 
   String get priceLabel => unitLabel.isEmpty
-      ? '₹${sellingPriceSnapshot.toStringAsFixed(2)}'
-      : '₹${sellingPriceSnapshot.toStringAsFixed(2)} / $unitLabel';
+      ? rupees(sellingPriceSnapshot)
+      : '${rupees(sellingPriceSnapshot)} / $unitLabel';
   String get quantityLabel {
     final amount = quantity.toStringAsFixed(
       quantity == quantity.roundToDouble() ? 0 : 2,
@@ -313,6 +389,7 @@ class BillItem {
     this.igstAmountSnapshot = 0,
     this.wasDirectPrice = true,
     num quantity = 1,
+    this.originalItemUuid,
     this.deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -358,6 +435,7 @@ class BillItem {
     'igst_amount_snapshot': igstAmountSnapshot,
     'was_direct_price': wasDirectPrice ? 1 : 0,
     'quantity': quantity,
+    'original_item_uuid': originalItemUuid,
     'subtotal': subtotal,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
@@ -399,6 +477,7 @@ class BillItem {
           (map['igst_amount_snapshot'] as num?)?.toDouble() ?? 0,
       wasDirectPrice: (map['was_direct_price'] as int? ?? 1) == 1,
       quantity: (map['quantity'] as num).toDouble(),
+      originalItemUuid: map['original_item_uuid'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

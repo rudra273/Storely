@@ -89,7 +89,7 @@ class _ManualProductTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    isOut ? 'Out' : product.quantityLabel,
+                    isOut ? context.l10n.outOfStock : product.quantityLabel,
                     style: TextStyle(
                       color: isOut
                           ? AppColors.error
@@ -105,6 +105,51 @@ class _ManualProductTile extends StatelessWidget {
                     size: 22,
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown in place of the camera when it is missing or permission is denied,
+/// so billing can continue by search.
+class _ScannerUnavailable extends StatelessWidget {
+  final String message;
+  final VoidCallback onUseSearch;
+
+  const _ScannerUnavailable({required this.message, required this.onUseSearch});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.surfaceOf(context),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.no_photography_outlined,
+                size: 36,
+                color: AppColors.inkMutedOf(context),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppText.caption.copyWith(
+                  color: AppColors.inkMutedOf(context),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              FilledButton.icon(
+                onPressed: onUseSearch,
+                icon: const Icon(Icons.search_rounded),
+                label: Text(context.l10n.searchItemsBtn),
               ),
             ],
           ),

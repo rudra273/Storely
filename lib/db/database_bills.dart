@@ -4,6 +4,7 @@ mixin DatabaseBills {
   Future<Database> get database;
   Future<void> syncCustomersFromBills(DatabaseExecutor executor);
   Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
+  Future<BillSettings> getBillSettings();
   Future<void> _syncProductQuantityCache(
     DatabaseExecutor executor,
     int productId,
@@ -11,7 +12,15 @@ mixin DatabaseBills {
 
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
-    return db.transaction((txn) async {
+    return db.transaction((txn) => _insertBillTxn(txn, bill, items));
+  }
+
+  Future<int> _insertBillTxn(
+    Transaction txn,
+    Bill bill,
+    List<BillItem> items,
+  ) async {
+    {
       final shopId = await _activeShopId(txn);
       final billUuid = bill.uuid.isEmpty ? _newUuid() : bill.uuid;
       final billNumber = bill.billNumber.isEmpty
@@ -31,6 +40,7 @@ mixin DatabaseBills {
         'invoice_series_uuid': billNumber.seriesUuid,
         'customer_id': customerInfo?.id,
         'customer_uuid': customerInfo?.uuid,
+        'created_at': _localIso(bill.createdAt),
         'updated_at': _nowIso(),
       };
       final billId = await txn.insert('bills', billMap..remove('id'));
@@ -42,7 +52,7 @@ mixin DatabaseBills {
               ? shopId
               : item.shopId,
           'bill_uuid': billUuid,
-          'created_at': bill.createdAt.toIso8601String(),
+          'created_at': _localIso(bill.createdAt),
           'updated_at': _nowIso(),
         };
         await txn.insert('bill_items', itemMap..remove('id'));
@@ -64,7 +74,7 @@ mixin DatabaseBills {
           'amount': bill.paidAmount.clamp(0, bill.totalAmount).toDouble(),
           'payment_method': bill.paymentMethod,
           'payment_reference': _normaliseName(bill.transactionReference),
-          'received_at': bill.createdAt.toIso8601String(),
+          'received_at': _localIso(bill.createdAt),
           'created_at': bill.createdAt.toIso8601String(),
           'updated_at': _nowIso(),
         });
@@ -72,7 +82,7 @@ mixin DatabaseBills {
       }
       notifyDatabaseChanged();
       return billId;
-    });
+    }
   }
 
   Future<List<Bill>> getAllBills() async {
@@ -95,6 +105,412 @@ mixin DatabaseBills {
           'transaction_reference': refByBillUuid[map['uuid']],
         }, itemsByBillId[map['id']] ?? const []),
     ];
+  }
+
+  /// Bills dated [from]..[to] (yyyy-MM-dd, inclusive), oldest first, with
+  /// their items. Cancelled bills come back too when [includeCancelled]
+  /// (their items are left out).
+  Future<List<Bill>> getBillsBetween(
+    String from,
+    String to, {
+    bool includeCancelled = false,
+  }) async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where:
+          'shop_id = ? AND substr(created_at, 1, 10) BETWEEN ? AND ?'
+          '${includeCancelled ? '' : ' AND deleted_at IS NULL'}',
+      whereArgs: [await _activeShopId(db), from, to],
+      orderBy: 'created_at ASC, id ASC',
+    );
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: false,
+    );
+    return [
+      for (final map in billMaps)
+        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+    ];
+  }
+
+  // ── Held bills and the auto-saved cart (device-local) ──
+
+  Future<int> holdBill(String label, List<BillItem> items) async {
+    final db = await database;
+    final now = _localIso();
+    return db.insert('held_bills', {
+      'shop_id': await _activeShopId(db),
+      'kind': 'held',
+      'label': label,
+      'items_json': HeldBill.encodeItems(items),
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<List<HeldBill>> getHeldBills() async {
+    final db = await database;
+    final rows = await db.query(
+      'held_bills',
+      where: "kind = 'held' AND shop_id = ?",
+      whereArgs: [await _activeShopId(db)],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(HeldBill.fromMap).toList();
+  }
+
+  Future<void> deleteHeldBill(int id) async {
+    final db = await database;
+    await db.delete('held_bills', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Saves the cart being billed so it survives the app being closed.
+  /// An empty cart clears the draft.
+  Future<void> saveCartDraft(List<BillItem> items) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    await db.transaction((txn) async {
+      await txn.delete(
+        'held_bills',
+        where: "kind = 'draft' AND shop_id = ?",
+        whereArgs: [shopId],
+      );
+      if (items.isEmpty) return;
+      final now = _localIso();
+      await txn.insert('held_bills', {
+        'shop_id': shopId,
+        'kind': 'draft',
+        'label': 'Unsaved bill',
+        'items_json': HeldBill.encodeItems(items),
+        'created_at': now,
+        'updated_at': now,
+      });
+    });
+  }
+
+  Future<List<BillItem>> loadCartDraft() async {
+    final db = await database;
+    final rows = await db.query(
+      'held_bills',
+      where: "kind = 'draft' AND shop_id = ?",
+      whereArgs: [await _activeShopId(db)],
+      limit: 1,
+    );
+    return rows.isEmpty
+        ? const []
+        : HeldBill.decodeItems(rows.single['items_json'] as String);
+  }
+
+  // ── Credit notes (sales returns) ──
+
+  static const creditNoteSettleRefund = 'refund';
+  static const creditNoteSettleAdjust = 'adjust';
+
+  /// Quantity still returnable per invoice line (sold minus already
+  /// returned on active credit notes), keyed by the invoice line uuid.
+  Future<Map<String, double>> returnableQuantities(int billId) async {
+    final db = await database;
+    return _returnableQuantities(db, billId);
+  }
+
+  Future<Map<String, double>> _returnableQuantities(
+    DatabaseExecutor executor,
+    int billId,
+  ) async {
+    final rows = await executor.rawQuery(
+      '''
+      SELECT bi.uuid AS uuid, bi.quantity AS sold,
+        COALESCE((
+          SELECT -SUM(cni.quantity)
+          FROM bill_items cni
+          JOIN bills cn ON cn.id = cni.bill_id
+          WHERE cni.original_item_uuid = bi.uuid
+            AND cni.deleted_at IS NULL AND cn.deleted_at IS NULL
+        ), 0) AS returned
+      FROM bill_items bi
+      WHERE bi.bill_id = ? AND bi.deleted_at IS NULL
+      ''',
+      [billId],
+    );
+    return {
+      for (final row in rows)
+        row['uuid'] as String: roundMoney(
+          (row['sold'] as num).toDouble() - (row['returned'] as num).toDouble(),
+        ),
+    };
+  }
+
+  /// Issues a credit note returning [quantities] (invoice line uuid ->
+  /// quantity) of invoice [billId]. Returned stock goes back to inventory.
+  /// [settlement] is [creditNoteSettleRefund] (money paid back by
+  /// [refundMethod]) or [creditNoteSettleAdjust] (reduces what the customer
+  /// still owes on the invoice). Returns the credit note's bill id.
+  Future<int> createCreditNote({
+    required int billId,
+    required Map<String, double> quantities,
+    required String settlement,
+    String refundMethod = 'cash',
+    String? reason,
+    DateTime? createdAt,
+  }) async {
+    await _requireAdminMutation();
+    final when = createdAt ?? DateTime.now();
+    final db = await database;
+    final settings = await getBillSettings();
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [billId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('Bill not found or cancelled');
+      final original = Bill.fromMap(rows.single);
+      if (original.isCreditNote) {
+        throw StateError('A credit note cannot be returned');
+      }
+      final itemRows = await txn.query(
+        'bill_items',
+        where: 'bill_id = ? AND deleted_at IS NULL',
+        whereArgs: [billId],
+      );
+      final returnable = await _returnableQuantities(txn, billId);
+      final lines = <BillItem>[];
+      for (final row in itemRows) {
+        final item = BillItem.fromMap(row);
+        final qty = quantities[item.uuid] ?? 0;
+        if (qty <= 0) continue;
+        if (qty > (returnable[item.uuid] ?? 0) + stockQuantityEpsilon) {
+          throw ArgumentError(
+            'Only ${_formatDbQuantity(returnable[item.uuid] ?? 0)} of '
+            '"${item.productName}" can be returned',
+          );
+        }
+        lines.add(
+          BillItem(
+            uuid: _newUuid(),
+            productId: item.productId,
+            productUuid: item.productUuid,
+            productName: item.productName,
+            hsnCodeSnapshot: item.hsnCodeSnapshot,
+            hsnTypeSnapshot: item.hsnTypeSnapshot,
+            unit: item.unit,
+            purchasePriceSnapshot: item.purchasePriceSnapshot,
+            sellingPriceSnapshot: item.sellingPriceSnapshot,
+            costSnapshot: item.costSnapshot,
+            profitSnapshot: item.profitSnapshot,
+            commissionSnapshot: item.commissionSnapshot,
+            gstSnapshot: item.gstSnapshot,
+            gstPercentSnapshot: item.gstPercentSnapshot,
+            taxableValueSnapshot: item.taxableValueSnapshot,
+            cgstAmountSnapshot: item.cgstAmountSnapshot,
+            sgstAmountSnapshot: item.sgstAmountSnapshot,
+            igstAmountSnapshot: item.igstAmountSnapshot,
+            wasDirectPrice: item.wasDirectPrice,
+            quantity: -qty,
+            originalItemUuid: item.uuid,
+            createdAt: when,
+          ),
+        );
+      }
+      if (lines.isEmpty) throw ArgumentError('Choose at least one item');
+
+      final totals = BillTotals.fromTaxedItems(
+        lines,
+        roundOff: settings.roundOffTotal,
+      );
+      final refund = -totals.grandTotal; // positive amount owed back
+      if (settlement == creditNoteSettleAdjust &&
+          refund > original.balanceDue + 0.005) {
+        throw ArgumentError(
+          'Adjustment is more than the ${rupees(original.balanceDue)} due on '
+          'this bill. Refund instead.',
+        );
+      }
+
+      final shopId = await _activeShopId(txn);
+      final number = await _allocateCreditNoteNumber(txn, when, shopId);
+      final creditNoteId = await _insertBillTxn(
+        txn,
+        Bill(
+          billNumber: number,
+          billType: original.billType,
+          customerName: original.customerName,
+          customerPhone: original.customerPhone,
+          customerGstin: original.customerGstin,
+          customerGstLegalName: original.customerGstLegalName,
+          customerGstTradeName: original.customerGstTradeName,
+          customerAddressSnapshot: original.customerAddressSnapshot,
+          placeOfSupplyStateCode: original.placeOfSupplyStateCode,
+          subtotalAmount: totals.subtotal,
+          discountPercent: original.discountPercent,
+          discountAmount: totals.discountAmount,
+          taxableAmount: totals.taxableAmount,
+          cgstAmount: totals.cgstAmount,
+          sgstAmount: totals.sgstAmount,
+          igstAmount: totals.igstAmount,
+          roundOffAmount: totals.roundOffAmount,
+          totalAmount: totals.grandTotal,
+          itemCount: lines.length,
+          isPaid: false,
+          paidAmount: 0,
+          documentType: Bill.documentCreditNote,
+          originalBillUuid: original.uuid,
+          originalBillNumber: original.billNumber,
+          cancelReason: _normaliseName(reason),
+          createdAt: when,
+        ),
+        lines,
+      );
+      final creditNote = (await txn.query(
+        'bills',
+        where: 'id = ?',
+        whereArgs: [creditNoteId],
+        limit: 1,
+      )).single;
+
+      // Returned goods back to stock.
+      for (final line in lines) {
+        if (line.productId == null || line.productUuid == null) continue;
+        await _insertBillStockMovement(
+          txn,
+          productId: line.productId!,
+          productUuid: line.productUuid!,
+          movementType: StockMovementType.returnIn,
+          quantityDelta: -line.quantity,
+          sourceType: 'credit_note',
+          sourceDocumentType: 'bill',
+          sourceDocumentId: creditNoteId,
+          sourceDocumentUuid: creditNote['uuid'] as String,
+          createdAt: when,
+        );
+        await _syncProductQuantityCache(txn, line.productId!);
+      }
+
+      // Settle: refund money, or reduce what is owed on the invoice. The
+      // two adjustment rows cancel out in 'collected', since no cash moves.
+      if (refund > 0.005) {
+        final isAdjust = settlement == creditNoteSettleAdjust;
+        await _insertPayment(
+          txn,
+          billId: creditNoteId,
+          bill: creditNote,
+          amount: -refund,
+          paymentMethod: isAdjust ? 'credit_note' : refundMethod,
+          paymentReference: isAdjust ? original.billNumber : null,
+          notes: isAdjust ? 'Adjusted against invoice' : 'Refund',
+          receivedAt: when,
+        );
+        if (isAdjust) {
+          await _insertPayment(
+            txn,
+            billId: billId,
+            bill: rows.single,
+            amount: refund,
+            paymentMethod: 'credit_note',
+            paymentReference: number,
+            notes: 'Credit note',
+            receivedAt: when,
+          );
+        }
+      }
+      await _logBillAudit(
+        txn,
+        billUuid: original.uuid,
+        action: AuditAction.creditNote,
+        details:
+            '$number · ${rupees(refund)} '
+            '${settlement == creditNoteSettleAdjust ? 'adjusted' : 'refunded'}'
+            '${_normaliseName(reason) == null ? '' : ' · ${_normaliseName(reason)}'}',
+      );
+      await syncCustomersFromBills(txn);
+      notifyDatabaseChanged();
+      return creditNoteId;
+    });
+  }
+
+  /// CN/{FY}/{SEQ} with this device's letter; its own per-device counter.
+  Future<String> _allocateCreditNoteNumber(
+    DatabaseExecutor executor,
+    DateTime createdAt,
+    String shopId,
+  ) async {
+    final deviceCode = await _deviceCodeFor(executor, shopId);
+    final resetKey = InvoiceNumbering.resetKey(createdAt, 'financial_year');
+    final counterKey = 'credit_note_seq:$shopId:$resetKey';
+    final stored = await executor.query(
+      'cloud_sync_state',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [counterKey],
+      limit: 1,
+    );
+    var sequence = stored.isEmpty
+        ? 1
+        : int.tryParse(stored.single['value']?.toString() ?? '') ?? 1;
+    String format(int seq) => InvoiceNumbering.format(
+      template: 'CN/{FY}/{SEQ}',
+      date: createdAt,
+      sequence: seq,
+      padding: 4,
+      deviceCode: deviceCode,
+    );
+    var number = format(sequence);
+    while (await _billNumberExists(executor, shopId, number)) {
+      sequence++;
+      number = format(sequence);
+    }
+    await executor.insert('cloud_sync_state', {
+      'key': counterKey,
+      'value': '${sequence + 1}',
+      'updated_at': _nowIso(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return number;
+  }
+
+  /// One bill with its items (including a cancelled one), or null.
+  Future<Bill?> getBillById(int id) async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (billMaps.isEmpty) return null;
+    final items = await _itemsByBillId(db, billMaps, includeDeleted: true);
+    final refs = await _latestPaymentRefByBillUuid(db, billMaps);
+    final map = billMaps.single;
+    return Bill.fromMap({
+      ...map,
+      'transaction_reference': refs[map['uuid']],
+    }, items[map['id']] ?? const []);
+  }
+
+  /// How many bills each product appeared on in the last [days] days, for
+  /// putting frequently sold items first while billing.
+  Future<Map<int, int>> getProductSaleCounts({int days = 60}) async {
+    final db = await database;
+    final since = DateTime.now()
+        .subtract(Duration(days: days))
+        .toIso8601String()
+        .substring(0, 10);
+    final rows = await db.rawQuery(
+      '''
+      SELECT bi.product_id AS product_id, COUNT(DISTINCT bi.bill_id) AS n
+      FROM bill_items bi
+      WHERE bi.deleted_at IS NULL AND bi.product_id IS NOT NULL
+        AND substr(bi.created_at, 1, 10) >= ?
+      GROUP BY bi.product_id
+      ''',
+      [since],
+    );
+    return {
+      for (final row in rows)
+        row['product_id'] as int: (row['n'] as num).toInt(),
+    };
   }
 
   /// Cancelled bills are soft-deleted (deleted_at is set) so they stay out of
@@ -280,6 +696,53 @@ mixin DatabaseBills {
       if (rows.isEmpty || rows.single['deleted_at'] != null) return 0;
       final now = _nowIso();
       final billUuid = rows.single['uuid'] as String;
+      final activeCreditNotes = await txn.query(
+        'bills',
+        columns: ['bill_number'],
+        where: 'original_bill_uuid = ? AND deleted_at IS NULL',
+        whereArgs: [billUuid],
+      );
+      if (activeCreditNotes.isNotEmpty) {
+        throw StateError(
+          'This bill has credit note '
+          '${activeCreditNotes.map((r) => r['bill_number']).join(', ')}. '
+          'Cancel the credit note first.',
+        );
+      }
+      // Cancelling a credit note also undoes its adjustment on the invoice.
+      final creditNoteNumber = await txn.query(
+        'bills',
+        columns: ['bill_number', 'original_bill_uuid'],
+        where: "id = ? AND document_type = 'credit_note'",
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (creditNoteNumber.isNotEmpty) {
+        final originalUuid =
+            creditNoteNumber.single['original_bill_uuid'] as String?;
+        await txn.update(
+          'bill_payments',
+          {'deleted_at': now, 'updated_at': now},
+          where:
+              "bill_uuid = ? AND payment_method = 'credit_note' "
+              'AND payment_reference = ? AND deleted_at IS NULL',
+          whereArgs: [originalUuid, creditNoteNumber.single['bill_number']],
+        );
+        final original = await txn.query(
+          'bills',
+          columns: ['id'],
+          where: 'uuid = ?',
+          whereArgs: [originalUuid],
+          limit: 1,
+        );
+        if (original.isNotEmpty) {
+          await _updateBillPaymentSummary(
+            txn,
+            original.single['id'] as int,
+            originalUuid!,
+          );
+        }
+      }
       final customerId = rows.single['customer_id'] as int?;
       final totalAmount =
           (rows.single['total_amount'] as num?)?.toDouble() ?? 0;
@@ -293,6 +756,9 @@ mixin DatabaseBills {
         if (item.productId != null && item.productUuid != null) {
           await _insertBillStockMovement(
             txn,
+            // Same id on every device: if two phones cancel the same bill,
+            // sync keeps one stock return instead of restoring it twice.
+            uuid: 'void-$billUuid-${item.uuid}',
             productId: item.productId!,
             productUuid: item.productUuid!,
             movementType: StockMovementType.voidSale,
@@ -329,6 +795,14 @@ mixin DatabaseBills {
         where: 'id = ?',
         whereArgs: [id],
       );
+      await _logBillAudit(
+        txn,
+        billUuid: billUuid,
+        action: AuditAction.cancelled,
+        details:
+            '${_normaliseName(reason) ?? 'Cancelled'} · '
+            '${rupees(totalAmount)} · stock returned',
+      );
       if (customerId != null) {
         await _adjustCustomerLedger(
           txn,
@@ -353,6 +827,9 @@ mixin DatabaseBills {
     String? paymentMethod,
     String? paymentReference,
   }) async {
+    // Marking unpaid voids every recorded payment on the bill, so it is an
+    // admin-only correction like cancelling a bill.
+    if (!isPaid) await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
       final rows = await txn.query(
@@ -370,13 +847,30 @@ mixin DatabaseBills {
       final balance = (bill['balance_due'] as num?)?.toDouble() ?? total;
       final now = _nowIso();
       if (!isPaid) {
+        final reversed = roundMoney(total - balance);
         await txn.update(
           'bill_payments',
           {'deleted_at': now, 'updated_at': now},
           where: 'bill_uuid = ? AND deleted_at IS NULL',
           whereArgs: [billUuid],
         );
+        if (reversed > 0.005) {
+          await _logBillAudit(
+            txn,
+            billUuid: billUuid,
+            action: AuditAction.markedUnpaid,
+            details: '${rupees(reversed)} of payments reversed',
+          );
+        }
       } else if (balance > 0.005) {
+        await _logBillAudit(
+          txn,
+          billUuid: billUuid,
+          action: AuditAction.payment,
+          details:
+              '${rupees(balance)} ${_auditMethod(paymentMethod ?? 'cash')}'
+              ' · marked paid',
+        );
         await txn.insert('bill_payments', {
           'uuid': _newUuid(),
           'shop_id': shopId,
@@ -384,7 +878,7 @@ mixin DatabaseBills {
           'amount': balance,
           'payment_method': paymentMethod ?? 'cash',
           'payment_reference': _normaliseName(paymentReference),
-          'received_at': now,
+          'received_at': _localIso(),
           'created_at': now,
           'updated_at': now,
         });
@@ -418,42 +912,151 @@ mixin DatabaseBills {
       if (amount > balance + 0.005) {
         throw ArgumentError('Payment cannot exceed balance due');
       }
-      final now = _nowIso();
-      await txn.insert('bill_payments', {
-        'uuid': _newUuid(),
-        'shop_id':
-            rows.single['shop_id'] as String? ?? await _activeShopId(txn),
-        'bill_uuid': rows.single['uuid'] as String,
-        'amount': amount,
-        'payment_method': paymentMethod,
-        'payment_reference': _normaliseName(paymentReference),
-        'notes': _normaliseName(notes),
-        'received_at': (receivedAt ?? DateTime.now()).toIso8601String(),
-        'created_at': now,
-        'updated_at': now,
-      });
-      await _updateBillPaymentSummary(
+      await _insertPayment(
         txn,
-        billId,
-        rows.single['uuid'] as String,
+        billId: billId,
+        bill: rows.single,
+        amount: amount,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+        notes: notes,
+        receivedAt: receivedAt,
       );
       notifyDatabaseChanged();
       return 1;
     });
   }
 
+  /// One payment from a customer settled against their unpaid bills, oldest
+  /// first, in a single transaction. Returns how many bills it touched.
+  /// Throws if [amount] is more than they owe on [billIds].
+  Future<int> recordCustomerPayment({
+    required List<int> billIds,
+    required double amount,
+    String paymentMethod = 'cash',
+    String? paymentReference,
+    DateTime? receivedAt,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Payment amount must be positive');
+    if (billIds.isEmpty) return 0;
+    final db = await database;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['id', 'uuid', 'shop_id', 'balance_due'],
+        where:
+            'deleted_at IS NULL AND balance_due > 0.005 '
+            'AND id IN (${List.filled(billIds.length, '?').join(',')})',
+        whereArgs: billIds,
+        orderBy: 'created_at ASC, id ASC',
+      );
+      final totalDue = rows.fold<double>(
+        0,
+        (sum, row) => sum + (row['balance_due'] as num).toDouble(),
+      );
+      if (amount > totalDue + 0.005) {
+        throw ArgumentError('Payment cannot exceed the amount due');
+      }
+      var remaining = amount;
+      var touched = 0;
+      for (final row in rows) {
+        if (remaining <= 0.005) break;
+        final balance = (row['balance_due'] as num).toDouble();
+        final part = roundMoney(remaining < balance ? remaining : balance);
+        await _insertPayment(
+          txn,
+          billId: row['id'] as int,
+          bill: row,
+          amount: part,
+          paymentMethod: paymentMethod,
+          paymentReference: paymentReference,
+          notes: 'Customer payment',
+          receivedAt: receivedAt,
+        );
+        remaining = roundMoney(remaining - part);
+        touched++;
+      }
+      notifyDatabaseChanged();
+      return touched;
+    });
+  }
+
+  Future<void> _insertPayment(
+    DatabaseExecutor txn, {
+    required int billId,
+    required Map<String, Object?> bill,
+    required double amount,
+    required String paymentMethod,
+    String? paymentReference,
+    String? notes,
+    DateTime? receivedAt,
+  }) async {
+    final now = _nowIso();
+    final billUuid = bill['uuid'] as String;
+    await txn.insert('bill_payments', {
+      'uuid': _newUuid(),
+      'shop_id': bill['shop_id'] as String? ?? await _activeShopId(txn),
+      'bill_uuid': billUuid,
+      'amount': amount,
+      'payment_method': paymentMethod,
+      'payment_reference': _normaliseName(paymentReference),
+      'notes': _normaliseName(notes),
+      'received_at': _localIso(receivedAt),
+      'created_at': now,
+      'updated_at': now,
+    });
+    if (paymentMethod != 'credit_note') {
+      await _logBillAudit(
+        txn,
+        billUuid: billUuid,
+        action: AuditAction.payment,
+        details: [
+          '${amount < 0 ? 'Refund ' : ''}${rupees(amount.abs())} '
+              '${_auditMethod(paymentMethod)}',
+          ?_normaliseName(notes),
+        ].join(' · '),
+      );
+    }
+    await _updateBillPaymentSummary(txn, billId, billUuid);
+  }
+
+  static String _auditMethod(String method) => switch (method) {
+    'upi' => 'UPI',
+    'card' => 'card',
+    'bank' => 'bank',
+    _ => method,
+  };
+
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
     await _requireAdminMutation();
     final db = await database;
-    final count = await db.update(
-      'bills',
-      {
-        'profit_commission_percent': percent.clamp(0, 100).toDouble(),
-        'updated_at': _nowIso(),
-      },
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    final count = await db.transaction((txn) async {
+      final before = await txn.query(
+        'bills',
+        columns: ['uuid', 'profit_commission_percent'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final value = percent.clamp(0, 100).toDouble();
+      final count = await txn.update(
+        'bills',
+        {'profit_commission_percent': value, 'updated_at': _nowIso()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      final old = (before.firstOrNull?['profit_commission_percent'] as num?)
+          ?.toDouble();
+      if (before.isNotEmpty && old != value) {
+        await _logBillAudit(
+          txn,
+          billUuid: before.single['uuid'] as String,
+          action: AuditAction.commission,
+          details: '${old ?? 0}% → $value%',
+        );
+      }
+      return count;
+    });
     notifyDatabaseChanged();
     return count;
   }
@@ -476,7 +1079,9 @@ mixin DatabaseBills {
     final db = await database;
     final values = <String, Object?>{
       'customer_name': _normaliseName(customerName) ?? 'Walk-in Customer',
-      'customer_phone': _normaliseCustomerPhone(customerPhone),
+      // Stored as typed, like new bills (customers keep the 91-prefixed
+      // form for matching).
+      'customer_phone': _normaliseName(customerPhone),
       'updated_at': _nowIso(),
     };
     if (isB2b) {
@@ -497,20 +1102,59 @@ mixin DatabaseBills {
       values['customer_address_snapshot'] = cleaned.customerAddressSnapshot;
       values['place_of_supply_state_code'] = cleaned.placeOfSupplyStateCode;
     }
-    final count = await db.update(
-      'bills',
-      values,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    final count = await db.transaction((txn) async {
+      final before = await txn.query(
+        'bills',
+        columns: ['uuid', ...values.keys.where((k) => k != 'updated_at')],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final count = await txn.update(
+        'bills',
+        values,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (before.isNotEmpty) {
+        final old = before.single;
+        final changes = [
+          for (final key in values.keys)
+            if (key != 'updated_at' &&
+                (old[key]?.toString() ?? '') != (values[key]?.toString() ?? ''))
+              '${_auditField(key)}: ${old[key] ?? '—'} → ${values[key] ?? '—'}',
+        ];
+        if (changes.isNotEmpty) {
+          await _logBillAudit(
+            txn,
+            billUuid: old['uuid'] as String,
+            action: AuditAction.edited,
+            details: changes.join('\n'),
+          );
+        }
+      }
+      return count;
+    });
     notifyDatabaseChanged();
     return count;
   }
 
+  static String _auditField(String column) => switch (column) {
+    'customer_name' => 'Name',
+    'customer_phone' => 'Phone',
+    'customer_gstin' => 'GSTIN',
+    'customer_gst_legal_name' => 'Legal name',
+    'customer_gst_trade_name' => 'Trade name',
+    'customer_address_snapshot' => 'Address',
+    'place_of_supply_state_code' => 'Place of supply',
+    _ => column,
+  };
+
   Future<int> getBillCount() async {
     final db = await database;
     final r = await db.rawQuery(
-      'SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL',
+      "SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL "
+      "AND document_type <> 'credit_note'",
     );
     return Sqflite.firstIntValue(r) ?? 0;
   }
@@ -546,7 +1190,8 @@ mixin DatabaseBills {
     final db = await database;
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final r = await db.rawQuery(
-      'SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL AND created_at LIKE ?',
+      "SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL "
+      "AND document_type <> 'credit_note' AND created_at LIKE ?",
       ['$today%'],
     );
     return Sqflite.firstIntValue(r) ?? 0;
@@ -603,42 +1248,73 @@ mixin DatabaseBills {
     }
 
     final series = rows.single;
-    final resetKey = _invoiceResetKey(
+    final resetKey = InvoiceNumbering.resetKey(
       createdAt,
       series['reset_period']?.toString(),
     );
     final storedKey = series['last_sequence_key']?.toString();
-    final sequence = storedKey == resetKey
+    var sequence = storedKey == resetKey
         ? (series['next_sequence'] as num?)?.toInt() ?? 1
         : 1;
-    final nextSequence = sequence + 1;
-    final now = _nowIso();
-    await executor.update(
-      'invoice_series',
-      {
-        'next_sequence': nextSequence,
-        'last_sequence_key': resetKey,
-        'updated_at': now,
-      },
-      where: 'id = ?',
-      whereArgs: [series['id']],
-    );
 
     final template =
-        series['format_template']?.toString() ?? 'INV-{YYYY}{MM}{DD}-{SEQ}';
+        series['format_template']?.toString() ??
+        InvoiceNumbering.defaultTemplate;
     final padding = (series['sequence_padding'] as num?)?.toInt() ?? 4;
-    final deviceId = series['device_id']?.toString() ?? 'local';
-    final number = _formatInvoiceNumber(
+    final deviceCode = await _deviceCodeFor(executor, shopId);
+    String format(int seq) => InvoiceNumbering.format(
       template: template,
-      createdAt: createdAt,
-      sequence: sequence,
+      date: createdAt,
+      sequence: seq,
       padding: padding,
-      deviceId: deviceId,
+      deviceCode: deviceCode,
+    );
+
+    // A sequence reset can land on a number that already exists, e.g. a
+    // pattern without date tokens on a daily reset, or a pulled bill from
+    // another device. The unique (shop_id, bill_number) index covers
+    // cancelled bills too, so a collision would fail the insert and roll the
+    // sequence back, blocking every later bill. Skip forward to a free number.
+    var number = format(sequence);
+    var attempts = 0;
+    while (await _billNumberExists(executor, shopId, number)) {
+      if (++attempts > 100000) {
+        throw StateError(
+          'Could not find a free bill number. Check the bill number pattern '
+          'in Bill Settings.',
+        );
+      }
+      sequence++;
+      number = format(sequence);
+    }
+
+    await executor.update(
+      'invoice_series',
+      // This device's own counter (its numbers carry its device letter), so
+      // it is local-only: not synced and no updated_at bump.
+      {'next_sequence': sequence + 1, 'last_sequence_key': resetKey},
+      where: 'id = ?',
+      whereArgs: [series['id']],
     );
     return _BillNumberAllocation(
       number: number,
       seriesUuid: series['uuid']?.toString(),
     );
+  }
+
+  Future<bool> _billNumberExists(
+    DatabaseExecutor executor,
+    String shopId,
+    String billNumber,
+  ) async {
+    final rows = await executor.query(
+      'bills',
+      columns: ['id'],
+      where: 'shop_id = ? AND bill_number = ?',
+      whereArgs: [shopId, billNumber],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   Future<void> _updateBillPaymentSummary(
@@ -664,10 +1340,16 @@ mixin DatabaseBills {
       [billUuid],
     );
     final paid = (paymentRows.single['paid'] as num?)?.toDouble() ?? 0;
-    final due = (total - paid) <= 0.005 ? 0.0 : total - paid;
-    final status = paid <= 0.005
+    // Credit notes are negative (money owed back); compare magnitudes and
+    // keep the sign, so an unrefunded credit note is never 'unpaid' dues.
+    final sign = total < 0 ? -1.0 : 1.0;
+    final totalAbs = total * sign;
+    final paidAbs = paid * sign;
+    final dueAbs = (totalAbs - paidAbs) <= 0.005 ? 0.0 : totalAbs - paidAbs;
+    final due = dueAbs * sign;
+    final status = paidAbs <= 0.005
         ? Bill.statusUnpaid
-        : due <= 0.005
+        : dueAbs <= 0.005
         ? Bill.statusPaid
         : Bill.statusPartial;
     await executor.update(
@@ -680,7 +1362,9 @@ mixin DatabaseBills {
         'payment_method': status == Bill.statusUnpaid
             ? 'cash'
             : await _latestPaymentMethod(executor, billUuid),
-        'updated_at': _nowIso(),
+        // Derived from bill_payments (which sync on their own), so it does not
+        // bump updated_at: a payment on one phone must not overwrite another
+        // phone's edit or cancellation of the bill row.
       },
       where: 'id = ?',
       whereArgs: [billId],
@@ -712,7 +1396,7 @@ mixin DatabaseBills {
     if (item.quantity <= 0 || item.productId == null) return;
     final productRows = await executor.query(
       'products',
-      columns: ['uuid', 'name', 'quantity_cache'],
+      columns: ['uuid'],
       where: 'id = ?',
       whereArgs: [item.productId],
       limit: 1,
@@ -720,14 +1404,8 @@ mixin DatabaseBills {
     if (productRows.isEmpty) {
       throw StateError('Product "${item.productName}" no longer exists');
     }
-    final available =
-        (productRows.single['quantity_cache'] as num?)?.toDouble() ?? 0;
-    if (item.quantity > available) {
-      final name = productRows.single['name']?.toString() ?? item.productName;
-      throw StateError(
-        'Only ${_formatDbQuantity(available)} available for "$name"',
-      );
-    }
+    // Selling more than the recorded stock is allowed (the count is often
+    // behind the shelf); billing warns first and stock goes negative.
     final productUuid =
         item.productUuid ?? productRows.single['uuid'] as String;
     await _insertBillStockMovement(
@@ -747,6 +1425,7 @@ mixin DatabaseBills {
 
   Future<void> _insertBillStockMovement(
     DatabaseExecutor executor, {
+    String? uuid,
     required int productId,
     required String productUuid,
     required String movementType,
@@ -760,7 +1439,7 @@ mixin DatabaseBills {
     final now = DateTime.now().toUtc();
     final shopId = await _activeShopId(executor);
     await executor.insert('stock_movements', {
-      'uuid': _newUuid(),
+      'uuid': uuid ?? _newUuid(),
       'shop_id': shopId,
       'product_id': productId,
       'product_uuid': productUuid,
@@ -770,7 +1449,7 @@ mixin DatabaseBills {
       'source_document_type': sourceDocumentType,
       'source_document_id': sourceDocumentId,
       'source_document_uuid': sourceDocumentUuid,
-      'created_at': (createdAt ?? now).toIso8601String(),
+      'created_at': _localIso(createdAt),
       'updated_at': now.toIso8601String(),
     });
   }
@@ -805,45 +1484,6 @@ String _formatDbQuantity(double value) {
             .toStringAsFixed(3)
             .replaceFirst(RegExp(r'0+$'), '')
             .replaceFirst(RegExp(r'\.$'), '');
-}
-
-String _invoiceResetKey(DateTime createdAt, String? resetPeriod) {
-  final year = createdAt.year.toString().padLeft(4, '0');
-  final month = createdAt.month.toString().padLeft(2, '0');
-  final day = createdAt.day.toString().padLeft(2, '0');
-  switch (resetPeriod) {
-    case 'never':
-      return 'all';
-    case 'monthly':
-      return '$year$month';
-    case 'financial_year':
-      final startYear = createdAt.month >= 4
-          ? createdAt.year
-          : createdAt.year - 1;
-      return 'FY$startYear-${(startYear + 1).toString().substring(2)}';
-    case 'daily':
-    default:
-      return '$year$month$day';
-  }
-}
-
-String _formatInvoiceNumber({
-  required String template,
-  required DateTime createdAt,
-  required int sequence,
-  required int padding,
-  required String deviceId,
-}) {
-  final year = createdAt.year.toString().padLeft(4, '0');
-  final month = createdAt.month.toString().padLeft(2, '0');
-  final day = createdAt.day.toString().padLeft(2, '0');
-  return template
-      .replaceAll('{DEVICE}', deviceId)
-      .replaceAll('{YYYY}', year)
-      .replaceAll('{YY}', year.substring(2))
-      .replaceAll('{MM}', month)
-      .replaceAll('{DD}', day)
-      .replaceAll('{SEQ}', sequence.toString().padLeft(padding, '0'));
 }
 
 class _BillNumberAllocation {
@@ -953,17 +1593,16 @@ Future<void> _adjustCustomerLedger(
   required double amountDelta,
   required int billCountDelta,
 }) async {
-  final now = _nowIso();
+  // Customer totals are derived: no updated_at bump (see sync tracking).
   await executor.rawUpdate(
     '''
     UPDATE customers
     SET
       total_purchase_amount = MAX(total_purchase_amount + ?, 0),
-      bill_count = MAX(bill_count + ?, 0),
-      updated_at = ?
+      bill_count = MAX(bill_count + ?, 0)
     WHERE id = ?
     ''',
-    [amountDelta, billCountDelta, now, customerId],
+    [amountDelta, billCountDelta, customerId],
   );
 }
 

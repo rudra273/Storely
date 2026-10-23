@@ -1,13 +1,14 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import '../main.dart';
+import '../utils/money.dart';
 
 // ── Formatters ──────────────────────────────────────────────────────────────
 String fmtRupee(double v) {
-  if (v >= 1e7) return '₹${(v / 1e7).toStringAsFixed(2)}Cr';
-  if (v >= 1e5) return '₹${(v / 1e5).toStringAsFixed(2)}L';
+  if (v >= 1e7) return '${rupees((v / 1e7))}Cr';
+  if (v >= 1e5) return '${rupees((v / 1e5))}L';
   if (v >= 1e3) return '₹${(v / 1e3).toStringAsFixed(1)}K';
-  return '₹${v.toStringAsFixed(2)}';
+  return rupees(v);
 }
 
 String fmtNum(double v) {
@@ -491,8 +492,10 @@ class KpiBarChart extends StatelessWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: AppColors.borderOf(context),
+                    strokeWidth: 1,
+                  ),
                 ),
                 borderData: FlBorderData(show: false),
                 barGroups: data.asMap().entries.map((e) {
@@ -570,8 +573,10 @@ class KpiLineChart extends StatelessWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: AppColors.borderOf(context),
+                    strokeWidth: 1,
+                  ),
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: const AxisTitles(

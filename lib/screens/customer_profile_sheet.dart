@@ -166,7 +166,8 @@ class _CustomerProfileSheetState extends State<CustomerProfileSheet> {
                           size: 18,
                         ),
                       ),
-                      validator: (value) => value == null || value.trim().isEmpty
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
                           ? 'Required'
                           : null,
                     ),

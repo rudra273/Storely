@@ -45,9 +45,10 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
   @override
   Widget build(BuildContext context) {
     final bill = widget.bill;
-    final revenue = bill.items.fold(0.0, (sum, item) => sum + item.subtotal);
+    // Sales after discount - GST - cost = profit (round-off excluded).
+    final revenue = bill.items.fold(0.0, (sum, item) => sum + item.lineAmount);
     final cost = bill.items.fold(0.0, (sum, item) => sum + item.totalCost);
-    final profit = bill.items.fold(0.0, (sum, item) => sum + item.totalProfit);
+    final profit = bill.items.fold(0.0, (sum, item) => sum + item.lineProfit);
     final commission = profit > 0 ? profit * _commissionPercent / 100 : 0.0;
     final gst = bill.items.fold(0.0, (sum, item) => sum + item.totalGst);
     final net = profit - commission;
@@ -65,9 +66,9 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
           AppSpacing.md,
         ),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: AppColors.surfaceOf(context),
           borderRadius: AppRadius.lgRadius,
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: AppColors.borderOf(context)),
         ),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.xl),
@@ -80,7 +81,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                   width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.border,
+                    color: AppColors.borderOf(context),
                     borderRadius: AppRadius.pillRadius,
                   ),
                 ),
@@ -89,13 +90,12 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
               Text('${_billDisplayId(bill)} Profit', style: AppText.title),
               const SizedBox(height: AppSpacing.lg),
               AppCard(
-                color: AppColors.bg,
+                color: AppColors.bgOf(context),
                 child: Column(
                   children: [
-                    _ProfitRow('Total Revenue', revenue),
-                    _ProfitRow('Purchase Cost', cost),
-                    _ProfitRow('Overhead', 0.0),
+                    _ProfitRow('Sales (after discount)', revenue),
                     if (gst > 0) _ProfitRow('GST', gst),
+                    _ProfitRow('Cost (incl. overhead)', cost),
                     const Divider(height: AppSpacing.lg),
                     _ProfitRow(
                       'Gross Profit',
@@ -131,18 +131,18 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                               suffixText: '%',
                               border: OutlineInputBorder(
                                 borderRadius: AppRadius.smRadius,
-                                borderSide: const BorderSide(
-                                  color: AppColors.border,
+                                borderSide: BorderSide(
+                                  color: AppColors.borderOf(context),
                                 ),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: AppRadius.smRadius,
-                                borderSide: const BorderSide(
-                                  color: AppColors.border,
+                                borderSide: BorderSide(
+                                  color: AppColors.borderOf(context),
                                 ),
                               ),
                               filled: true,
-                              fillColor: AppColors.surface,
+                              fillColor: AppColors.surfaceOf(context),
                             ),
                             onChanged: (value) => setState(() {
                               _commissionPercent = (double.tryParse(value) ?? 0)
@@ -207,13 +207,13 @@ class _ProfitRow extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: color ?? AppColors.inkMuted,
+              color: color ?? AppColors.inkMutedOf(context),
               fontSize: fontSize,
               fontWeight: isBold ? FontWeight.w700 : FontWeight.normal,
             ),
           ),
           Text(
-            '${value < 0 ? '−' : ''}₹${value.abs().toStringAsFixed(2)}',
+            '${value < 0 ? '−' : ''}${rupees(value.abs())}',
             style: TextStyle(
               fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
               fontSize: fontSize,

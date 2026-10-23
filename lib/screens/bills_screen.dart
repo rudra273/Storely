@@ -1,22 +1,29 @@
+import '../l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/bill_totals.dart';
 import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
-import '../utils/bill_pdf_generator.dart';
+import '../services/bill_share.dart';
+import '../services/thermal/thermal_printer_service.dart';
 import 'scan_screen.dart';
+import 'shared/record_payment_dialog.dart';
 import 'store/bill_settings_screen.dart';
+import '../utils/money.dart';
 
+part 'billing/bill_history_sheet.dart';
 part 'billing/bill_list_widgets.dart';
 part 'billing/bill_card.dart';
 part 'billing/bill_profit_sheet.dart';
 part 'billing/bill_action_widgets.dart';
 part 'billing/bill_formatters.dart';
+part 'billing/bill_dialogs.dart';
+part 'billing/return_sheet.dart';
 
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
@@ -63,12 +70,19 @@ class _BillsScreenState extends State<BillsScreen> {
     if (oldWidget.refreshToken != widget.refreshToken) _loadBills();
   }
 
+  Set<String> _unsyncedBillUuids = const {};
+
   Future<void> _loadBills() async {
     final db = DatabaseHelper.instance;
     final bills = await db.getAllBills();
     final cancelled = await db.getCancelledBills();
+    final cloud = CloudService.instance.state.value;
+    final unsynced = cloud.isConfigured && cloud.isSignedIn
+        ? await db.unsyncedBillUuids()
+        : const <String>{};
     if (mounted) {
       setState(() {
+        _unsyncedBillUuids = unsynced;
         _bills = bills;
         _cancelledBills = cancelled;
         _isLoading = false;
@@ -78,57 +92,19 @@ class _BillsScreenState extends State<BillsScreen> {
 
   Future<void> _cancelBill(Bill bill) async {
     if (bill.id == null) return;
-    final reasonCtrl = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _CancelBillDialog(billLabel: _billDisplayId(bill)),
+    );
+    if (reason == null) return;
     try {
-      final reason = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          icon: Icon(Icons.block_rounded, color: AppColors.error, size: 32),
-          title: const Text('Cancel Bill'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Cancel ${_billDisplayId(bill)}? Stock and customer ledger will be reversed.',
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: reasonCtrl,
-                textCapitalization: TextCapitalization.sentences,
-                minLines: 2,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Reason',
-                  prefixIcon: Icon(Icons.notes_outlined),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Keep Bill'),
-            ),
-            TestKeys.tag(
-              TestKeys.confirmBtn,
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, reasonCtrl.text),
-                style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-                child: const Text('Cancel Bill'),
-              ),
-              button: true,
-            ),
-          ],
-        ),
-      );
-      if (reason == null) return;
       await DatabaseHelper.instance.cancelBill(
         bill.id!,
         reason: reason.trim().isEmpty ? 'Correction required' : reason,
       );
       await _loadBills();
-    } finally {
-      reasonCtrl.dispose();
+    } catch (e) {
+      _showActionError(e);
     }
   }
 
@@ -139,105 +115,94 @@ class _BillsScreenState extends State<BillsScreen> {
     String? paymentReference,
   }) async {
     if (bill.id == null) return;
-    await DatabaseHelper.instance.updateBillPaidStatus(
-      bill.id!,
-      isPaid,
-      paymentMethod: paymentMethod,
-      paymentReference: paymentReference,
+    try {
+      await DatabaseHelper.instance.updateBillPaidStatus(
+        bill.id!,
+        isPaid,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+      );
+      await _loadBills();
+    } catch (e) {
+      _showActionError(e);
+    }
+  }
+
+  Future<void> _returnItems(Bill bill) async {
+    if (bill.id == null) return;
+    final db = DatabaseHelper.instance;
+    final returnable = await db.returnableQuantities(bill.id!);
+    final settings = await db.getBillSettings();
+    if (!mounted) return;
+    final request = await showModalBottomSheet<_ReturnRequest>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.surfaceOf(context),
+      builder: (_) => _ReturnSheet(
+        bill: bill,
+        returnable: returnable,
+        roundOff: settings.roundOffTotal,
+      ),
     );
-    await _loadBills();
+    if (request == null) return;
+    try {
+      final creditNoteId = await db.createCreditNote(
+        billId: bill.id!,
+        quantities: request.quantities,
+        settlement: request.settlement,
+        refundMethod: request.refundMethod,
+        reason: request.reason,
+      );
+      await _loadBills();
+      final creditNote = await db.getBillById(creditNoteId);
+      if (!mounted || creditNote == null) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Credit note ${creditNote.billNumber} issued'),
+            action: SnackBarAction(
+              label: context.l10n.share,
+              onPressed: () => BillShare.sharePdf(creditNote),
+            ),
+          ),
+        );
+    } catch (e) {
+      _showActionError(e);
+    }
+  }
+
+  void _showActionError(Object error) {
+    debugPrint('Bill action failed: $error');
+    if (!mounted) return;
+    final message = switch (error) {
+      ArgumentError(:final message) => '$message',
+      StateError(:final message) => message,
+      _ => 'Something went wrong. Please try again.',
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _recordPayment(Bill bill) async {
     if (bill.id == null || bill.balanceDue <= 0) return;
-    final amountCtrl = TextEditingController(
-      text: bill.balanceDue.toStringAsFixed(2),
+    final entry = await showDialog<PaymentEntry>(
+      context: context,
+      builder: (_) => RecordPaymentDialog(balanceDue: bill.balanceDue),
     );
-    final txnRefCtrl = TextEditingController();
-    var method = 'cash';
+    if (entry == null) return;
     try {
-      final amount = await showDialog<double>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            title: const Text('Record Payment'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: amountCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'Amount received',
-                    prefixText: '₹ ',
-                    helperText:
-                        'Balance: ₹${bill.balanceDue.toStringAsFixed(2)}',
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'cash',
-                      icon: Icon(Icons.payments_outlined),
-                      label: Text('Cash'),
-                    ),
-                    ButtonSegment(
-                      value: 'online',
-                      icon: Icon(Icons.account_balance_wallet_outlined),
-                      label: Text('Online'),
-                    ),
-                  ],
-                  selected: {method},
-                  onSelectionChanged: (value) =>
-                      setDialogState(() => method = value.first),
-                ),
-                if (method == 'online') ...[
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    controller: txnRefCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Transaction ID (optional)',
-                      prefixIcon: Icon(Icons.receipt_long_outlined),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              TestKeys.tag(
-                TestKeys.saveBtn,
-                FilledButton(
-                  onPressed: () {
-                    final value = double.tryParse(amountCtrl.text) ?? 0;
-                    Navigator.pop(ctx, value);
-                  },
-                  child: const Text('Save'),
-                ),
-                button: true,
-              ),
-            ],
-          ),
-        ),
-      );
-      if (amount == null || amount <= 0) return;
       await DatabaseHelper.instance.recordBillPayment(
         bill.id!,
-        amount: amount,
-        paymentMethod: method,
-        paymentReference: method == 'online' ? txnRefCtrl.text : null,
+        amount: entry.amount,
+        paymentMethod: entry.method,
+        paymentReference: entry.reference,
       );
       await _loadBills();
-    } finally {
-      amountCtrl.dispose();
-      txnRefCtrl.dispose();
+    } catch (e) {
+      _showActionError(e);
     }
   }
 
@@ -332,7 +297,7 @@ class _BillsScreenState extends State<BillsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       nameCtrl.dispose();
       phoneCtrl.dispose();
@@ -361,20 +326,7 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _shareBillPdf(Bill bill) async {
-    final db = DatabaseHelper.instance;
-    final shop = await db.getShopProfile();
-    final settings = await db.getBillSettings();
-    final bytes = await BillPdfGenerator.generate(
-      bill: bill,
-      shop: shop,
-      settings: settings,
-    );
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: BillPdfGenerator.filename(bill),
-    );
-  }
+  Future<void> _shareBillPdf(Bill bill) => BillShare.sharePdf(bill);
 
   String? _whatsAppPhone(String? value) {
     final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
@@ -398,21 +350,24 @@ class _BillsScreenState extends State<BillsScreen> {
       ..writeln('Items:');
     for (final item in bill.items) {
       buffer.writeln(
-        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ₹${item.subtotal.toStringAsFixed(2)}',
+        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ${rupees(item.subtotal)}',
       );
     }
     buffer
       ..writeln('')
-      ..writeln('Subtotal: ₹${bill.subtotalAmount.toStringAsFixed(2)}');
+      ..writeln('Subtotal: ${rupees(bill.subtotalAmount)}');
     if (bill.discountAmount > 0) {
       buffer.writeln(
-        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -₹${bill.discountAmount.toStringAsFixed(2)}',
+        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -${rupees(bill.discountAmount)}',
       );
     }
+    if (bill.roundOffAmount != 0) {
+      buffer.writeln('Round off: ${signedRupees(bill.roundOffAmount)}');
+    }
     buffer
-      ..writeln('Total: ₹${bill.totalAmount.toStringAsFixed(2)}')
-      ..writeln('Paid: ₹${bill.paidAmount.toStringAsFixed(2)}')
-      ..writeln('Balance: ₹${bill.balanceDue.toStringAsFixed(2)}')
+      ..writeln('Total: ${rupees(bill.totalAmount)}')
+      ..writeln('Paid: ${rupees(bill.paidAmount)}')
+      ..writeln('Balance: ${rupees(bill.balanceDue)}')
       ..writeln('Status: ${_paymentStatusLabel(bill.paymentStatus)}');
     if (bill.paidAmount > 0) {
       buffer.writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
@@ -447,7 +402,7 @@ class _BillsScreenState extends State<BillsScreen> {
                     cursorColor: AppColors.amber,
                     decoration: InputDecoration(
                       isCollapsed: true,
-                      hintText: 'Search bills...',
+                      hintText: context.l10n.searchBills,
                       hintStyle: TextStyle(
                         color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 16,
@@ -457,13 +412,12 @@ class _BillsScreenState extends State<BillsScreen> {
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                     ),
-                    onChanged: (val) => setState(
-                      () => _searchQuery = val.trim().toLowerCase(),
-                    ),
+                    onChanged: (val) =>
+                        setState(() => _searchQuery = val.trim().toLowerCase()),
                   ),
                   textField: true,
                 )
-              : const Text('Bills'),
+              : Text(context.l10n.navBills),
           actions: [
             IconButton(
               onPressed: () {
@@ -513,29 +467,27 @@ class _BillsScreenState extends State<BillsScreen> {
           ],
         ),
         body: RefreshIndicator(
-        color: AppColors.amber,
-        onRefresh: _loadBills,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            if (_isLoading)
-              const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_bills.isEmpty && _cancelledBills.isEmpty)
-              SliverFillRemaining(child: _buildEmpty())
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.lg,
-                  AppSpacing.lg,
-                  96,
-                ),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+          color: AppColors.amber,
+          onRefresh: _loadBills,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              if (_isLoading)
+                const SliverFillRemaining(child: AppSkeletonList())
+              else if (_bills.isEmpty && _cancelledBills.isEmpty)
+                SliverFillRemaining(child: _buildEmpty())
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    96,
+                  ),
+                  // A lazy list: only the bill cards on screen are built and
+                  // laid out, so shops with thousands of bills scroll fine.
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
                       // Always shown so the Cancelled tab stays reachable even
                       // when there are no cancelled bills yet (count shows 0).
                       _BillFilterTabs(
@@ -554,30 +506,29 @@ class _BillsScreenState extends State<BillsScreen> {
                         ],
                         ..._buildGroupedBillCards(),
                       ],
-                    ],
+                    ], addAutomaticKeepAlives: false),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-      // Hidden only when there are no bills of any kind (the full-page empty
-      // state has its own Create button). When only cancelled bills remain, the
-      // FAB must stay so a new bill is still reachable.
-      floatingActionButton:
-          !widget.isActiveMainTab ||
-              _isLoading ||
-              (_bills.isEmpty && _cancelledBills.isEmpty)
-          ? null
-          : TestKeys.tag(
-              TestKeys.createBillBtn,
-              FloatingActionButton.extended(
-                onPressed: () => _openBillCreator(BillingEntryMode.manual),
-                icon: const Icon(Icons.receipt_long_rounded),
-                label: const Text('New Bill'),
+        // Hidden only when there are no bills of any kind (the full-page empty
+        // state has its own Create button). When only cancelled bills remain, the
+        // FAB must stay so a new bill is still reachable.
+        floatingActionButton:
+            !widget.isActiveMainTab ||
+                _isLoading ||
+                (_bills.isEmpty && _cancelledBills.isEmpty)
+            ? null
+            : TestKeys.tag(
+                TestKeys.createBillBtn,
+                FloatingActionButton.extended(
+                  onPressed: () => _openBillCreator(BillingEntryMode.manual),
+                  icon: const Icon(Icons.receipt_long_rounded),
+                  label: Text(context.l10n.newBill),
+                ),
+                button: true,
               ),
-              button: true,
-            ),
       ),
     );
   }
@@ -611,6 +562,7 @@ class _BillsScreenState extends State<BillsScreen> {
           TestKeys.billRow(bill.id ?? bill.billNumber),
           _BillCard(
             bill: bill,
+            waitingToSync: _unsyncedBillUuids.contains(bill.uuid),
             onCancel: () => _cancelBill(bill),
             onEdit: () => _editBillDetails(bill),
             onStatusChanged: (isPaid, method, reference) => _updateBillStatus(
@@ -620,6 +572,10 @@ class _BillsScreenState extends State<BillsScreen> {
               paymentReference: reference,
             ),
             onRecordPayment: () => _recordPayment(bill),
+            onReturn:
+                !bill.isCreditNote && CloudService.instance.state.value.isAdmin
+                ? () => _returnItems(bill)
+                : null,
             onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
             onSharePdf: () => _shareBillPdf(bill),
           ),
@@ -648,7 +604,9 @@ class _BillsScreenState extends State<BillsScreen> {
               _searchQuery.isEmpty
                   ? 'No cancelled bills'
                   : 'No cancelled bills match your search',
-              style: AppText.body.copyWith(color: AppColors.inkMuted),
+              style: AppText.body.copyWith(
+                color: AppColors.inkMutedOf(context),
+              ),
             ),
           ),
         ),
@@ -678,45 +636,18 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: AppRadius.lgRadius,
-              ),
-              child: Icon(
-                Icons.receipt_long_outlined,
-                size: 36,
-                color: AppColors.inkFaint,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('No bills yet', style: AppText.title),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Create your first bill to get started',
-              style: AppText.caption,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            TestKeys.tag(
-              TestKeys.createBillBtn,
-              FilledButton.icon(
-                onPressed: () => _openBillCreator(BillingEntryMode.manual),
-                icon: const Icon(Icons.receipt_long_rounded),
-                label: const Text('Create Bill'),
-              ),
-              button: true,
-            ),
-          ],
+    return AppEmptyState(
+      icon: Icons.receipt_long_outlined,
+      title: context.l10n.noBillsYet,
+      message: context.l10n.createFirstBill,
+      secondaryAction: TestKeys.tag(
+        TestKeys.createBillBtn,
+        FilledButton.icon(
+          onPressed: () => _openBillCreator(BillingEntryMode.manual),
+          icon: const Icon(Icons.receipt_long_rounded),
+          label: Text(context.l10n.createBill),
         ),
+        button: true,
       ),
     );
   }

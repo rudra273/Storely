@@ -9,6 +9,49 @@ class StockMovementType {
   static const stocktake = 'stocktake';
 }
 
+/// Why a manual stock adjustment was made (stock_movements.reason).
+class StockAdjustmentReason {
+  static const damage = 'damage';
+  static const expired = 'expired';
+  static const theft = 'theft';
+  static const returnIn = 'return';
+  static const ownUse = 'own_use';
+  static const count = 'count';
+  static const other = 'other';
+
+  /// Reasons that take stock out of the shop.
+  static const removing = [damage, expired, theft, ownUse];
+
+  /// Reasons that can go either way or add stock.
+  static const neutral = [count, returnIn, other];
+
+  static String label(String? reason) => switch (reason) {
+    damage => 'Damaged',
+    expired => 'Expired',
+    theft => 'Lost / theft',
+    returnIn => 'Customer return',
+    ownUse => 'Own use',
+    count => 'Stock count corrected',
+    _ => 'Other',
+  };
+}
+
+/// Average cost of stock after adding [added] units at [addedCost] to
+/// [onHand] units at [currentCost]. Negative stock (sold before it was
+/// entered) carries no cost, so the new purchase sets the price.
+double weightedAverageCost({
+  required double onHand,
+  required double currentCost,
+  required double added,
+  required double addedCost,
+}) {
+  final existing = onHand > 0 ? onHand : 0.0;
+  final total = existing + added;
+  if (added <= 0 || total <= 0) return currentCost;
+  final cost = (existing * currentCost + added * addedCost) / total;
+  return (cost * 10000).roundToDouble() / 10000;
+}
+
 class StockMovement {
   final int? id;
   final String uuid;
@@ -27,6 +70,7 @@ class StockMovement {
   final String? importBatchKey;
   final int? importRowNumber;
   final String? notes;
+  final String? reason;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -50,6 +94,7 @@ class StockMovement {
     this.importBatchKey,
     this.importRowNumber,
     this.notes,
+    this.reason,
     this.deviceId,
     required this.createdAt,
     required this.updatedAt,
@@ -76,6 +121,7 @@ class StockMovement {
       importBatchKey: map['import_batch_key'] as String?,
       importRowNumber: map['import_row_number'] as int?,
       notes: map['notes'] as String?,
+      reason: map['reason'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

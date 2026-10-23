@@ -68,7 +68,10 @@ class _CustomerSuggestionList extends StatelessWidget {
                       child: Text(
                         customer.name.trim().isEmpty
                             ? '?'
-                            : customer.name.trim().substring(0, 1).toUpperCase(),
+                            : customer.name
+                                  .trim()
+                                  .substring(0, 1)
+                                  .toUpperCase(),
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
@@ -82,7 +85,7 @@ class _CustomerSuggestionList extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     subtitle: Text(
-                      '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ₹${customer.totalPurchaseAmount.toStringAsFixed(2)}',
+                      '${_displayPhone(customer.phone)} • ${customer.billCount} bill${customer.billCount == 1 ? '' : 's'} • ${rupees(customer.totalPurchaseAmount)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

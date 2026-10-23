@@ -4,6 +4,9 @@ import '../db/database_helper.dart';
 import '../services/cloud_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
+import '../l10n/l10n.dart';
+import '../services/app_settings_service.dart';
+import '../services/sample_data.dart';
 
 enum _WelcomeMode { choice, createShop, joinCloud }
 
@@ -25,6 +28,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   final _passwordCtrl = TextEditingController();
   _WelcomeMode _mode = _WelcomeMode.choice;
   bool _isSaving = false;
+  bool _addSampleData = false;
 
   /// Reveals the "use your own Supabase" fields in the join flow. Forced open
   /// when the bundled Storely Cloud credentials aren't compiled into the build.
@@ -47,6 +51,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     setState(() => _isSaving = true);
     try {
       await DatabaseHelper.instance.saveShopName(_shopNameCtrl.text);
+      if (_addSampleData) await SampleData.addProducts();
       if (!mounted) return;
       widget.onComplete();
     } catch (e) {
@@ -144,15 +149,21 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
+              // Minus the keyboard, so the form (and Continue) stays above it.
               minHeight:
                   MediaQuery.sizeOf(context).height -
                   MediaQuery.paddingOf(context).vertical -
+                  MediaQuery.viewInsetsOf(context).bottom -
                   AppSpacing.xxl * 2,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                if (_mode == _WelcomeMode.choice) ...[
+                  const _LanguageChoice(),
+                  const SizedBox(height: AppSpacing.xl),
+                ],
                 Align(
                   child: Container(
                     width: 72,
@@ -170,7 +181,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 ),
                 const SizedBox(height: AppSpacing.xxl),
                 Text(
-                  'Welcome to Storely',
+                  context.l10n.welcomeTitle,
                   textAlign: TextAlign.center,
                   style: AppText.display.copyWith(
                     color: AppColors.inkOf(context),
@@ -179,10 +190,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   _mode == _WelcomeMode.joinCloud
-                      ? 'Sign in to join a shop you were added to'
+                      ? context.l10n.welcomeJoin
                       : _mode == _WelcomeMode.createShop
-                      ? 'Add your shop name to get started'
-                      : 'Start a new shop or join an existing cloud shop',
+                      ? context.l10n.welcomeCreate
+                      : context.l10n.welcomeChoice,
                   textAlign: TextAlign.center,
                   style: AppText.body.copyWith(color: AppColors.inkMuted),
                 ),
@@ -207,7 +218,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               ? null
               : () => setState(() => _mode = _WelcomeMode.createShop),
           icon: const Icon(Icons.add_business_rounded),
-          label: const Text('Start Fresh'),
+          label: Text(context.l10n.startFresh),
           style: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
           ),
@@ -218,7 +229,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               ? null
               : () => setState(() => _mode = _WelcomeMode.joinCloud),
           icon: const Icon(Icons.cloud_done_outlined),
-          label: const Text('Join Existing Shop'),
+          label: Text(context.l10n.joinExistingShop),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
           ),
@@ -240,24 +251,39 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               autofocus: true,
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Shop Name',
+              decoration: InputDecoration(
+                labelText: context.l10n.shopName,
                 prefixIcon: Icon(Icons.store_mall_directory_outlined),
               ),
-              validator: (value) =>
-                  value == null || value.trim().isEmpty ? 'Required' : null,
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? context.l10n.required
+                  : null,
               onFieldSubmitted: (_) => _saveShopName(),
             ),
             textField: true,
           ),
         ),
-        const SizedBox(height: AppSpacing.lg),
+        CheckboxListTile(
+          key: const ValueKey('welcome-sample-data'),
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          value: _addSampleData,
+          onChanged: _isSaving
+              ? null
+              : (value) => setState(() => _addSampleData = value ?? false),
+          title: Text(context.l10n.addSampleProducts),
+          subtitle: Text(
+            context.l10n.sampleProductsHint,
+            style: AppText.caption,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
         TestKeys.tag(
           TestKeys.welcomeContinueBtn,
           FilledButton.icon(
             onPressed: _isSaving ? null : _saveShopName,
             icon: _busyIcon(Icons.arrow_forward_rounded),
-            label: const Text('Continue'),
+            label: Text(context.l10n.continueLabel),
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
             ),
@@ -268,7 +294,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           onPressed: _isSaving
               ? null
               : () => setState(() => _mode = _WelcomeMode.choice),
-          child: const Text('Back'),
+          child: Text(context.l10n.back),
         ),
       ],
     );
@@ -356,7 +382,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           onPressed: _isSaving
               ? null
               : () => setState(() => _mode = _WelcomeMode.choice),
-          child: const Text('Back'),
+          child: Text(context.l10n.back),
         ),
       ],
     );
@@ -412,4 +438,31 @@ String _cleanError(Object error) {
       .replaceFirst('Bad state: ', '')
       .replaceFirst('AuthException(message: ', '')
       .replaceFirst(RegExp(r', statusCode:.*\)$'), '');
+}
+
+/// English / Hindi switch shown on the first screen.
+class _LanguageChoice extends StatelessWidget {
+  const _LanguageChoice();
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = AppSettingsService.instance;
+    final current = settings.language == AppLanguage.system
+        ? (Localizations.localeOf(context).languageCode == 'hi'
+              ? AppLanguage.hindi
+              : AppLanguage.english)
+        : settings.language;
+    return Center(
+      child: SegmentedButton<AppLanguage>(
+        key: const ValueKey('welcome-language'),
+        segments: const [
+          ButtonSegment(value: AppLanguage.english, label: Text('English')),
+          ButtonSegment(value: AppLanguage.hindi, label: Text('हिन्दी')),
+        ],
+        selected: {current},
+        showSelectedIcon: false,
+        onSelectionChanged: (value) => settings.setLanguage(value.first),
+      ),
+    );
+  }
 }

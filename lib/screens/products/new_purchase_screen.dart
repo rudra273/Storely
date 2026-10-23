@@ -26,8 +26,13 @@ class _NewPurchaseScreen extends StatefulWidget {
   /// Finds a matching existing catalog product by name, or null.
   final Product? Function(String name) matchExisting;
 
-  /// Commits the batch; returns the number of items written.
-  final Future<int> Function(List<_PurchaseDraft> drafts, DateTime purchaseDate)
+  /// Commits the batch; returns the number of items written. [importedRows]
+  /// are the file rows imported into this purchase (for duplicate detection).
+  final Future<int> Function(
+    List<_PurchaseDraft> drafts,
+    DateTime purchaseDate,
+    List<Product> importedRows,
+  )
   commitBatch;
 
   /// Action to fire automatically when the screen first opens, so the user
@@ -51,6 +56,7 @@ class _NewPurchaseScreen extends StatefulWidget {
 
 class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
   final List<_PurchaseDraft> _drafts = [];
+  final List<Product> _importedRows = [];
   var _committing = false;
 
   Set<String> get _stagedNames =>
@@ -89,57 +95,91 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
   }
 
   void _removeDraft(int index) {
-    setState(() => _drafts.removeAt(index));
+    final name = _drafts[index].name.toLowerCase();
+    setState(() {
+      _drafts.removeAt(index);
+      _importedRows.removeWhere((row) => row.name.trim().toLowerCase() == name);
+    });
   }
 
   Future<void> _import() async {
-    final products = await widget.pickAndParseImport(context);
-    if (products == null || !mounted) return;
-    final existingNames = _stagedNames;
+    final parsed = await widget.pickAndParseImport(context);
+    if (parsed == null || !mounted) return;
+    final supplier = widget.supplier?.trim();
+    final hasSupplier = supplier != null && supplier.isNotEmpty;
+
+    // One row per product: repeated lines for the same item in a file are
+    // summed (they used to be silently dropped).
+    final byName = <String, Product>{};
+    for (final row in parsed) {
+      final key = row.name.trim().toLowerCase();
+      if (key.isEmpty) continue;
+      final withSupplier = row.copyWith(
+        supplier: supplier,
+        clearSupplier: !hasSupplier,
+      );
+      final previous = byName[key];
+      byName[key] = previous == null
+          ? withSupplier
+          : withSupplier.copyWith(
+              quantity: previous.quantity + withSupplier.quantity,
+            );
+    }
+    final rows = byName.values.toList();
+
+    if (await DatabaseHelper.instance.wouldImportDuplicate(
+          rows,
+          purchaseDate: widget.purchaseDate,
+        ) &&
+        mounted) {
+      final importAgain = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already imported?'),
+          content: const Text(
+            'A purchase with exactly these items, quantities and prices was '
+            'imported before. Importing it again will add the stock twice.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Import Again'),
+            ),
+          ],
+        ),
+      );
+      if (importAgain != true) return;
+    }
+    if (!mounted) return;
+
+    final alreadyStaged = _stagedNames;
     var added = 0;
     var skipped = 0;
-    for (final parsed in products) {
-      final lower = parsed.name.trim().toLowerCase();
-      if (lower.isEmpty || existingNames.contains(lower)) {
+    for (final row in rows) {
+      if (alreadyStaged.contains(row.name.trim().toLowerCase())) {
         skipped++;
         continue;
       }
-      existingNames.add(lower);
-      final parsedForPurchase = parsed.copyWith(
-        supplier: widget.supplier,
-        clearSupplier: widget.supplier == null || widget.supplier!.isEmpty,
+      final match = widget.matchExisting(row.name);
+      _importedRows.add(row);
+      _drafts.add(
+        match == null
+            ? _PurchaseDraft(product: row, quantityAdded: row.quantity)
+            : _PurchaseDraft(
+                product: match.withImportRow(row, applySupplier: hasSupplier),
+                quantityAdded: row.quantity,
+                restockTarget: match,
+              ),
       );
-      final match = widget.matchExisting(parsed.name);
-      if (match != null) {
-        // Restock: keep identity from the existing product, carry imported
-        // catalog/pricing fields, add the imported quantity.
-        final restockProduct = parsedForPurchase.copyWith(
-          id: match.id,
-          uuid: match.uuid,
-          shopId: match.shopId,
-          createdAt: match.createdAt,
-        );
-        _drafts.add(
-          _PurchaseDraft(
-            product: restockProduct,
-            quantityAdded: parsed.quantity,
-            restockTarget: match,
-          ),
-        );
-      } else {
-        _drafts.add(
-          _PurchaseDraft(
-            product: parsedForPurchase,
-            quantityAdded: parsed.quantity,
-          ),
-        );
-      }
       added++;
     }
-    if (!mounted) return;
     setState(() {});
     final msg = skipped > 0
-        ? 'Added $added · skipped $skipped duplicate(s)'
+        ? 'Added $added · skipped $skipped already in this purchase'
         : 'Added $added product(s)';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
@@ -151,6 +191,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
       final count = await widget.commitBatch(
         List<_PurchaseDraft>.from(_drafts),
         widget.purchaseDate,
+        List<Product>.from(_importedRows),
       );
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -162,7 +203,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
       setState(() => _committing = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -392,15 +433,15 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
         title: p.name,
         subtitle:
             '${isRestock ? 'Restock' : 'New'} · '
-            'Qty $qtyLabel$unit · ₹${p.mrp.toStringAsFixed(2)}',
+            'Qty $qtyLabel$unit · ${rupees(p.mrp)}',
         onTap: _committing ? null : () => _editDraft(index),
         trailing: IconButton(
           tooltip: 'Remove',
           onPressed: _committing ? null : () => _removeDraft(index),
-          icon: const Icon(
+          icon: Icon(
             Icons.close_rounded,
             size: 18,
-            color: AppColors.inkMuted,
+            color: AppColors.inkMutedOf(context),
           ),
         ),
       ),

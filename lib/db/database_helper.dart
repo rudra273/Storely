@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -5,9 +7,14 @@ import 'package:uuid/uuid.dart';
 
 import '../models/bill.dart';
 import '../models/bill_settings.dart';
+import '../models/bill_totals.dart';
+import '../models/invoice_numbering.dart';
 import '../models/customer.dart';
+import '../models/expense.dart';
+import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
+import '../utils/money.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
@@ -18,6 +25,9 @@ part 'database_products.dart';
 part 'database_bills.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
+part 'database_expenses.dart';
+part 'database_reports.dart';
+part 'database_audit.dart';
 
 const _uuid = Uuid();
 const _legacyShopId = 'local-shop';
@@ -29,16 +39,28 @@ class DatabaseHelper
         DatabaseProducts,
         DatabaseBills,
         DatabaseSync,
-        DatabaseKpi {
+        DatabaseKpi,
+        DatabaseExpenses,
+        DatabaseReports,
+        DatabaseAudit {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
+  /// Database file name. Tests switch it to simulate several devices.
+  @visibleForTesting
+  static String databaseFileName = 'storely.db';
+
   DatabaseHelper._init();
+
+  /// Full path of the database file (for backups and the startup error
+  /// screen's "save a copy").
+  static Future<String> databasePath() async =>
+      join(await getDatabasesPath(), databaseFileName);
 
   @override
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('storely.db');
+    _database = await _initDB(databaseFileName);
     return _database!;
   }
 
@@ -58,19 +80,53 @@ class DatabaseHelper
   /// true (local-only / no cloud guard installed).
   bool Function()? isAdminMutationAllowed;
 
+  /// Who is making changes, for the audit log (e.g. the cloud user's email).
+  /// Null means this phone's owner without a cloud account.
+  String? Function()? auditActor;
+
   Future<String> currentShopId() async {
     final db = await database;
     return _activeShopId(db);
   }
 
+  /// Joins this device to an existing cloud shop. Only allowed while the
+  /// device has no business data (the sync engine checks), so everything
+  /// here is untouched defaults: the cloud is the source of truth for the
+  /// shop's profile, settings and catalog. Drop the local defaults and keep
+  /// the shop row only as a placeholder that loses to the cloud copy, so a
+  /// joining phone can never upload "My Shop" / preset units / default
+  /// settings over the shop's real ones.
   Future<void> adoptCloudShopId(String shopId) async {
     final db = await database;
     await db.transaction((txn) async {
       final current = await _activeShopId(txn);
       if (current == shopId) return;
-      await _replaceShopId(txn, current, shopId);
+      for (final table in const [
+        'app_settings',
+        'bill_settings',
+        'invoice_series',
+        'units',
+        'categories',
+        'suppliers',
+      ]) {
+        await txn.delete(table, where: 'shop_id = ?', whereArgs: [current]);
+      }
+      await txn.update(
+        'shops',
+        {
+          'uuid': shopId,
+          'created_at': _placeholderTimestamp,
+          'updated_at': _placeholderTimestamp,
+          'sync_dirty': DatabaseSchema.syncDirtyFromCloud,
+        },
+        where: 'uuid = ?',
+        whereArgs: [current],
+      );
     });
   }
+
+  /// Older than any real edit, so the cloud copy always wins.
+  static const _placeholderTimestamp = '1970-01-01T00:00:00.000Z';
 }
 
 void notifyDatabaseChanged() {
@@ -98,7 +154,15 @@ String? _normaliseName(String? value) {
 
 String _newUuid() => _uuid.v4();
 
+/// Sync bookkeeping (updated_at, deleted_at): UTC, compared across devices.
 String _nowIso() => DateTime.now().toUtc().toIso8601String();
+
+/// Business dates (bill created_at, payment received_at, stock movement
+/// created_at): local wall-clock time without a zone, because reports group
+/// them by the shop's calendar day with substr(col, 1, 10). Mixing in UTC put
+/// anything between 00:00 and 05:30 IST on the previous day.
+String _localIso([DateTime? time]) =>
+    (time ?? DateTime.now()).toLocal().toIso8601String();
 
 bool _isPresetUnit(String value) {
   return Product.presetUnits.any(

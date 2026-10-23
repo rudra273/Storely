@@ -7,6 +7,7 @@ mixin DatabaseSettings {
   static const _defaultOverheadCostKey = 'default_overhead_cost';
   static const _defaultProfitMarginPercentKey = 'default_profit_margin_percent';
   static const _gstRegisteredKey = 'gst_registered';
+  static const _gstSchemeKey = 'gst_scheme';
   static const _showPurchasePriceGloballyKey = 'show_purchase_price_globally';
 
   Future<Database> get database;
@@ -43,7 +44,7 @@ mixin DatabaseSettings {
           email: current.email,
           gstin: current.gstin,
           address: current.address,
-          gstRegistered: current.gstRegistered,
+          gstScheme: current.gstScheme,
           createdAt: current.createdAt,
           updatedAt: current.updatedAt,
         ),
@@ -74,16 +75,17 @@ mixin DatabaseSettings {
       whereArgs: [shopId],
       limit: 1,
     );
+    final scheme = GstScheme.clean(
+      await _getSetting(db, _gstSchemeKey),
+      fallbackRegistered: pricing.gstRegistered,
+    );
     if (rows.isNotEmpty) {
-      return ShopProfile.fromMap(
-        rows.single,
-        gstRegistered: pricing.gstRegistered,
-      );
+      return ShopProfile.fromMap(rows.single, gstScheme: scheme);
     }
 
     final legacyName = await _getLegacyShopName(db);
     if (legacyName == null) return null;
-    return ShopProfile(name: legacyName, gstRegistered: pricing.gstRegistered);
+    return ShopProfile(name: legacyName, gstScheme: scheme);
   }
 
   Future<void> saveShopProfile(ShopProfile profile) async {
@@ -120,6 +122,9 @@ mixin DatabaseSettings {
         );
       }
       await _saveSetting(txn, _shopNameKey, name);
+      await _saveSetting(txn, _gstSchemeKey, profile.gstScheme);
+      // Pricing reads this flag: only the regular scheme charges GST and
+      // claims input credit; composition prices like an unregistered shop.
       await _saveSetting(
         txn,
         _gstRegisteredKey,
@@ -357,9 +362,12 @@ mixin DatabaseSettings {
   ) async {
     await _requireAdminMutation();
     final template = _normaliseName(settings.formatTemplate);
-    if (template == null || !template.contains('{SEQ}')) {
-      throw ArgumentError('Bill number pattern must include {SEQ}');
-    }
+    final problem = InvoiceNumbering.validate(
+      template: template ?? '',
+      padding: settings.sequencePadding,
+      resetPeriod: settings.resetPeriod,
+    );
+    if (problem != null) throw ArgumentError(problem);
     final db = await database;
     await db.transaction((txn) async {
       final shopId = await _activeShopId(txn);
@@ -415,4 +423,15 @@ Future<void> _saveSetting(
     'value': value,
     'updated_at': _nowIso(),
   }, conflictAlgorithm: ConflictAlgorithm.replace);
+}
+
+Future<String?> _getSetting(DatabaseExecutor executor, String key) async {
+  final rows = await executor.query(
+    'app_settings',
+    columns: ['value'],
+    where: 'shop_id = ? AND key = ? AND deleted_at IS NULL',
+    whereArgs: [await _activeShopId(executor), key],
+    limit: 1,
+  );
+  return rows.isEmpty ? null : rows.single['value']?.toString();
 }

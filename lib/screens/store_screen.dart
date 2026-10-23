@@ -12,6 +12,13 @@ import '../models/supplier.dart';
 import '../services/app_lock_service.dart';
 import '../services/cloud_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/thermal/thermal_printer_service.dart';
+import 'store/printer_setup_sheet.dart';
+import 'store/backup_sheet.dart';
+import '../l10n/l10n.dart';
+import 'shared/sync_status_widgets.dart';
+import '../services/sync_status.dart';
+import '../main.dart' show AppGate;
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -186,6 +193,20 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  Future<void> _showBackup() async {
+    final restored = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const BackupSheet(),
+    );
+    if (!mounted || restored != true) return;
+    // Every screen holds data from the old database: start over.
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const AppGate()),
+      (_) => false,
+    );
+  }
+
   Future<void> _showAppSettings() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -196,9 +217,9 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showCustomerTable() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const CustomersScreen()));
     if (mounted) await _loadStoreData();
   }
 
@@ -258,9 +279,9 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showSupplierManager() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()));
     if (mounted) await _loadStoreData();
   }
 
@@ -562,6 +583,13 @@ class _StoreScreenState extends State<StoreScreen> {
                       icon: Icons.settings_outlined,
                       onTap: _showAppSettings,
                     ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _StoreActionRow(
+                    title: 'Backup & restore',
+                    subtitle: 'Save all data to one file',
+                    icon: Icons.backup_outlined,
+                    onTap: _showBackup,
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   const _SectionLabel(title: 'Account'),

@@ -1,3 +1,4 @@
+import '../l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
@@ -9,10 +10,13 @@ import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
 import 'suppliers_screen.dart';
+import 'expenses_screen.dart';
+import 'shared/sync_status_widgets.dart';
 import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
 import '../services/home_section_prefs.dart';
+import '../utils/money.dart';
 
 class HomeScreen extends StatefulWidget {
   final int refreshToken;
@@ -34,6 +38,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Product> _lowStockProducts = [];
+
+  /// False until the first load finishes, so zeros never flash as if the
+  /// shop had no data.
+  bool _loaded = false;
   List<Product> _products = [];
   List<Bill> _unpaidBills = [];
   List<Bill> _bills = [];
@@ -116,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pending = _buildCustomerPendingMaps(bills);
     if (!mounted) return;
     setState(() {
+      _loaded = true;
       _products = products;
       _productCount = products.length;
       _supplierCount = suppliers.length;
@@ -130,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _shopName = shopName;
       _lowStockThreshold = lowStockThreshold;
       _lowStockProducts = products
-          .where((p) => p.quantity <= lowStockThreshold)
+          .where((p) => p.isLowStock(lowStockThreshold))
           .toList();
     });
   }
@@ -182,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? _HomeSearchField(controller: _homeSearchCtrl)
                       : null,
                   actions: [
+                    if (!_searchOpen) const SyncStatusIcon(color: Colors.white),
                     IconButton(
                       onPressed: _toggleSearch,
                       icon: Icon(
@@ -207,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           size: 22,
                         ),
                       ),
-                      label: 'Notifications',
+                      label: context.l10n.notifications,
                       button: true,
                     ),
                   ],
@@ -220,6 +230,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: showSearchResults
                         ? [_HomeSearchResults(results: _searchResults)]
+                        : !_loaded
+                        ? [
+                            const SizedBox(
+                              height: 480,
+                              child: AppSkeletonList(rows: 5, rowHeight: 80),
+                            ),
+                          ]
                         : [
                             _SalesHero(
                               sales: _todaySales,
@@ -247,12 +264,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               supplierCount: _supplierCount,
                               onSuppliers: _openSuppliers,
                               onPricing: _openPricing,
+                              onExpenses: _openExpenses,
                             ),
                             if (!HomeSectionPrefs.instance.unpaidHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
                               SectionHeader(
-                                title: 'Unpaid Bills',
-                                actionLabel: 'View All →',
+                                title: context.l10n.unpaidBills,
+                                actionLabel: context.l10n.viewAll,
                                 onAction: () => widget.onNavigate(2),
                                 onMenu: () => showUnpaidBillsSettings(context),
                               ),
@@ -261,7 +279,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ] else ...[
                               const SizedBox(height: AppSpacing.xxl),
                               _HiddenSectionStrip(
-                                title: 'Unpaid Bills',
+                                title: context.l10n.unpaidBills,
                                 onShow: () => HomeSectionPrefs.instance
                                     .setUnpaidHidden(false),
                               ),
@@ -269,8 +287,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             if (!HomeSectionPrefs.instance.attentionHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
                               SectionHeader(
-                                title: 'Needs Attention',
-                                actionLabel: 'View All →',
+                                title: context.l10n.needsAttention,
+                                actionLabel: context.l10n.viewAll,
                                 onAction: () => widget.onNavigate(1),
                                 onMenu: () => showNeedsAttentionSettings(
                                   context,
@@ -290,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ] else ...[
                               const SizedBox(height: AppSpacing.xxl),
                               _HiddenSectionStrip(
-                                title: 'Needs Attention',
+                                title: context.l10n.needsAttention,
                                 onShow: () => HomeSectionPrefs.instance
                                     .setAttentionHidden(false),
                               ),
@@ -328,7 +346,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.navy,
           title: product.name,
           subtitle: 'Product · ${product.quantityLabel} in stock',
-          trailing: '₹${product.sellingPrice.toStringAsFixed(0)}',
+          trailing: rupees(product.sellingPrice, decimals: 0),
           onTap: () => widget.onNavigate(1),
         ),
       );
@@ -349,7 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.amber,
           title: _cleanBillNumber(bill),
           subtitle: 'Bill · ${bill.customerName}',
-          trailing: '₹${bill.totalAmount.toStringAsFixed(0)}',
+          trailing: rupees(bill.totalAmount, decimals: 0),
           onTap: () => widget.onNavigate(2),
         ),
       );
@@ -371,7 +389,9 @@ class _HomeScreenState extends State<HomeScreen> {
           title: customer.name,
           subtitle:
               'Customer · ${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
-          trailing: pending > 0 ? 'Due ₹${pending.toStringAsFixed(0)}' : 'Paid',
+          trailing: pending > 0
+              ? 'Due ${rupees(pending, decimals: 0)}'
+              : 'Paid',
           onTap: _openCustomers,
         ),
       );
@@ -402,25 +422,32 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openSuppliers() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
+  void _openExpenses() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const ExpensesScreen()),
     );
+  }
+
+  Future<void> _openSuppliers() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()));
     // Refresh the supplier count after returning (a supplier may be added).
     if (mounted) _loadData();
   }
 
   Future<void> _openCustomers() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const CustomersScreen()));
     if (mounted) _loadData();
   }
 
   Future<void> _openPricing() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const PricingScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const PricingScreen()));
     if (mounted) _loadData();
   }
 
@@ -452,7 +479,7 @@ class _HomeSearchField extends StatelessWidget {
         decoration: InputDecoration(
           isCollapsed: true,
           filled: false,
-          hintText: 'Search products, bills, customers...',
+          hintText: context.l10n.searchEverything,
           hintStyle: TextStyle(
             color: Colors.white.withValues(alpha: 0.5),
             fontSize: 16,
@@ -581,6 +608,7 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
   final int supplierCount;
   final VoidCallback onSuppliers;
   final VoidCallback onPricing;
+  final VoidCallback onExpenses;
 
   const _WorkspaceShortcutsSection({
     required this.customerCount,
@@ -588,6 +616,7 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
     required this.supplierCount,
     required this.onSuppliers,
     required this.onPricing,
+    required this.onExpenses,
   });
 
   @override
@@ -595,32 +624,40 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader(title: 'Workspace'),
+        SectionHeader(title: context.l10n.workspace),
         const SizedBox(height: AppSpacing.md),
         Row(
           children: [
             _WorkspaceTile(
               icon: Icons.people_outline_rounded,
-              label: 'Customers',
-              subtitle: '$customerCount saved',
+              label: context.l10n.customers,
+              subtitle: context.l10n.savedCount(customerCount),
               color: AppColors.inkMutedOf(context),
               onTap: onCustomers,
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
               icon: Icons.handshake_outlined,
-              label: 'Suppliers',
-              subtitle: '$supplierCount saved',
+              label: context.l10n.suppliers,
+              subtitle: context.l10n.savedCount(supplierCount),
               color: AppColors.inkMutedOf(context),
               onTap: onSuppliers,
             ),
             const SizedBox(width: AppSpacing.sm),
             _WorkspaceTile(
               icon: Icons.sell_outlined,
-              label: 'Pricing',
-              subtitle: 'GST & rates',
+              label: context.l10n.pricing,
+              subtitle: context.l10n.gstAndRates,
               color: AppColors.inkMutedOf(context),
               onTap: onPricing,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            _WorkspaceTile(
+              icon: Icons.account_balance_wallet_outlined,
+              label: context.l10n.expenses,
+              subtitle: context.l10n.rentSalary,
+              color: AppColors.inkMutedOf(context),
+              onTap: onExpenses,
             ),
           ],
         ),
@@ -719,7 +756,7 @@ class _SalesHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "TODAY'S BOOKED SALES",
+                  context.l10n.todaysBookedSales,
                   style: AppText.label.copyWith(
                     color: Colors.white60,
                     letterSpacing: 1.0,
@@ -727,7 +764,7 @@ class _SalesHero extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  '₹${sales.toStringAsFixed(2)}',
+                  rupees(sales),
                   style: AppText.display.copyWith(
                     color: Colors.white,
                     fontSize: 30,
@@ -736,8 +773,11 @@ class _SalesHero extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   billCount == 0
-                      ? 'No bills yet today'
-                      : '₹${collected.toStringAsFixed(2)} collected, $billCount bill${billCount != 1 ? 's' : ''} created',
+                      ? context.l10n.noBillsToday
+                      : context.l10n.collectedBills(
+                          rupees(collected),
+                          billCount,
+                        ),
                   style: AppText.caption.copyWith(color: Colors.white60),
                 ),
               ],
@@ -782,7 +822,7 @@ class _StatsRow extends StatelessWidget {
       children: [
         Expanded(
           child: _StatTile(
-            label: 'Products',
+            label: context.l10n.navProducts,
             value: '$productCount',
             subtitle: 'in catalog',
             icon: Icons.inventory_2_outlined,
@@ -792,7 +832,7 @@ class _StatsRow extends StatelessWidget {
         const SizedBox(width: AppSpacing.md),
         Expanded(
           child: _StatTile(
-            label: 'Bills Today',
+            label: context.l10n.billsToday,
             value: '$billCount',
             subtitle: 'transactions',
             icon: Icons.receipt_long_outlined,
@@ -827,10 +867,10 @@ class _StatTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(AppSpacing.sm),
             decoration: BoxDecoration(
-              color: AppColors.bg,
+              color: AppColors.bgOf(context),
               borderRadius: AppRadius.smRadius,
             ),
-            child: Icon(icon, size: 16, color: AppColors.inkMuted),
+            child: Icon(icon, size: 16, color: AppColors.inkMutedOf(context)),
           ),
           const SizedBox(width: AppSpacing.md),
           Column(
@@ -874,14 +914,14 @@ class _QuickActionsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader(title: 'Quick Actions'),
+        SectionHeader(title: context.l10n.quickActions),
         const SizedBox(height: AppSpacing.md),
         Row(
           children: [
             _QuickActionTile(
               testId: TestKeys.homeScanBillBtn,
               icon: Icons.qr_code_scanner_rounded,
-              label: 'Scan & Bill',
+              label: context.l10n.scanAndBill,
               color: AppColors.amber,
               filled: false,
               onTap: onScan,
@@ -890,7 +930,7 @@ class _QuickActionsSection extends StatelessWidget {
             _QuickActionTile(
               testId: TestKeys.homeAddProductBtn,
               icon: Icons.add_rounded,
-              label: 'Add Product',
+              label: context.l10n.addProduct,
               color: AppColors.amber,
               filled: false,
               onTap: onAddProduct,
@@ -898,7 +938,7 @@ class _QuickActionsSection extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
               icon: Icons.grid_view_rounded,
-              label: 'Labels',
+              label: context.l10n.labels,
               color: AppColors.amber,
               filled: false,
               onTap: onQrSheet,
@@ -906,7 +946,7 @@ class _QuickActionsSection extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             _QuickActionTile(
               icon: Icons.bar_chart_rounded,
-              label: 'Reports',
+              label: context.l10n.reports,
               color: AppColors.amber,
               filled: false,
               onTap: onReports,
@@ -993,7 +1033,7 @@ class _UnpaidBillsSection extends StatelessWidget {
     if (bills.isEmpty) {
       return _EmptyState(
         icon: Icons.task_alt_rounded,
-        message: 'All bills are paid!',
+        message: context.l10n.allBillsPaid,
       );
     }
     return CompactListCard(
@@ -1004,15 +1044,18 @@ class _UnpaidBillsSection extends StatelessWidget {
                 icon: Icons.pending_actions_outlined,
                 color: AppColors.error,
               ),
-              title: bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
+              title: bill.customerName.isEmpty
+                  ? context.l10n.walkIn
+                  : bill.customerName,
               subtitle:
-                  '${_cleanBillNumber(bill)} · ${bill.itemCount} item${bill.itemCount != 1 ? 's' : ''}',
+                  '${_cleanBillNumber(bill)} · '
+                  '${context.l10n.itemCount(bill.itemCount)}',
               trailing: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '₹${bill.balanceDue.toStringAsFixed(0)}',
+                    rupees(bill.balanceDue, decimals: 0),
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
@@ -1020,8 +1063,14 @@ class _UnpaidBillsSection extends StatelessWidget {
                     ),
                   ),
                   bill.paymentStatus == Bill.statusPartial
-                      ? StatusPill.partial()
-                      : StatusPill.unpaid(),
+                      ? StatusPill(
+                          label: context.l10n.partial,
+                          variant: PillVariant.warning,
+                        )
+                      : StatusPill(
+                          label: context.l10n.unpaid,
+                          variant: PillVariant.unpaid,
+                        ),
                 ],
               ),
             ),
@@ -1054,7 +1103,7 @@ class _NeedsAttentionSectionState extends State<_NeedsAttentionSection> {
     if (widget.products.isEmpty) {
       return _EmptyState(
         icon: Icons.inventory_2_outlined,
-        message: 'All stocked up!',
+        message: context.l10n.allStockedUp,
       );
     }
 
@@ -1069,7 +1118,7 @@ class _NeedsAttentionSectionState extends State<_NeedsAttentionSection> {
         TextField(
           onChanged: (v) => setState(() => _query = v.toLowerCase()),
           decoration: InputDecoration(
-            hintText: 'Search items...',
+            hintText: context.l10n.searchItems,
             prefixIcon: const Icon(Icons.search, size: 20),
           ),
         ),
@@ -1136,7 +1185,7 @@ class _LowStockRow extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () async {
@@ -1154,7 +1203,7 @@ class _LowStockRow extends StatelessWidget {
               );
               if (ctx.mounted) Navigator.pop(ctx, true);
             },
-            child: const Text('Save'),
+            child: Text(context.l10n.save),
           ),
         ],
       ),
@@ -1182,11 +1231,13 @@ class _EmptyState extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 20, color: AppColors.inkFaint),
+          Icon(icon, size: 20, color: AppColors.inkFaintOf(context)),
           const SizedBox(width: AppSpacing.sm),
           Text(
             message,
-            style: AppText.caption.copyWith(color: AppColors.inkMuted),
+            style: AppText.caption.copyWith(
+              color: AppColors.inkMutedOf(context),
+            ),
           ),
         ],
       ),

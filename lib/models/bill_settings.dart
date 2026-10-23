@@ -1,3 +1,6 @@
+import 'invoice_numbering.dart';
+import 'shop_profile.dart';
+
 class BillSettings {
   static const defaultInvoiceTitle = 'TAX INVOICE';
   static const defaultFooterText = 'Thank you for your business.';
@@ -45,6 +48,28 @@ class BillSettings {
   final bool showGstTotal;
   final bool showGrandTotal;
   final bool showFooterText;
+
+  /// Round the grand total to the nearest rupee with a 'Round off' line.
+  final bool roundOffTotal;
+
+  /// PDF page size: [paperA4] or [paperA5].
+  final String paperSize;
+
+  /// Shop UPI id (name@bank). When set, unpaid invoices carry a UPI QR for
+  /// the balance due.
+  final String upiId;
+  final bool showUpiQr;
+  final bool showAmountInWords;
+  final bool showHsnSummary;
+
+  /// Free text printed at the bottom (returns policy, jurisdiction...).
+  final String termsText;
+
+  /// Free text bank block (account name, number, IFSC, bank) for B2B.
+  final String bankDetails;
+
+  static const paperA4 = 'a4';
+  static const paperA5 = 'a5';
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -93,12 +118,32 @@ class BillSettings {
     this.showGstTotal = true,
     this.showGrandTotal = true,
     this.showFooterText = true,
+    this.roundOffTotal = true,
+    this.paperSize = paperA4,
+    this.upiId = '',
+    this.showUpiQr = true,
+    this.showAmountInWords = true,
+    this.showHsnSummary = true,
+    this.termsText = '',
+    this.bankDetails = '',
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
   }) : createdAt = createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
        updatedAt =
            updatedAt ?? createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Document title for a bill. A custom title typed in Bill Settings always
+  /// wins; the default title is replaced by the one GST requires:
+  /// TAX INVOICE when the bill carries GST, BILL OF SUPPLY for a registered
+  /// (regular or composition) shop billing without tax, and BILL otherwise.
+  String documentTitle({required bool billHasGst, required String gstScheme}) {
+    final custom = invoiceTitle.trim().toUpperCase();
+    if (custom.isNotEmpty && custom != defaultInvoiceTitle) return custom;
+    if (billHasGst) return 'TAX INVOICE';
+    if (gstScheme == GstScheme.unregistered) return 'BILL';
+    return 'BILL OF SUPPLY';
+  }
 
   factory BillSettings.fromMap(Map<String, dynamic> map) {
     return BillSettings(
@@ -170,6 +215,14 @@ class BillSettings {
       showGstTotal: _flag(map['show_gst_total'], fallback: true),
       showGrandTotal: _flag(map['show_grand_total'], fallback: true),
       showFooterText: _flag(map['show_footer_text'], fallback: true),
+      roundOffTotal: _flag(map['round_off_total'], fallback: true),
+      paperSize: map['paper_size'] == paperA5 ? paperA5 : paperA4,
+      upiId: map['upi_id']?.toString().trim() ?? '',
+      showUpiQr: _flag(map['show_upi_qr'], fallback: true),
+      showAmountInWords: _flag(map['show_amount_in_words'], fallback: true),
+      showHsnSummary: _flag(map['show_hsn_summary'], fallback: true),
+      termsText: map['terms_text']?.toString().trim() ?? '',
+      bankDetails: map['bank_details']?.toString().trim() ?? '',
       createdAt: _date(map['created_at']),
       updatedAt: _date(map['updated_at']),
       deletedAt: map['deleted_at'] == null
@@ -224,6 +277,14 @@ class BillSettings {
     'show_gst_total': showGstTotal ? 1 : 0,
     'show_grand_total': showGrandTotal ? 1 : 0,
     'show_footer_text': showFooterText ? 1 : 0,
+    'round_off_total': roundOffTotal ? 1 : 0,
+    'paper_size': paperSize,
+    'upi_id': upiId.trim(),
+    'show_upi_qr': showUpiQr ? 1 : 0,
+    'show_amount_in_words': showAmountInWords ? 1 : 0,
+    'show_hsn_summary': showHsnSummary ? 1 : 0,
+    'terms_text': termsText.trim(),
+    'bank_details': bankDetails.trim(),
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
     'deleted_at': deletedAt?.toIso8601String(),
@@ -275,6 +336,14 @@ class BillSettings {
     bool? showGstTotal,
     bool? showGrandTotal,
     bool? showFooterText,
+    bool? roundOffTotal,
+    String? paperSize,
+    String? upiId,
+    bool? showUpiQr,
+    bool? showAmountInWords,
+    bool? showHsnSummary,
+    String? termsText,
+    String? bankDetails,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
@@ -332,6 +401,14 @@ class BillSettings {
       showGstTotal: showGstTotal ?? this.showGstTotal,
       showGrandTotal: showGrandTotal ?? this.showGrandTotal,
       showFooterText: showFooterText ?? this.showFooterText,
+      roundOffTotal: roundOffTotal ?? this.roundOffTotal,
+      paperSize: paperSize ?? this.paperSize,
+      upiId: upiId ?? this.upiId,
+      showUpiQr: showUpiQr ?? this.showUpiQr,
+      showAmountInWords: showAmountInWords ?? this.showAmountInWords,
+      showHsnSummary: showHsnSummary ?? this.showHsnSummary,
+      termsText: termsText ?? this.termsText,
+      bankDetails: bankDetails ?? this.bankDetails,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -352,9 +429,9 @@ class InvoiceSeriesSettings {
     this.id,
     this.uuid = '',
     this.name = 'Default',
-    this.formatTemplate = 'INV-{YYYY}{MM}{DD}-{SEQ}',
-    this.sequencePadding = 4,
-    this.resetPeriod = 'daily',
+    this.formatTemplate = InvoiceNumbering.defaultTemplate,
+    this.sequencePadding = InvoiceNumbering.defaultPadding,
+    this.resetPeriod = InvoiceNumbering.defaultResetPeriod,
     this.nextSequence = 1,
   });
 
@@ -365,7 +442,7 @@ class InvoiceSeriesSettings {
       name: _cleanText(map['name']?.toString()) ?? 'Default',
       formatTemplate:
           _cleanText(map['format_template']?.toString()) ??
-          'INV-{YYYY}{MM}{DD}-{SEQ}',
+          InvoiceNumbering.defaultTemplate,
       sequencePadding: ((map['sequence_padding'] as num?)?.toInt() ?? 4).clamp(
         1,
         8,
@@ -412,7 +489,7 @@ String? _cleanText(String? value) {
 String _cleanResetPeriod(Object? value) {
   const allowed = {'daily', 'monthly', 'financial_year', 'never'};
   final text = value?.toString();
-  return allowed.contains(text) ? text! : 'daily';
+  return allowed.contains(text) ? text! : InvoiceNumbering.defaultResetPeriod;
 }
 
 DateTime _date(Object? value) {

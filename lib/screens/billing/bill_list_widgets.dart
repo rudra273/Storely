@@ -64,7 +64,7 @@ class _UnpaidSummary extends StatelessWidget {
                     children: [
                       Expanded(child: Text(e.key, style: AppText.body)),
                       Text(
-                        '₹${e.value.toStringAsFixed(2)}',
+                        rupees(e.value),
                         style: AppText.subtitle.copyWith(
                           color: AppColors.error,
                         ),
@@ -112,7 +112,7 @@ class _UnpaidSummary extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '₹${b.balanceDue.toStringAsFixed(0)}',
+                        rupees(b.balanceDue, decimals: 0),
                         style: AppText.body.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.error,
@@ -158,7 +158,7 @@ class _BillFilterTabs extends StatelessWidget {
         children: [
           Expanded(
             child: _FilterChip(
-              label: 'Active',
+              label: context.l10n.active,
               count: activeCount,
               selected: !showCancelled,
               onTap: () => onChanged(false),
@@ -166,7 +166,7 @@ class _BillFilterTabs extends StatelessWidget {
           ),
           Expanded(
             child: _FilterChip(
-              label: 'Cancelled',
+              label: context.l10n.cancelled,
               count: cancelledCount,
               selected: showCancelled,
               onTap: () => onChanged(true),
@@ -199,9 +199,7 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         decoration: BoxDecoration(
-          color: selected
-              ? AppColors.surfaceOf(context)
-              : Colors.transparent,
+          color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
           borderRadius: AppRadius.smRadius,
           border: selected
               ? Border.all(color: AppColors.borderOf(context))
@@ -240,9 +238,9 @@ class _CancelledBillCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const LeadingIconChip(
+              LeadingIconChip(
                 icon: Icons.block_rounded,
-                color: AppColors.inkMuted,
+                color: AppColors.inkMutedOf(context),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
@@ -250,9 +248,7 @@ class _CancelledBillCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      bill.customerName.isEmpty
-                          ? 'Walk-in'
-                          : bill.customerName,
+                      bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
                       style: AppText.subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -271,16 +267,16 @@ class _CancelledBillCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const StatusPill(
-                    label: 'Cancelled',
+                  StatusPill(
+                    label: context.l10n.cancelled,
                     variant: PillVariant.neutral,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '₹${bill.totalAmount.toStringAsFixed(2)}',
+                    rupees(bill.totalAmount),
                     style: AppText.subtitle.copyWith(
                       fontSize: 14,
-                      color: AppColors.inkMuted,
+                      color: AppColors.inkMutedOf(context),
                       decoration: TextDecoration.lineThrough,
                     ),
                   ),
@@ -302,14 +298,21 @@ class _CancelledBillCard extends StatelessWidget {
               text: 'Reason: ${bill.cancelReason}',
             ),
           const SizedBox(height: AppSpacing.xs),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _ActionButton(
-              onPressed: onDuplicate,
-              icon: Icons.copy_rounded,
-              label: 'Duplicate as New',
-              color: AppColors.brandOf(context),
-            ),
+          Wrap(
+            children: [
+              _ActionButton(
+                onPressed: onDuplicate,
+                icon: Icons.copy_rounded,
+                label: context.l10n.duplicateAsNew,
+                color: AppColors.brandOf(context),
+              ),
+              _ActionButton(
+                onPressed: () => showBillHistory(context, bill),
+                icon: Icons.history_rounded,
+                label: context.l10n.history,
+                color: AppColors.inkMutedOf(context),
+              ),
+            ],
           ),
         ],
       ),

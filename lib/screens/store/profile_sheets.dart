@@ -16,7 +16,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
   late final TextEditingController _emailCtrl;
   late final TextEditingController _gstinCtrl;
   late final TextEditingController _addressCtrl;
-  late bool _gstRegistered;
+  late String _gstScheme;
 
   @override
   void initState() {
@@ -27,7 +27,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
     _emailCtrl = TextEditingController(text: profile.email ?? '');
     _gstinCtrl = TextEditingController(text: profile.gstin ?? '');
     _addressCtrl = TextEditingController(text: profile.address ?? '');
-    _gstRegistered = profile.gstRegistered;
+    _gstScheme = profile.gstScheme;
   }
 
   @override
@@ -42,7 +42,8 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    if (_gstRegistered && _cleanOptional(_gstinCtrl.text) == null) {
+    if (_gstScheme != GstScheme.unregistered &&
+        _cleanOptional(_gstinCtrl.text) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Add a GSTIN to mark the shop as GST registered'),
@@ -61,7 +62,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
         email: _cleanOptional(_emailCtrl.text),
         gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
         address: _cleanOptional(_addressCtrl.text),
-        gstRegistered: _gstRegistered,
+        gstScheme: _gstScheme,
         createdAt: current.createdAt,
         updatedAt: current.updatedAt,
       ),
@@ -122,7 +123,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
               onChanged: (value) {
                 final hasGstin = _cleanOptional(value) != null;
                 setState(() {
-                  if (!hasGstin) _gstRegistered = false;
+                  if (!hasGstin) _gstScheme = GstScheme.unregistered;
                 });
               },
             ),
@@ -141,21 +142,51 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
             Builder(
               builder: (context) {
                 final hasGstin = _cleanOptional(_gstinCtrl.text) != null;
-                return SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Shop is GST registered'),
-                  subtitle: Text(
-                    !hasGstin
-                        ? 'Add a GSTIN above to enable GST'
-                        : _gstRegistered
-                        ? 'GST is added on selling price'
-                        : 'Purchase GST is included in cost',
-                  ),
-                  value: _gstRegistered,
-                  activeThumbColor: AppColors.brandOf(context),
-                  onChanged: hasGstin
-                      ? (value) => setState(() => _gstRegistered = value)
-                      : null,
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: GstScheme.regular,
+                          label: Text('Regular'),
+                        ),
+                        ButtonSegment(
+                          value: GstScheme.composition,
+                          label: Text('Composition'),
+                        ),
+                        ButtonSegment(
+                          value: GstScheme.unregistered,
+                          label: Text('Not registered'),
+                        ),
+                      ],
+                      selected: {_gstScheme},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (value) {
+                        final scheme = value.first;
+                        if (scheme != GstScheme.unregistered && !hasGstin) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Add a GSTIN above first'),
+                            ),
+                          );
+                          return;
+                        }
+                        setState(() => _gstScheme = scheme);
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(switch (_gstScheme) {
+                      GstScheme.regular =>
+                        'Bills are TAX INVOICES with CGST/SGST or IGST',
+                      GstScheme.composition =>
+                        'Bills are BILLS OF SUPPLY with no tax. '
+                            'Purchase GST is included in cost',
+                      _ =>
+                        'Bills show no GST. '
+                            'Purchase GST is included in cost',
+                    }, style: AppText.caption),
+                  ],
                 );
               },
             ),

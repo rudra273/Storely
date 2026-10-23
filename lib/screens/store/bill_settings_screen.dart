@@ -4,6 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/bill_settings.dart';
+import '../../models/invoice_numbering.dart';
+import '../../utils/upi.dart';
 import '../../theme/app_theme.dart';
 
 /// Full-page editor for invoice/bill appearance: numbering series, visible
@@ -26,6 +28,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   final TextEditingController _patternCtrl = TextEditingController();
   final TextEditingController _paddingCtrl = TextEditingController();
   final TextEditingController _seriesNameCtrl = TextEditingController();
+  final TextEditingController _upiCtrl = TextEditingController();
+  final TextEditingController _termsCtrl = TextEditingController();
+  final TextEditingController _bankCtrl = TextEditingController();
   BillSettings _settings = BillSettings();
   InvoiceSeriesSettings _series = const InvoiceSeriesSettings();
   bool _isLoading = true;
@@ -41,6 +46,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   void dispose() {
     _titleCtrl.dispose();
     _footerCtrl.dispose();
+    _upiCtrl.dispose();
+    _termsCtrl.dispose();
+    _bankCtrl.dispose();
     _patternCtrl.dispose();
     _paddingCtrl.dispose();
     _seriesNameCtrl.dispose();
@@ -57,6 +65,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       _series = series;
       _titleCtrl.text = settings.invoiceTitle;
       _footerCtrl.text = settings.footerText;
+      _upiCtrl.text = settings.upiId;
+      _termsCtrl.text = settings.termsText;
+      _bankCtrl.text = settings.bankDetails;
       _patternCtrl.text = series.formatTemplate;
       _paddingCtrl.text = series.sequencePadding.toString();
       _seriesNameCtrl.text = series.name;
@@ -102,16 +113,27 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   Future<void> _save() async {
     if (_isSaving) return;
     final pattern = _patternCtrl.text.trim();
-    if (!pattern.contains('{SEQ}')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bill number pattern must include {SEQ}')),
-      );
+    final problem = _patternProblem();
+    if (problem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(problem)));
       return;
     }
-    final padding = int.tryParse(_paddingCtrl.text.trim()) ?? 4;
+    final upiProblem = _upiProblem();
+    if (upiProblem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(upiProblem)));
+      return;
+    }
+    final padding = _padding;
     final settings = _settings.copyWith(
       invoiceTitle: _titleCtrl.text,
       footerText: _footerCtrl.text,
+      upiId: _upiCtrl.text.trim(),
+      termsText: _termsCtrl.text,
+      bankDetails: _bankCtrl.text,
     );
     final series = _series.copyWith(
       name: _seriesNameCtrl.text.trim().isEmpty
@@ -132,14 +154,44 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       setState(() => _isSaving = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
+  }
+
+  String? _upiProblem() {
+    final value = _upiCtrl.text.trim();
+    if (value.isEmpty || Upi.isValidId(value)) return null;
+    return 'Enter a UPI ID like shopname@okicici';
+  }
+
+  int get _padding =>
+      (int.tryParse(_paddingCtrl.text.trim()) ??
+              InvoiceNumbering.defaultPadding)
+          .clamp(1, 8);
+
+  String? _patternProblem() => InvoiceNumbering.validate(
+    template: _patternCtrl.text.trim(),
+    padding: _padding,
+    resetPeriod: _series.resetPeriod,
+  );
+
+  String _patternPreview() {
+    final number = InvoiceNumbering.format(
+      template: _patternCtrl.text.trim(),
+      date: DateTime.now(),
+      sequence: 1,
+      padding: _padding,
+      deviceCode: '',
+    );
+    return 'First bill: $number  (${number.length}/${InvoiceNumbering.maxLength})'
+        '\nTokens: {FY}, {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}';
   }
 
   Widget _sequenceDigitsField() {
     return TextField(
       controller: _paddingCtrl,
       keyboardType: TextInputType.number,
+      onChanged: (_) => setState(() {}),
       decoration: const InputDecoration(
         labelText: 'Sequence digits',
         prefixIcon: Icon(Icons.format_list_numbered_rounded),
@@ -199,12 +251,14 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                       TextField(
                         controller: _patternCtrl,
                         textCapitalization: TextCapitalization.characters,
-                        decoration: const InputDecoration(
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
                           labelText: 'Bill number pattern',
-                          helperText:
-                              'Tokens: {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}',
-                          helperMaxLines: 2,
-                          prefixIcon: Icon(Icons.tag_outlined),
+                          helperText: _patternPreview(),
+                          helperMaxLines: 3,
+                          errorText: _patternProblem(),
+                          errorMaxLines: 3,
+                          prefixIcon: const Icon(Icons.tag_outlined),
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
@@ -236,6 +290,10 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                         textCapitalization: TextCapitalization.characters,
                         decoration: const InputDecoration(
                           labelText: 'Invoice title',
+                          helperText:
+                              'Keep TAX INVOICE to switch automatically to '
+                              'BILL OF SUPPLY or BILL when a bill has no GST',
+                          helperMaxLines: 2,
                           prefixIcon: Icon(Icons.title_rounded),
                         ),
                       ),
@@ -248,6 +306,94 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                           labelText: 'Footer text',
                           prefixIcon: Icon(Icons.notes_outlined),
                         ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _termsCtrl,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Terms & conditions',
+                          hintText:
+                              'e.g. Goods once sold are exchanged within 7 days',
+                          prefixIcon: Icon(Icons.gavel_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Paper size', style: AppText.caption),
+                      const SizedBox(height: AppSpacing.xs),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: BillSettings.paperA4,
+                            label: Text('A4'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paperA5,
+                            label: Text('A5 (half page)'),
+                          ),
+                        ],
+                        selected: {_settings.paperSize},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (value) => setState(
+                          () => _settings = _settings.copyWith(
+                            paperSize: value.first,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      const _SettingsSectionLabel(title: 'Payment'),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _upiCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'UPI ID',
+                          hintText: 'shopname@okicici',
+                          helperText:
+                              'Unpaid bills get a UPI QR for the balance due',
+                          errorText: _upiProblem(),
+                          prefixIcon: const Icon(Icons.qr_code_2_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _bankCtrl,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Bank details (optional)',
+                          hintText: 'A/c name, A/c no, IFSC, Bank',
+                          prefixIcon: Icon(Icons.account_balance_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      _ToggleGroup(
+                        title: 'Extras',
+                        children: [
+                          _switch(
+                            'UPI QR on unpaid bills',
+                            _settings.showUpiQr,
+                            (value) => _settings = _settings.copyWith(
+                              showUpiQr: value,
+                            ),
+                          ),
+                          _switch(
+                            'Amount in words',
+                            _settings.showAmountInWords,
+                            (value) => _settings = _settings.copyWith(
+                              showAmountInWords: value,
+                            ),
+                          ),
+                          _switch(
+                            'HSN tax summary (GST bills)',
+                            _settings.showHsnSummary,
+                            (value) => _settings = _settings.copyWith(
+                              showHsnSummary: value,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       _ToggleGroup(
@@ -514,6 +660,13 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                             _settings.showGrandTotal,
                             (value) => _settings = _settings.copyWith(
                               showGrandTotal: value,
+                            ),
+                          ),
+                          _switch(
+                            'Round grand total to nearest ₹1',
+                            _settings.roundOffTotal,
+                            (value) => _settings = _settings.copyWith(
+                              roundOffTotal: value,
                             ),
                           ),
                         ],
@@ -826,6 +979,8 @@ class _PreviewSample {
   static const sgst = '17.15';
   static const gstTotal = '34.30';
   static const grandTotal = '224.90';
+  static const roundOff = '+0.10';
+  static const roundedGrandTotal = '225.00';
 }
 
 /// A live, scaled-down mock of the generated invoice PDF. Mirrors the section
@@ -1196,8 +1351,15 @@ class _BillPreviewPanel extends StatelessWidget {
         ['SGST', _PreviewSample.sgst, false],
       if (showGst && settings.showGstTotal)
         ['GST Total', _PreviewSample.gstTotal, false],
+      if (settings.roundOffTotal) ['Round off', _PreviewSample.roundOff, false],
       if (settings.showGrandTotal)
-        ['Grand total', _PreviewSample.grandTotal, true],
+        [
+          'Grand total',
+          settings.roundOffTotal
+              ? _PreviewSample.roundedGrandTotal
+              : _PreviewSample.grandTotal,
+          true,
+        ],
     ];
     if (rows.isEmpty) return null;
     return Align(
@@ -1236,10 +1398,12 @@ class _BillPreviewPanel extends StatelessWidget {
   }
 
   Widget? _footer() {
-    final hasSignature = settings.showDigitalSignature &&
+    final hasSignature =
+        settings.showDigitalSignature &&
         settings.digitalSignatureBase64 != null;
-    final footerText =
-        settings.showFooterText ? settings.footerText.trim() : '';
+    final footerText = settings.showFooterText
+        ? settings.footerText.trim()
+        : '';
     if (footerText.isEmpty && !hasSignature) return null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1288,6 +1452,11 @@ class _PreviewCol {
   final _ColKind kind;
   final int dataIndex;
 
-  const _PreviewCol(this.label, this.flex, this.align, this.kind,
-      [this.dataIndex = 0]);
+  const _PreviewCol(
+    this.label,
+    this.flex,
+    this.align,
+    this.kind, [
+    this.dataIndex = 0,
+  ]);
 }

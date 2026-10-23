@@ -163,7 +163,10 @@ class _MembersSheetState extends State<_MembersSheet> {
                   const Expanded(
                     child: Text(
                       'Members',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   FilledButton.icon(
@@ -221,9 +224,7 @@ class _MembersList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (members.isEmpty && invites.isEmpty) {
-      return Center(
-        child: Text('No members yet.', style: AppText.caption),
-      );
+      return Center(child: Text('No members yet.', style: AppText.caption));
     }
     return ListView(
       children: [
@@ -244,11 +245,8 @@ class _MembersList extends StatelessWidget {
           Text('Pending invites', style: AppText.caption),
           const SizedBox(height: 8),
           ...invites.map(
-            (i) => _InviteTile(
-              invite: i,
-              busy: busy,
-              onRevoke: () => onRevoke(i),
-            ),
+            (i) =>
+                _InviteTile(invite: i, busy: busy, onRevoke: () => onRevoke(i)),
           ),
         ],
       ],

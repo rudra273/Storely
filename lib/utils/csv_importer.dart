@@ -7,6 +7,25 @@ import 'package:flutter/foundation.dart';
 import 'package:xml/xml.dart';
 import '../models/product.dart';
 
+/// One file row that could not be imported.
+class ImportRowError {
+  final int row;
+  final String message;
+
+  const ImportRowError(this.row, this.message);
+
+  @override
+  String toString() => 'Row $row: $message';
+}
+
+/// Parsed rows ready to import plus the rows that were skipped.
+class ImportParseResult {
+  final List<Product> products;
+  final List<ImportRowError> errors;
+
+  const ImportParseResult(this.products, this.errors);
+}
+
 class CsvImporter {
   static const requiredColumns = ['product_name', 'quantity', 'purchase_price'];
   static const optionalColumns = [
@@ -15,7 +34,39 @@ class CsvImporter {
     'category',
     'selling_price',
     'unit',
+    'hsn_code',
+    'gst_percent',
+    'reorder_level',
   ];
+
+  /// Other header spellings shop files use for each column (after
+  /// normalising: lower case, words joined by "_").
+  static const _aliases = <String, List<String>>{
+    'product_name': ['name', 'product', 'item', 'item_name', 'description'],
+    'quantity': ['qty', 'stock', 'opening_stock', 'quantity_in_stock'],
+    'purchase_price': [
+      'cost',
+      'cost_price',
+      'buy_price',
+      'buying_price',
+      'purchase_rate',
+    ],
+    'selling_price': [
+      'price',
+      'sale_price',
+      'sales_price',
+      'rate',
+      'sale_rate',
+      'mrp',
+    ],
+    'product_code': ['code', 'item_code', 'sku'],
+    'barcode': ['bar_code', 'ean', 'upc'],
+    'category': ['group', 'item_group'],
+    'unit': ['uom', 'units'],
+    'hsn_code': ['hsn', 'hsn_sac', 'sac', 'hsn_sac_code'],
+    'gst_percent': ['gst', 'gst_rate', 'tax', 'tax_rate', 'gst_percentage'],
+    'reorder_level': ['reorder', 'min_stock', 'minimum_stock', 'low_stock'],
+  };
 
   static String get columnGuide =>
       'Required columns: ${requiredColumns.join(', ')}\n'
@@ -34,7 +85,31 @@ class CsvImporter {
   }
 
   /// Parses CSV or Excel bytes from file pickers that do not expose a path.
+  /// Throws if any row has an error; see [parseBytesDetailed] to import the
+  /// valid rows and list the rest.
   static Future<List<Product>> parseBytes(
+    Uint8List bytes, {
+    required String fileName,
+    String? extension,
+  }) async {
+    final result = await parseBytesDetailed(
+      bytes,
+      fileName: fileName,
+      extension: extension,
+    );
+    if (result.errors.isNotEmpty) {
+      final preview = result.errors.take(10).join('\n');
+      final suffix = result.errors.length > 10
+          ? '\n...and ${result.errors.length - 10} more row errors'
+          : '';
+      throw Exception('Import failed:\n$preview$suffix');
+    }
+    return result.products;
+  }
+
+  /// Like [parseBytes], but returns the valid rows with per-row errors
+  /// instead of failing the whole file. File-level problems still throw.
+  static Future<ImportParseResult> parseBytesDetailed(
     Uint8List bytes, {
     required String fileName,
     String? extension,
@@ -56,10 +131,10 @@ class CsvImporter {
       rows = _readCsv(content);
     }
 
-    return _productsFromRows(rows);
+    return _parseRows(rows);
   }
 
-  static List<Product> _productsFromRows(List<List<dynamic>> rows) {
+  static ImportParseResult _parseRows(List<List<dynamic>> rows) {
     if (rows.isEmpty) throw Exception('File is empty');
     if (rows.length < 2) {
       throw Exception('File must have a header row and at least one data row');
@@ -80,15 +155,16 @@ class CsvImporter {
     }
 
     final products = <Product>[];
-    final errors = <String>[];
+    final errors = <ImportRowError>[];
     for (int i = header.index + 1; i < rows.length; i++) {
       final row = rows[i];
       if (_isBlankRow(row)) continue;
 
       final rowNumber = i + 1;
+      final rowErrors = <String>[];
       final name = _getString(row, mapping['product_name']);
       if (name == null || name.isEmpty) {
-        errors.add('Row $rowNumber: Product name is required');
+        errors.add(ImportRowError(rowNumber, 'Product name is required'));
         continue;
       }
 
@@ -97,21 +173,56 @@ class CsvImporter {
         mapping['selling_price'],
         'Selling price',
         rowNumber,
-        errors,
+        rowErrors,
       );
       final purchasePrice = _getRequiredMoney(
         row,
         mapping['purchase_price'],
         'Purchase price',
         rowNumber,
-        errors,
+        rowErrors,
       );
       final quantity = _getRequiredQuantity(
         row,
         mapping['quantity'],
         rowNumber,
-        errors,
+        rowErrors,
       );
+      final gstPercent = _getMoney(
+        row,
+        mapping['gst_percent'],
+        'GST %',
+        rowNumber,
+        rowErrors,
+      );
+      if (gstPercent != null && !_gstRates.contains(gstPercent)) {
+        rowErrors.add(
+          'Row $rowNumber: GST % must be one of '
+          '${_gstRates.map(_trimNumber).join(', ')}',
+        );
+      }
+      final reorderLevel = _getQuantity(
+        row,
+        mapping['reorder_level'],
+        rowNumber,
+        rowErrors,
+      );
+      final hsn = _getString(row, mapping['hsn_code']);
+      if (hsn != null && !RegExp(r'^\d{4,8}$').hasMatch(hsn)) {
+        rowErrors.add('Row $rowNumber: HSN/SAC code must be 4 to 8 digits');
+      }
+
+      if (rowErrors.isNotEmpty) {
+        errors.add(
+          ImportRowError(
+            rowNumber,
+            rowErrors
+                .map((e) => e.replaceFirst('Row $rowNumber: ', ''))
+                .join('; '),
+          ),
+        );
+        continue;
+      }
 
       products.add(
         Product(
@@ -119,27 +230,27 @@ class CsvImporter {
           barcode: _getString(row, mapping['barcode']),
           name: name,
           category: _getString(row, mapping['category']),
+          hsnCode: hsn,
+          gstPercent: gstPercent,
           sellingPrice: sellingPrice ?? 0,
           purchasePrice: purchasePrice ?? 0,
           directPriceToggle: sellingPrice != null,
           manualPrice: sellingPrice,
           quantity: quantity ?? 0,
+          reorderLevel: reorderLevel,
           unit: _getString(row, mapping['unit']),
           source: ProductSource.imported,
         ),
       );
     }
 
-    if (errors.isNotEmpty) {
-      final preview = errors.take(10).join('\n');
-      final suffix = errors.length > 10
-          ? '\n...and ${errors.length - 10} more row errors'
-          : '';
-      throw Exception('Import failed:\n$preview$suffix');
-    }
-
-    return products;
+    return ImportParseResult(products, errors);
   }
+
+  static const _gstRates = [0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0];
+
+  static String _trimNumber(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
   static _HeaderMatch _readHeader(List<List<dynamic>> rows) {
     for (var i = 0; i < rows.length; i++) {
@@ -156,7 +267,11 @@ class CsvImporter {
 
   /// Reads CSV content into rows.
   static List<List<dynamic>> _readCsv(String content) {
-    return const CsvToListConverter().convert(content, eol: '\n');
+    // Keep every cell as text: number parsing turned barcodes/codes like
+    // "001234" into 1234 and long codes into doubles, so they never matched.
+    return const CsvToListConverter(
+      shouldParseNumbers: false,
+    ).convert(content, eol: '\n');
   }
 
   /// Reads an Excel file on a background isolate to prevent UI jank/crashes.
@@ -437,29 +552,39 @@ class CsvImporter {
     }
   }
 
-  /// Maps exact standard header names to our field names.
+  /// Maps standard header names (and their [_aliases]) to field names.
+  /// An exact standard name wins over an alias.
   static Map<String, int?> _mapColumns(List<String> headers) {
     final mapping = <String, int?>{
-      'product_code': null,
-      'barcode': null,
-      'product_name': null,
-      'category': null,
-      'selling_price': null,
-      'purchase_price': null,
-      'quantity': null,
-      'unit': null,
+      for (final column in [...requiredColumns, ...optionalColumns])
+        column: null,
     };
-
     for (int i = 0; i < headers.length; i++) {
-      final header = headers[i];
-      if (mapping.containsKey(header)) mapping[header] = i;
+      if (mapping.containsKey(headers[i]) && mapping[headers[i]] == null) {
+        mapping[headers[i]] = i;
+      }
     }
-
+    for (final entry in _aliases.entries) {
+      if (mapping[entry.key] != null) continue;
+      for (int i = 0; i < headers.length; i++) {
+        if (entry.value.contains(headers[i]) && !mapping.values.contains(i)) {
+          mapping[entry.key] = i;
+          break;
+        }
+      }
+    }
     return mapping;
   }
 
-  static String _normaliseHeader(Object value) =>
-      value.toString().trim().toLowerCase();
+  /// "Product Name", "product-name" and " PRODUCT_NAME " all become
+  /// "product_name"; "GST %" becomes "gst".
+  static String _normaliseHeader(Object value) => value
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'\(.*?\)'), '')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
 
   static String? _getString(List row, int? index) {
     if (index == null || index >= row.length) return null;
@@ -535,14 +660,25 @@ class CsvImporter {
     if (index == null || index >= row.length) return null;
     final raw = row[index].toString().trim();
     if (raw.isEmpty) return null;
-    final normalised = raw
-        .replaceAll(',', '')
-        .replaceAll(RegExp(r'[^0-9.\-]'), '');
-    final value = double.tryParse(normalised);
+    final value = parseIndianNumber(raw);
     if (value == null) {
       errors.add('Row $rowNumber: Invalid $label "$raw"');
     }
     return value;
+  }
+
+  /// Parses amounts as Indian shops write them: "Rs.250", "₹ 1,25,000.50",
+  /// "INR 99", "250/-", and quantities with a unit ("2.5 kg"). Returns null for anything else instead of guessing
+  /// (the old digit-stripping read "Rs.250" as 0.25).
+  @visibleForTesting
+  static double? parseIndianNumber(String raw) {
+    var text = raw.trim().toLowerCase();
+    text = text.replaceFirst(RegExp(r'^(rs\.?|inr|₹)\s*'), '');
+    text = text.replaceFirst(RegExp(r'\s*/-$'), '');
+    text = text.replaceAll(',', '');
+    // Optional trailing unit word, e.g. "2.5 kg", "10 pcs", "250 rs".
+    final match = RegExp(r'^(-?\d+(\.\d+)?)\s*[a-z]*\.?$').firstMatch(text);
+    return match == null ? null : double.tryParse(match.group(1)!);
   }
 
   static bool _hasCellValue(List row, int? index) {

@@ -108,6 +108,14 @@ create table if not exists public.bill_settings (
   show_gst_total integer not null default 1,
   show_grand_total integer not null default 1,
   show_footer_text integer not null default 1,
+  round_off_total integer not null default 1,
+  paper_size text not null default 'a4',
+  upi_id text,
+  show_upi_qr integer not null default 1,
+  show_amount_in_words integer not null default 1,
+  show_hsn_summary integer not null default 1,
+  terms_text text,
+  bank_details text,
   created_at text not null,
   updated_at text not null,
   deleted_at text
@@ -201,6 +209,8 @@ create table if not exists public.products (
   direct_price_toggle integer not null default 0,
   manual_price double precision,
   quantity_cache double precision not null default 0,
+  track_stock integer not null default 1,
+  reorder_level double precision,
   unit_uuid text references public.units(uuid),
   source text not null default 'mobile',
   device_id text,
@@ -231,6 +241,10 @@ create table if not exists public.bills (
   cgst_amount double precision not null default 0,
   sgst_amount double precision not null default 0,
   igst_amount double precision not null default 0,
+  round_off_amount double precision not null default 0,
+  document_type text not null default 'invoice',
+  original_bill_uuid text,
+  original_bill_number text,
   total_amount double precision not null,
   item_count integer not null,
   is_paid integer not null default 1,
@@ -269,6 +283,7 @@ create table if not exists public.bill_items (
   sgst_amount_snapshot double precision not null default 0,
   igst_amount_snapshot double precision not null default 0,
   was_direct_price integer not null default 1,
+  original_item_uuid text,
   quantity double precision not null default 0,
   subtotal double precision not null,
   device_id text,
@@ -325,6 +340,7 @@ create table if not exists public.stock_movements (
   import_batch_key text,
   import_row_number integer,
   notes text,
+  reason text,
   device_id text,
   created_at text not null,
   updated_at text not null,
@@ -690,52 +706,72 @@ using (public.is_shop_admin(shop_id));
 
 -- ── Admin-managed tables: members can read, only owner/admin can write ──
 drop policy if exists "Members can sync app_settings" on public.app_settings;
+drop policy if exists "Members can read app_settings" on public.app_settings;
 create policy "Members can read app_settings" on public.app_settings
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert app_settings" on public.app_settings;
 create policy "Admins can insert app_settings" on public.app_settings
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update app_settings" on public.app_settings;
 create policy "Admins can update app_settings" on public.app_settings
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete app_settings" on public.app_settings;
 create policy "Admins can delete app_settings" on public.app_settings
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync bill_settings" on public.bill_settings;
+drop policy if exists "Members can read bill_settings" on public.bill_settings;
 create policy "Members can read bill_settings" on public.bill_settings
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert bill_settings" on public.bill_settings;
 create policy "Admins can insert bill_settings" on public.bill_settings
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update bill_settings" on public.bill_settings;
 create policy "Admins can update bill_settings" on public.bill_settings
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete bill_settings" on public.bill_settings;
 create policy "Admins can delete bill_settings" on public.bill_settings
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync categories" on public.categories;
+drop policy if exists "Members can read categories" on public.categories;
 create policy "Members can read categories" on public.categories
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert categories" on public.categories;
 create policy "Admins can insert categories" on public.categories
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update categories" on public.categories;
 create policy "Admins can update categories" on public.categories
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete categories" on public.categories;
 create policy "Admins can delete categories" on public.categories
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync units" on public.units;
+drop policy if exists "Members can read units" on public.units;
 create policy "Members can read units" on public.units
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert units" on public.units;
 create policy "Admins can insert units" on public.units
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update units" on public.units;
 create policy "Admins can update units" on public.units
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete units" on public.units;
 create policy "Admins can delete units" on public.units
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync suppliers" on public.suppliers;
+drop policy if exists "Members can read suppliers" on public.suppliers;
 create policy "Members can read suppliers" on public.suppliers
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert suppliers" on public.suppliers;
 create policy "Admins can insert suppliers" on public.suppliers
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update suppliers" on public.suppliers;
 create policy "Admins can update suppliers" on public.suppliers
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete suppliers" on public.suppliers;
 create policy "Admins can delete suppliers" on public.suppliers
 for delete using (public.is_shop_admin(shop_id));
 
@@ -746,22 +782,30 @@ using (public.is_shop_member(shop_id))
 with check (public.is_shop_member(shop_id));
 
 drop policy if exists "Members can sync products" on public.products;
+drop policy if exists "Members can read products" on public.products;
 create policy "Members can read products" on public.products
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert products" on public.products;
 create policy "Admins can insert products" on public.products
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update products" on public.products;
 create policy "Admins can update products" on public.products
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete products" on public.products;
 create policy "Admins can delete products" on public.products
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync invoice_series" on public.invoice_series;
+drop policy if exists "Members can read invoice_series" on public.invoice_series;
 create policy "Members can read invoice_series" on public.invoice_series
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert invoice_series" on public.invoice_series;
 create policy "Admins can insert invoice_series" on public.invoice_series
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update invoice_series" on public.invoice_series;
 create policy "Admins can update invoice_series" on public.invoice_series
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete invoice_series" on public.invoice_series;
 create policy "Admins can delete invoice_series" on public.invoice_series
 for delete using (public.is_shop_admin(shop_id));
 
@@ -811,3 +855,486 @@ create index if not exists idx_bill_payments_bill_uuid on public.bill_payments(b
 create index if not exists idx_stock_movements_shop_updated on public.stock_movements(shop_id, updated_at);
 create index if not exists idx_stock_movements_source_document
 on public.stock_movements(source_document_type, source_document_uuid);
+
+-- ── Sync v2 (mirrors migrations/20261024_sync_v2.sql) ──
+create or replace function public.storely_sync_before_write()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  sticky boolean := tg_table_name in (
+    'bills', 'bill_items', 'bill_payments', 'stock_movements'
+  );
+  incoming_ts timestamptz;
+  stored_ts timestamptz;
+  deletion jsonb;
+begin
+  new.server_updated_at := now();
+  if tg_op = 'INSERT' then
+    return new;
+  end if;
+
+  -- Deleted billing records stay deleted.
+  if sticky and old.deleted_at is not null and new.deleted_at is null then
+    new.deleted_at := old.deleted_at;
+    if tg_table_name = 'bills' then
+      new := jsonb_populate_record(new, jsonb_build_object(
+        'lifecycle_status', to_jsonb(old) ->> 'lifecycle_status',
+        'cancelled_at', to_jsonb(old) ->> 'cancelled_at',
+        'cancel_reason', to_jsonb(old) ->> 'cancel_reason'
+      ));
+    end if;
+  end if;
+
+  incoming_ts := nullif(new.updated_at, '')::timestamptz;
+  stored_ts := nullif(old.updated_at, '')::timestamptz;
+  if incoming_ts is null or stored_ts is null or incoming_ts >= stored_ts then
+    return new;
+  end if;
+
+  -- The upload is older than what is stored. Keep the stored row, except
+  -- that a deletion still applies.
+  if old.deleted_at is null and new.deleted_at is not null then
+    deletion := jsonb_build_object('deleted_at', new.deleted_at);
+    if tg_table_name = 'bills' then
+      deletion := deletion || jsonb_build_object(
+        'lifecycle_status', to_jsonb(new) ->> 'lifecycle_status',
+        'cancelled_at', to_jsonb(new) ->> 'cancelled_at',
+        'cancel_reason', to_jsonb(new) ->> 'cancel_reason'
+      );
+    end if;
+    new := jsonb_populate_record(old, deletion);
+    new.server_updated_at := now();
+    return new;
+  end if;
+  return null;
+end;
+$$;
+
+do $$
+declare
+  t text;
+  key_column text;
+begin
+  foreach t in array array[
+    'shops', 'app_settings', 'bill_settings', 'categories', 'units',
+    'suppliers', 'customers', 'products', 'invoice_series', 'bills',
+    'bill_items', 'bill_payments', 'stock_movements'
+  ] loop
+    execute format(
+      'alter table public.%I add column if not exists server_updated_at '
+      'timestamptz not null default now()', t);
+    execute format(
+      'drop trigger if exists storely_sync_before_write on public.%I', t);
+    execute format(
+      'create trigger storely_sync_before_write before insert or update '
+      'on public.%I for each row execute function '
+      'public.storely_sync_before_write()', t);
+    key_column := case t when 'app_settings' then 'key' else 'uuid' end;
+    if t = 'shops' then
+      execute 'create index if not exists idx_shops_server_updated '
+        'on public.shops (server_updated_at, uuid)';
+    else
+      execute format(
+        'create index if not exists %I on public.%I '
+        '(shop_id, server_updated_at, %I)',
+        'idx_' || t || '_shop_server_updated', t, key_column);
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function public.sync_pull(
+  p_table text,
+  p_shop_id text,
+  p_after_ts timestamptz,
+  p_after_key text,
+  p_limit integer default 500
+)
+returns setof jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  key_column text;
+  shop_column text;
+begin
+  if p_table not in (
+    'shops', 'app_settings', 'bill_settings', 'categories', 'units',
+    'suppliers', 'customers', 'products', 'invoice_series', 'bills',
+    'bill_items', 'bill_payments', 'stock_movements', 'expenses', 'audit_log'
+  ) then
+    raise exception 'sync_pull: unknown table %', p_table;
+  end if;
+  key_column := case p_table when 'app_settings' then 'key' else 'uuid' end;
+  shop_column := case p_table when 'shops' then 'uuid' else 'shop_id' end;
+  return query execute format(
+    'select to_jsonb(t) from public.%I t '
+    'where t.%I = $1 and (t.server_updated_at, t.%I) > ($2, $3) '
+    'order by t.server_updated_at, t.%I limit $4',
+    p_table, shop_column, key_column, key_column)
+  using p_shop_id, p_after_ts, coalesce(p_after_key, ''),
+        least(greatest(coalesce(p_limit, 500), 1), 1000);
+end;
+$$;
+
+grant execute on function public.sync_pull(text, text, timestamptz, text, integer)
+  to authenticated;
+
+-- ── Device bill-number letters (mirrors migrations/20261024_device_codes.sql) ──
+create table if not exists public.shop_devices (
+  shop_id text not null references public.shops(uuid) on delete cascade,
+  device_id text not null,
+  code text not null,
+  registered_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (shop_id, device_id),
+  unique (shop_id, code)
+);
+
+alter table public.shop_devices enable row level security;
+
+drop policy if exists "Members can view shop devices" on public.shop_devices;
+create policy "Members can view shop devices"
+on public.shop_devices for select
+using (public.is_shop_member(shop_id));
+-- No insert/update/delete policies: devices are registered only through
+-- register_device(), which assigns the code.
+
+create or replace function public.register_device(
+  target_shop_id text,
+  device_uuid text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  existing text;
+  n integer;
+  next_code text;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+  if not public.is_shop_member(target_shop_id) then
+    raise exception 'Not a member of this shop';
+  end if;
+  if coalesce(device_uuid, '') = '' then
+    raise exception 'device_uuid is required';
+  end if;
+
+  -- Serialise registrations per shop so two phones never get one code.
+  perform pg_advisory_xact_lock(hashtext('storely_device:' || target_shop_id));
+
+  select code into existing
+  from public.shop_devices
+  where shop_id = target_shop_id and device_id = device_uuid;
+  if found then
+    return existing;
+  end if;
+
+  select count(*) into n from public.shop_devices where shop_id = target_shop_id;
+  if n = 0 then
+    next_code := '';
+  elsif n < 26 then
+    next_code := chr(65 + n);
+  else
+    next_code := chr(65 + n / 26) || chr(65 + n % 26);
+  end if;
+
+  insert into public.shop_devices (shop_id, device_id, code, registered_by)
+  values (target_shop_id, device_uuid, next_code, auth.uid());
+  return next_code;
+end;
+$$;
+
+grant execute on function public.register_device(text, text) to authenticated;
+
+-- ── Permissions hardening (mirrors migrations/20261024_rls_hardening.sql) ──
+create or replace function public.is_shop_owner(target_shop_id text)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.shop_members
+    where shop_id = target_shop_id
+      and user_id = auth.uid()
+      and role = 'owner'
+  );
+$$;
+
+-- ── Shop members ──
+drop policy if exists "Owners and admins can manage shop members" on public.shop_members;
+
+drop policy if exists "Admins can add members" on public.shop_members;
+create policy "Admins can add members"
+on public.shop_members for insert
+with check (public.can_manage_shop_members(shop_id) and role <> 'owner');
+
+drop policy if exists "Admins can change member roles" on public.shop_members;
+create policy "Admins can change member roles"
+on public.shop_members for update
+using (public.can_manage_shop_members(shop_id) and role <> 'owner')
+with check (public.can_manage_shop_members(shop_id) and role <> 'owner');
+
+drop policy if exists "Admins can remove members" on public.shop_members;
+create policy "Admins can remove members"
+on public.shop_members for delete
+using (public.can_manage_shop_members(shop_id) and role <> 'owner');
+
+drop policy if exists "Members can leave a shop" on public.shop_members;
+create policy "Members can leave a shop"
+on public.shop_members for delete
+using ((select auth.uid()) = user_id and role <> 'owner');
+
+-- ── Shops ──
+drop policy if exists "Admins can delete shops" on public.shops;
+drop policy if exists "Owner can delete shop" on public.shops;
+create policy "Owner can delete shop"
+on public.shops for delete
+using (public.is_shop_owner(uuid));
+
+-- ── Operating tables: read/insert/update for members, never delete ──
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'customers', 'bills', 'bill_items', 'bill_payments', 'stock_movements'
+  ] loop
+    execute format('drop policy if exists %I on public.%I',
+      'Members can sync ' || t, t);
+    execute format('drop policy if exists %I on public.%I',
+      'Members can read ' || t, t);
+    execute format('create policy %I on public.%I for select '
+      'using (public.is_shop_member(shop_id))', 'Members can read ' || t, t);
+    execute format('drop policy if exists %I on public.%I',
+      'Members can add ' || t, t);
+    execute format('create policy %I on public.%I for insert '
+      'with check (public.is_shop_member(shop_id))', 'Members can add ' || t, t);
+    execute format('drop policy if exists %I on public.%I',
+      'Members can update ' || t, t);
+    execute format('create policy %I on public.%I for update '
+      'using (public.is_shop_member(shop_id)) '
+      'with check (public.is_shop_member(shop_id))', 'Members can update ' || t, t);
+  end loop;
+end;
+$$;
+
+-- What staff may write on billing tables. Runs after the sync trigger
+-- (triggers fire in name order), so a stale upload it skipped never gets
+-- here and sticky deletions are already restored.
+create or replace function public.storely_zz_guard_staff_write()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  -- Derived or link columns any device may refresh.
+  ignored text[] := array[
+    'server_updated_at', 'updated_at', 'paid_amount', 'balance_due',
+    'payment_status', 'is_paid', 'payment_method', 'customer_uuid'
+  ];
+begin
+  -- Service role / dashboard (no end user) and owners/admins are not limited.
+  if auth.uid() is null or public.is_shop_admin(new.shop_id) then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if new.deleted_at is not null then
+      raise exception 'Staff cannot create cancelled records'
+        using errcode = '42501';
+    end if;
+    if tg_table_name = 'stock_movements'
+       and (to_jsonb(new) ->> 'movement_type') is distinct from 'sale' then
+      raise exception 'Staff can only record sales stock movements'
+        using errcode = '42501';
+    end if;
+    return new;
+  end if;
+
+  if (to_jsonb(new) - ignored) is distinct from (to_jsonb(old) - ignored) then
+    raise exception 'Only the owner or an admin can change or cancel %',
+      tg_table_name using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'bills', 'bill_items', 'bill_payments', 'stock_movements'
+  ] loop
+    execute format(
+      'drop trigger if exists storely_zz_guard_staff_write on public.%I', t);
+    execute format(
+      'create trigger storely_zz_guard_staff_write before insert or update '
+      'on public.%I for each row execute function '
+      'public.storely_zz_guard_staff_write()', t);
+  end loop;
+end;
+$$;
+
+-- ── Credit notes (mirrors migrations/20261025_credit_notes.sql) ──
+create index if not exists idx_bills_original_bill
+on public.bills (original_bill_uuid) where original_bill_uuid is not null;
+
+create or replace function public.storely_zz_guard_staff_write()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  -- Derived or link columns any device may refresh.
+  ignored text[] := array[
+    'server_updated_at', 'updated_at', 'paid_amount', 'balance_due',
+    'payment_status', 'is_paid', 'payment_method', 'customer_uuid'
+  ];
+begin
+  -- Service role / dashboard (no end user) and owners/admins are not limited.
+  if auth.uid() is null or public.is_shop_admin(new.shop_id) then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if new.deleted_at is not null then
+      raise exception 'Staff cannot create cancelled records'
+        using errcode = '42501';
+    end if;
+    if tg_table_name = 'bills'
+       and (to_jsonb(new) ->> 'document_type') = 'credit_note' then
+      raise exception 'Only the owner or an admin can issue credit notes'
+        using errcode = '42501';
+    end if;
+    if tg_table_name = 'stock_movements'
+       and (to_jsonb(new) ->> 'movement_type') is distinct from 'sale' then
+      raise exception 'Staff can only record sales stock movements'
+        using errcode = '42501';
+    end if;
+    return new;
+  end if;
+
+  if (to_jsonb(new) - ignored) is distinct from (to_jsonb(old) - ignored) then
+    raise exception 'Only the owner or an admin can change or cancel %',
+      tg_table_name using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+-- ── Expenses (mirrors migrations/20261027_expenses.sql) ──
+create table if not exists public.expenses (
+  uuid text primary key,
+  shop_id text not null references public.shops(uuid) on delete cascade,
+  expense_date text not null,
+  amount double precision not null check (amount >= 0),
+  category text not null default 'Other',
+  payment_method text not null default 'cash',
+  notes text,
+  device_id text,
+  created_at text not null,
+  updated_at text not null,
+  deleted_at text,
+  server_updated_at timestamptz not null default now()
+);
+
+alter table public.expenses enable row level security;
+
+drop policy if exists "Members can read expenses" on public.expenses;
+create policy "Members can read expenses"
+on public.expenses for select
+using (public.is_shop_member(shop_id));
+
+drop policy if exists "Admins can add expenses" on public.expenses;
+create policy "Admins can add expenses"
+on public.expenses for insert
+with check (public.is_shop_admin(shop_id));
+
+drop policy if exists "Admins can update expenses" on public.expenses;
+create policy "Admins can update expenses"
+on public.expenses for update
+using (public.is_shop_admin(shop_id))
+with check (public.is_shop_admin(shop_id));
+
+drop trigger if exists storely_sync_before_write on public.expenses;
+create trigger storely_sync_before_write before insert or update
+on public.expenses for each row execute function
+public.storely_sync_before_write();
+
+create index if not exists idx_expenses_shop_server_updated
+on public.expenses (shop_id, server_updated_at, uuid);
+create index if not exists idx_expenses_shop_date
+on public.expenses (shop_id, expense_date);
+
+-- ── Audit log (mirrors migrations/20261028_audit_log.sql) ──
+create table if not exists public.audit_log (
+  uuid text primary key,
+  shop_id text not null references public.shops(uuid) on delete cascade,
+  entity_type text not null,
+  entity_uuid text not null,
+  action text not null,
+  details text,
+  actor text,
+  device_id text,
+  created_at text not null,
+  updated_at text not null,
+  deleted_at text,
+  server_updated_at timestamptz not null default now()
+);
+
+alter table public.audit_log enable row level security;
+
+drop policy if exists "Members can read audit log" on public.audit_log;
+create policy "Members can read audit log"
+on public.audit_log for select
+using (public.is_shop_member(shop_id));
+
+drop policy if exists "Members can add audit log" on public.audit_log;
+create policy "Members can add audit log"
+on public.audit_log for insert
+with check (public.is_shop_member(shop_id));
+
+-- Re-uploads of an entry are accepted but never change it.
+drop policy if exists "Members can resend audit log" on public.audit_log;
+create policy "Members can resend audit log"
+on public.audit_log for update
+using (public.is_shop_member(shop_id))
+with check (public.is_shop_member(shop_id));
+
+create or replace function public.storely_audit_log_immutable()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  return old;
+end;
+$$;
+
+drop trigger if exists storely_audit_log_immutable on public.audit_log;
+create trigger storely_audit_log_immutable before update
+on public.audit_log for each row execute function
+public.storely_audit_log_immutable();
+
+drop trigger if exists storely_sync_before_write on public.audit_log;
+create trigger storely_sync_before_write before insert
+on public.audit_log for each row execute function
+public.storely_sync_before_write();
+
+create index if not exists idx_audit_log_shop_server_updated
+on public.audit_log (shop_id, server_updated_at, uuid);
+create index if not exists idx_audit_log_entity
+on public.audit_log (entity_uuid);
+

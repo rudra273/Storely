@@ -1,3 +1,6 @@
+import '../l10n/l10n.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -9,7 +12,9 @@ import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
+import '../services/product_export.dart';
 import 'qr_sheet_screen.dart';
+import '../utils/money.dart';
 
 part 'products/product_models.dart';
 part 'products/product_formatters.dart';
@@ -20,6 +25,8 @@ part 'products/product_bulk_actions.dart';
 part 'products/product_import_widgets.dart';
 part 'products/stock_history_sheet.dart';
 part 'products/product_cards.dart';
+part 'products/stock_adjust_sheet.dart';
+part 'products/quick_add_sheet.dart';
 
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
@@ -121,7 +128,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
         _purchaseSummaries = purchaseSummaries;
         _purchaseDateProductIds = purchaseDateProductIds;
         _lowStockThreshold = lowStockThreshold;
-        _selectedCategories.removeWhere((value) => !_categories.contains(value));
+        _selectedCategories.removeWhere(
+          (value) => !_categories.contains(value),
+        );
         _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
         final productIds = products
             .map((product) => product.id)
@@ -157,7 +166,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       try {
         await _loadProducts();
         if (!mounted) return;
-        await _showNewPurchaseFlow();
+        await _showQuickAdd();
       } finally {
         _isOpeningRequestedPurchaseFlow = false;
         widget.onPurchaseFlowComplete?.call();
@@ -467,12 +476,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -539,31 +548,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
     }
 
     try {
-      final products = file.bytes != null
-          ? await CsvImporter.parseBytes(
-              file.bytes!,
-              fileName: file.name,
-              extension: file.extension,
-            )
-          : file.path != null
-          ? await CsvImporter.parseFile(
-              file.path!,
-              fileName: file.name,
-              extension: file.extension,
-            )
-          : throw Exception('Could not read the selected file');
+      final bytes =
+          file.bytes ??
+          (file.path != null
+              ? await File(file.path!).readAsBytes()
+              : throw Exception('Could not read the selected file'));
+      final parsed = await CsvImporter.parseBytesDetailed(
+        bytes,
+        fileName: file.name,
+        extension: file.extension,
+      );
 
       if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
+      if (!ctx.mounted) return null;
 
-      if (products.isEmpty) {
-        if (ctx.mounted) {
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            const SnackBar(content: Text('No products found in file')),
-          );
-        }
+      if (parsed.products.isEmpty && parsed.errors.isEmpty) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('No products found in file')),
+        );
         return null;
       }
-      return products;
+      if (parsed.errors.isNotEmpty) {
+        final proceed = await showDialog<bool>(
+          context: ctx,
+          builder: (_) => _ImportErrorsDialog(result: parsed),
+        );
+        if (proceed != true) return null;
+      }
+      return parsed.products;
     } catch (e) {
       if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
       _showImportError(e);
@@ -590,6 +602,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
+  Future<void> _exportProducts(ExportFormat format) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final shop = await DatabaseHelper.instance.getShopProfile();
+      await ProductExport.share(
+        _allProducts,
+        format: format,
+        shopName: shop?.name ?? 'Storely',
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not export: $error')),
+      );
+    }
+  }
+
   void _openQrSheet() {
     if (_allProducts.isEmpty) {
       ScaffoldMessenger.of(
@@ -601,6 +629,29 @@ class _ProductsScreenState extends State<ProductsScreen> {
       context,
       MaterialPageRoute(builder: (_) => QrSheetScreen(products: _allProducts)),
     );
+  }
+
+  Future<void> _showQuickAdd() async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) =>
+          _QuickAddSheet(units: _units, scanBarcode: _scanBarcodeValue),
+    );
+    if (!mounted) return;
+    await _loadProducts();
+    if (!mounted || result != _QuickAddSheet.openPurchase) return;
+    await _showNewPurchaseFlow();
+  }
+
+  Future<void> _adjustStock(Product product) async {
+    final adjusted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _StockAdjustSheet(product: product),
+    );
+    if (!mounted || adjusted != true) return;
+    await _loadProducts();
   }
 
   Future<void> _showStockHistory(Product product) async {
@@ -990,7 +1041,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                   _PurchaseInitialAction.manual,
                                 ),
                                 icon: const Icon(Icons.add_rounded, size: 18),
-                                label: const Text('Add product'),
+                                label: Text(context.l10n.addProductLower),
                                 style: FilledButton.styleFrom(
                                   minimumSize: const Size.fromHeight(48),
                                 ),
@@ -1055,6 +1106,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Future<int> _commitPurchaseBatch(
     List<_PurchaseDraft> drafts,
     DateTime purchaseDate,
+    List<Product> importedRows,
   ) async {
     final commits = drafts.map((draft) {
       final target = draft.restockTarget ?? _matchExistingByName(draft.name);
@@ -1067,6 +1119,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return DatabaseHelper.instance.commitProductPurchaseBatch(
       commits,
       purchaseDate: purchaseDate,
+      importedRows: importedRows,
     );
   }
 
@@ -1114,6 +1167,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
       text: product != null
           ? (product.purchasePrice * product.quantity).toStringAsFixed(2)
           : '',
+    );
+    var trackStock = product?.trackStock ?? true;
+    final reorderCtrl = TextEditingController(
+      text: product?.reorderLevel == null
+          ? ''
+          : _formatQuantityInput(product!.reorderLevel!),
     );
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier ?? initialSupplier;
@@ -1333,7 +1392,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         style: FilledButton.styleFrom(
                           backgroundColor: AppColors.error,
                         ),
-                        child: const Text('Discard'),
+                        child: Text(context.l10n.discard),
                       ),
                     ],
                   ),
@@ -1413,6 +1472,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           ? double.tryParse(manualPriceCtrl.text)
                           : null,
                       quantity: existing.quantity,
+                      trackStock: trackStock,
+                      reorderLevel: double.tryParse(reorderCtrl.text.trim()),
                       source: existing.source,
                       createdAt: existing.createdAt,
                       updatedAt: existing.updatedAt,
@@ -1476,6 +1537,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         ? double.tryParse(manualPriceCtrl.text)
                         : null,
                     quantity: double.parse(qtyCtrl.text),
+                    trackStock: trackStock,
+                    reorderLevel: double.tryParse(reorderCtrl.text.trim()),
                     source: product?.source ?? ProductSource.mobile,
                     createdAt: product?.createdAt,
                     updatedAt: product?.updatedAt,
@@ -1509,7 +1572,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   if (mounted) {
                     ScaffoldMessenger.of(
                       context,
-                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                   }
                 }
               }
@@ -1739,7 +1802,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                                       size: 18,
                                                     ),
                                                     suffixIcon: IconButton(
-                                                      tooltip: 'Scan barcode',
+                                                      tooltip: context
+                                                          .l10n
+                                                          .scanBarcode,
                                                       icon: const Icon(
                                                         Icons
                                                             .center_focus_strong,
@@ -1884,7 +1949,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                         ),
                                         const SizedBox(height: 10),
                                         _OptionDropdown(
-                                          label: 'Unit',
+                                          label: context.l10n.unit,
                                           value: selectedUnit,
                                           options: _units,
                                           noValueLabel: 'No Unit',
@@ -1930,6 +1995,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                               () => selectedUnit = value,
                                             );
                                           },
+                                        ),
+                                        const SizedBox(height: 10),
+                                        _StockTrackingFields(
+                                          trackStock: trackStock,
+                                          reorderController: reorderCtrl,
+                                          onTrackStockChanged: (value) {
+                                            markEdited();
+                                            setSheet(() => trackStock = value);
+                                          },
+                                          onChanged: markEdited,
                                         ),
                                         const SizedBox(height: 10),
                                         Row(
@@ -2210,6 +2285,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             overheadCtrl.dispose();
             marginCtrl.dispose();
             qtyCtrl.dispose();
+            reorderCtrl.dispose();
             totalCtrl.dispose();
           });
         });
@@ -2226,12 +2302,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -2292,7 +2368,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   ),
                   textField: true,
                 )
-              : const Text('Products'),
+              : Text(context.l10n.navProducts),
           actions: [
             if (_selectionMode) ...[
               IconButton(
@@ -2304,12 +2380,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
               if (_allProducts.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
-                  child: Center(
-                    child: StatusPill(
-                      label: '${_allProducts.length}',
-                      variant: PillVariant.info,
-                    ),
-                  ),
+                  child: Center(child: HeaderCount(_allProducts.length)),
                 ),
               IconButton(
                 onPressed: () {
@@ -2325,6 +2396,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 icon: const Icon(Icons.qr_code_2),
                 tooltip: 'Product labels',
               ),
+              if (_allProducts.isNotEmpty)
+                PopupMenuButton<ExportFormat>(
+                  tooltip: 'Export products',
+                  icon: const Icon(Icons.file_download_outlined),
+                  onSelected: _exportProducts,
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: ExportFormat.xlsx,
+                      child: Text('Export to Excel'),
+                    ),
+                    PopupMenuItem(
+                      value: ExportFormat.csv,
+                      child: Text('Export to CSV'),
+                    ),
+                  ],
+                ),
               const AppInfoAction(
                 title: 'Products Help',
                 intro:
@@ -2353,7 +2440,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ],
         ),
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const AppSkeletonList()
             : _allProducts.isEmpty
             ? _buildEmpty()
             : _buildContent(),
@@ -2366,10 +2453,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     TestKeys.addProductBtn,
                     FloatingActionButton(
                       heroTag: 'add',
-                      onPressed: _showNewPurchaseFlow,
+                      onPressed: _showQuickAdd,
                       child: const Icon(Icons.add_rounded),
                     ),
-                    label: 'Add product',
+                    label: context.l10n.addProductLower,
                     button: true,
                   ),
                 ],
@@ -2379,41 +2466,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: AppRadius.lgRadius,
-              ),
-              child: Icon(
-                Icons.inventory_2_outlined,
-                size: 36,
-                color: AppColors.inkFaint,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('No products yet', style: AppText.title),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Create a purchase, then add or import products',
-              style: AppText.caption,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            FilledButton.icon(
-              onPressed: _showNewPurchaseFlow,
-              icon: const Icon(Icons.add_shopping_cart_rounded),
-              label: const Text('New Purchase'),
-            ),
-          ],
-        ),
+    return AppEmptyState(
+      icon: Icons.inventory_2_outlined,
+      title: context.l10n.noProductsYet,
+      message: context.l10n.addProductsHint,
+      actionLabel: context.l10n.addProductLower,
+      onAction: _showQuickAdd,
+      secondaryAction: OutlinedButton.icon(
+        onPressed: _showNewPurchaseFlow,
+        icon: const Icon(Icons.add_shopping_cart_rounded),
+        label: Text(context.l10n.newPurchaseImport),
       ),
     );
   }
@@ -2582,6 +2644,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           : _showAddEditSheet(product: _filtered[i]),
                       onLongPress: () => _toggleProductSelection(_filtered[i]),
                       onHistory: () => _showStockHistory(_filtered[i]),
+                      onAdjust: () => _adjustStock(_filtered[i]),
                       onDelete: () => _deleteProduct(_filtered[i]),
                     ),
                   ),

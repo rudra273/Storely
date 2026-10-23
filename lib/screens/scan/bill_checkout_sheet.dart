@@ -2,13 +2,16 @@ part of '../scan_screen.dart';
 
 class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
-  final double subtotal;
+
+  /// Payable totals for a discount %, from the same calculator used to save
+  /// the bill, so the preview always matches the saved invoice.
+  final BillTotals Function(double discountPercent) totalsFor;
   final int itemCount;
   final Bill? initialBill;
 
   const _BillCheckoutSheet({
     required this.customers,
-    required this.subtotal,
+    required this.totalsFor,
     required this.itemCount,
     this.initialBill,
   });
@@ -36,7 +39,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
 
   var _discountPercent = 0.0;
   var _billType = Bill.typeB2c;
-  var _paymentStatus = Bill.statusUnpaid;
+  // Most counter sales are paid on the spot.
+  var _paymentStatus = Bill.statusPaid;
   var _paymentMethod = 'cash';
   var _hideCustomerSuggestions = false;
 
@@ -75,7 +79,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
       );
     }
     _billType = bill.billType;
-    _paymentStatus = Bill.statusUnpaid;
+    _paymentStatus = Bill.statusPaid;
     _paymentMethod = 'cash';
     _hideCustomerSuggestions = true;
   }
@@ -231,8 +235,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final percent = _discountPercent.clamp(0, 100).toDouble();
-    final discount = widget.subtotal * percent / 100;
-    final total = widget.subtotal - discount;
+    final totals = widget.totalsFor(percent);
+    final discount = totals.discountAmount;
+    final total = totals.grandTotal;
     final parsedPaid = _paymentStatus == Bill.statusPaid
         ? total
         : _paymentStatus == Bill.statusPartial
@@ -283,8 +288,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   textCapitalization: TextCapitalization.words,
                   onChanged: (_) =>
                       setState(() => _hideCustomerSuggestions = false),
-                  decoration: const InputDecoration(
-                    labelText: 'Customer name',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.customerName,
                     prefixIcon: Icon(Icons.person_outline_rounded),
                   ),
                 ),
@@ -298,8 +303,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 ],
                 onChanged: (_) =>
                     setState(() => _hideCustomerSuggestions = false),
-                decoration: const InputDecoration(
-                  labelText: 'Phone number (optional)',
+                decoration: InputDecoration(
+                  labelText: context.l10n.phoneOptional,
                   prefixIcon: Icon(Icons.phone_outlined),
                 ),
               ),
@@ -326,8 +331,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 TextField(
                   controller: _gstinController,
                   textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Customer GSTIN',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.customerGstin,
                     prefixIcon: Icon(Icons.badge_outlined),
                   ),
                 ),
@@ -335,8 +340,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 TextField(
                   controller: _legalNameController,
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Legal business name',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.legalName,
                     prefixIcon: Icon(Icons.business_center_outlined),
                   ),
                 ),
@@ -344,8 +349,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 TextField(
                   controller: _tradeNameController,
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Trade name (optional)',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.tradeNameOpt,
                     prefixIcon: Icon(Icons.storefront_outlined),
                   ),
                 ),
@@ -355,8 +360,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   minLines: 2,
                   maxLines: 3,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Business address',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.businessAddress,
                     prefixIcon: Icon(Icons.location_on_outlined),
                   ),
                 ),
@@ -368,18 +373,21 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(2),
                   ],
-                  decoration: const InputDecoration(
-                    labelText: 'Place of supply state code',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.placeOfSupplyCode,
                     prefixIcon: Icon(Icons.map_outlined),
                   ),
                 ),
               ],
               const SizedBox(height: 12),
               _BillSummaryRow(
-                label: 'Subtotal',
-                value: '₹${widget.subtotal.toStringAsFixed(2)}',
+                label: context.l10n.subtotal,
+                value: rupees(totals.subtotal),
               ),
-              _BillSummaryRow(label: 'Items', value: '${widget.itemCount}'),
+              _BillSummaryRow(
+                label: context.l10n.items,
+                value: '${widget.itemCount}',
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: _discountController,
@@ -394,8 +402,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     return isValid ? newValue : oldValue;
                   }),
                 ],
-                decoration: const InputDecoration(
-                  labelText: 'Discount percentage',
+                decoration: InputDecoration(
+                  labelText: context.l10n.discountPercent,
                   suffixText: '%',
                 ),
                 onChanged: (value) {
@@ -406,21 +414,21 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               ),
               const SizedBox(height: 14),
               SegmentedButton<String>(
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: Bill.statusPaid,
                     icon: Icon(Icons.check_circle_outline),
-                    label: Text('Paid full'),
+                    label: Text(context.l10n.paidFull),
                   ),
                   ButtonSegment(
                     value: Bill.statusPartial,
                     icon: Icon(Icons.payments_outlined),
-                    label: Text('Partial'),
+                    label: Text(context.l10n.partial),
                   ),
                   ButtonSegment(
                     value: Bill.statusUnpaid,
                     icon: Icon(Icons.pending_actions_outlined),
-                    label: Text('Unpaid'),
+                    label: Text(context.l10n.unpaid),
                   ),
                 ],
                 selected: {_paymentStatus},
@@ -451,8 +459,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       return isValid ? newValue : oldValue;
                     }),
                   ],
-                  decoration: const InputDecoration(
-                    labelText: 'Amount received',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.amountReceived,
                     prefixText: '₹ ',
                   ),
                   onChanged: (_) => setState(() {}),
@@ -461,16 +469,16 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               if (_paymentStatus != Bill.statusUnpaid) ...[
                 const SizedBox(height: 12),
                 SegmentedButton<String>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                       value: 'cash',
                       icon: Icon(Icons.payments_outlined),
-                      label: Text('Cash'),
+                      label: Text(context.l10n.cash),
                     ),
                     ButtonSegment(
                       value: 'online',
                       icon: Icon(Icons.account_balance_wallet_outlined),
-                      label: Text('Online'),
+                      label: Text(context.l10n.online),
                     ),
                   ],
                   selected: {_paymentMethod},
@@ -482,8 +490,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   TextField(
                     controller: _transactionIdController,
                     textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Transaction ID (optional)',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.txnIdOptional,
                       prefixIcon: Icon(Icons.receipt_long_outlined),
                     ),
                   ),
@@ -501,24 +509,29 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   children: [
                     _BillSummaryRow(
                       label: 'Discount (${percent.toStringAsFixed(2)}%)',
-                      value: '- ₹${discount.toStringAsFixed(2)}',
+                      value: '- ${rupees(discount)}',
                     ),
+                    if (totals.roundOffAmount != 0)
+                      _BillSummaryRow(
+                        label: context.l10n.roundOff,
+                        value:
+                            '${totals.roundOffAmount > 0 ? '+' : '-'} ${rupees(totals.roundOffAmount.abs())}',
+                      ),
                     const Divider(height: 20),
                     _BillSummaryRow(
-                      label: 'Grand Total',
-                      value: '₹${total.toStringAsFixed(2)}',
+                      label: context.l10n.grandTotal,
+                      value: rupees(total),
                       isTotal: true,
                     ),
                     if (paidAmount > 0) ...[
                       const Divider(height: 20),
                       _BillSummaryRow(
-                        label: 'Received',
-                        value: '₹${paidAmount.toStringAsFixed(2)}',
+                        label: context.l10n.received,
+                        value: rupees(paidAmount),
                       ),
                       _BillSummaryRow(
-                        label: 'Balance',
-                        value:
-                            '₹${(total - paidAmount).clamp(0, total).toStringAsFixed(2)}',
+                        label: context.l10n.balance,
+                        value: rupees((total - paidAmount).clamp(0, total)),
                       ),
                     ],
                   ],
@@ -530,7 +543,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 child: FilledButton.icon(
                   onPressed: () => _submit(total, paidAmount),
                   icon: const Icon(Icons.receipt_long_rounded),
-                  label: const Text('Generate Bill'),
+                  label: Text(context.l10n.generateBill),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.amber,
                     foregroundColor: Colors.white,

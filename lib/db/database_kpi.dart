@@ -5,6 +5,18 @@ part of 'database_helper.dart';
 // Date strings stored as ISO-8601 TEXT (e.g. "2024-03-15T10:30:00.000").
 // SQLite date functions use substr() on that prefix.
 
+// Definitions used across the dashboard (match Home and GST law):
+// - Sales / revenue = every non-cancelled bill (invoice value), paid or not.
+//   GST is owed on the invoice, not on payment.
+// - Collected = payments actually received (bill_payments).
+// - Line profit = (taxable value after discount - cost) x qty. GST is never
+//   profit, and the bill discount reduces it.
+const _lineProfit =
+    '((bi.taxable_value_snapshot - bi.cost_snapshot) * bi.quantity)';
+const _lineNetRevenue = '(bi.taxable_value_snapshot * bi.quantity)';
+const _lineAmount =
+    '((bi.taxable_value_snapshot + bi.gst_snapshot) * bi.quantity)';
+
 mixin DatabaseKpi {
   Future<Database> get database;
 
@@ -18,7 +30,20 @@ mixin DatabaseKpi {
     final r = await db.rawQuery('''
       SELECT COALESCE(SUM(total_amount), 0) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL AND b.is_paid = 1 $where
+      WHERE b.deleted_at IS NULL $where
+    ''');
+    return (r.first['v'] as num?)?.toDouble() ?? 0;
+  }
+
+  /// Payments received in the period, whichever bill they belong to.
+  Future<double> kpiCollected({String? from, String? to}) async {
+    final db = await database;
+    final where = _dateWhere('p.received_at', from, to);
+    final r = await db.rawQuery('''
+      SELECT COALESCE(SUM(p.amount), 0) AS v
+      FROM bill_payments p
+      JOIN bills b ON b.uuid = p.bill_uuid
+      WHERE p.deleted_at IS NULL AND b.deleted_at IS NULL $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -33,7 +58,7 @@ mixin DatabaseKpi {
       SELECT substr(b.created_at, 1, 10) AS day,
              COALESCE(SUM(b.total_amount), 0) AS revenue
       FROM bills b
-      WHERE b.deleted_at IS NULL AND b.is_paid = 1 $where
+      WHERE b.deleted_at IS NULL $where
       GROUP BY day ORDER BY day ASC
     ''');
   }
@@ -59,9 +84,9 @@ mixin DatabaseKpi {
     final where = _dateWhere('b.created_at', from, to);
     final r = await db.rawQuery('''
       SELECT COALESCE(SUM(total_amount), 0) * 1.0
-           / NULLIF(COUNT(*), 0) AS v
+           / NULLIF(SUM((CASE WHEN b.document_type = 'credit_note' THEN 0 ELSE 1 END)), 0) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL AND b.is_paid = 1 $where
+      WHERE b.deleted_at IS NULL $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -82,9 +107,9 @@ mixin DatabaseKpi {
     final db = await database;
     final r = await db.rawQuery('''
       SELECT COUNT(*) AS cnt,
-             COALESCE(SUM(total_amount), 0) AS total
+             COALESCE(SUM(balance_due), 0) AS total
       FROM bills
-      WHERE deleted_at IS NULL AND is_paid = 0
+      WHERE deleted_at IS NULL AND balance_due > 0.005
     ''');
     return {
       'count': (r.first['cnt'] as num?)?.toInt() ?? 0,
@@ -100,7 +125,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT COALESCE(c.name, 'Uncategorised') AS category,
-             COALESCE(SUM(bi.subtotal), 0) AS revenue
+             COALESCE(SUM($_lineAmount), 0) AS revenue
       FROM bill_items bi
       LEFT JOIN products p ON bi.product_id = p.id
       LEFT JOIN categories c ON p.category_id = c.id
@@ -118,7 +143,7 @@ mixin DatabaseKpi {
     // SQLite: strftime('%w', date) => 0=Sunday, 1=Monday ... 6=Saturday
     return db.rawQuery('''
       SELECT CAST(strftime('%w', substr(b.created_at, 1, 10)) AS INTEGER) AS dow,
-             COUNT(*) AS bills,
+             SUM((CASE WHEN b.document_type = 'credit_note' THEN 0 ELSE 1 END)) AS bills,
              COALESCE(SUM(b.total_amount), 0) AS revenue
       FROM bills b
       WHERE b.deleted_at IS NULL $where
@@ -134,7 +159,7 @@ mixin DatabaseKpi {
     final db = await database;
     final where = _dateWhere('bi.created_at', from, to);
     final r = await db.rawQuery('''
-      SELECT ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0), 2) AS v
+      SELECT ROUND(COALESCE(SUM($_lineProfit), 0), 2) AS v
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
     ''');
@@ -149,8 +174,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT substr(bi.created_at, 1, 7) AS month,
-             ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0), 2) AS profit,
-             ROUND(COALESCE(SUM(bi.commission_snapshot * bi.quantity), 0), 2) AS commission
+             ROUND(COALESCE(SUM($_lineProfit), 0), 2) AS profit
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
       GROUP BY month ORDER BY month ASC
@@ -162,36 +186,39 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     final r = await db.rawQuery('''
       SELECT ROUND(
-        COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0) * 100.0
-        / NULLIF(SUM(bi.subtotal), 0), 2) AS v
+        COALESCE(SUM($_lineProfit), 0) * 100.0
+        / NULLIF(SUM($_lineNetRevenue), 0), 2) AS v
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
 
+  /// Partner commission set per bill in the profit sheet: a percentage of
+  /// that bill's profit (only when the bill made a profit).
   Future<double> kpiTotalCommissionPaid({String? from, String? to}) async {
     final db = await database;
-    final where = _dateWhere('bi.created_at', from, to);
+    final where = _dateWhere('b.created_at', from, to);
     final r = await db.rawQuery('''
-      SELECT ROUND(COALESCE(SUM(bi.commission_snapshot * bi.quantity), 0), 2) AS v
-      FROM bill_items bi
-      WHERE bi.deleted_at IS NULL $where
+      SELECT ROUND(COALESCE(SUM(
+        CASE WHEN profit > 0 THEN profit * pct / 100.0 ELSE 0 END
+      ), 0), 2) AS v
+      FROM (
+        SELECT b.profit_commission_percent AS pct,
+               SUM($_lineProfit) AS profit
+        FROM bills b
+        JOIN bill_items bi ON bi.bill_id = b.id AND bi.deleted_at IS NULL
+        WHERE b.deleted_at IS NULL AND b.profit_commission_percent > 0 $where
+        GROUP BY b.id
+      )
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
 
   Future<double> kpiNetProfitAfterCommission({String? from, String? to}) async {
-    final db = await database;
-    final where = _dateWhere('bi.created_at', from, to);
-    final r = await db.rawQuery('''
-      SELECT ROUND(
-        COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0)
-        - COALESCE(SUM(bi.commission_snapshot * bi.quantity), 0), 2) AS v
-      FROM bill_items bi
-      WHERE bi.deleted_at IS NULL $where
-    ''');
-    return (r.first['v'] as num?)?.toDouble() ?? 0;
+    final profit = await kpiGrossProfit(from: from, to: to);
+    final commission = await kpiTotalCommissionPaid(from: from, to: to);
+    return double.parse((profit - commission).toStringAsFixed(2));
   }
 
   Future<List<Map<String, dynamic>>> kpiTopProfitItems({
@@ -203,7 +230,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT bi.product_name AS name,
-             ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0), 2) AS profit
+             ROUND(COALESCE(SUM($_lineProfit), 0), 2) AS profit
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
       GROUP BY bi.product_id, bi.product_name
@@ -220,9 +247,9 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT bi.product_name AS name,
-             ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0), 2) AS profit,
-             ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0) * 100.0
-                   / NULLIF(SUM(bi.subtotal), 0), 2) AS margin_pct
+             ROUND(COALESCE(SUM($_lineProfit), 0), 2) AS profit,
+             ROUND(COALESCE(SUM($_lineProfit), 0) * 100.0
+                   / NULLIF(SUM($_lineNetRevenue), 0), 2) AS margin_pct
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
       GROUP BY bi.product_id, bi.product_name
@@ -239,7 +266,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT COALESCE(c.name, 'Uncategorised') AS category,
-             ROUND(COALESCE(SUM(bi.profit_snapshot * bi.quantity), 0), 2) AS profit
+             ROUND(COALESCE(SUM($_lineProfit), 0), 2) AS profit
       FROM bill_items bi
       LEFT JOIN products p ON bi.product_id = p.id
       LEFT JOIN categories c ON p.category_id = c.id
@@ -248,17 +275,17 @@ mixin DatabaseKpi {
     ''');
   }
 
+  /// Output GST on all bills raised in the period (owed on the invoice,
+  /// whether or not it has been paid).
   Future<double> kpiGstCollected({String? from, String? to}) async {
     final db = await database;
-    final where = _dateWhere('bi.created_at', from, to);
+    final where = _dateWhere('b.created_at', from, to);
     final r = await db.rawQuery('''
       SELECT ROUND(COALESCE(SUM(
-        (bi.cgst_amount_snapshot + bi.sgst_amount_snapshot + bi.igst_amount_snapshot)
-        * bi.quantity
+        b.cgst_amount + b.sgst_amount + b.igst_amount
       ), 0), 2) AS v
-      FROM bill_items bi
-      JOIN bills b ON b.id = bi.bill_id
-      WHERE bi.deleted_at IS NULL AND b.deleted_at IS NULL AND b.is_paid = 1 $where
+      FROM bills b
+      WHERE b.deleted_at IS NULL $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -282,7 +309,7 @@ mixin DatabaseKpi {
     final r = await db.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM products
-      WHERE deleted_at IS NULL AND quantity_cache <= 0
+      WHERE deleted_at IS NULL AND track_stock = 1 AND quantity_cache <= 0
     ''');
     return (r.first['cnt'] as num?)?.toInt() ?? 0;
   }
@@ -296,8 +323,9 @@ mixin DatabaseKpi {
       SELECT name, quantity_cache AS quantity
       FROM products
       WHERE deleted_at IS NULL
+        AND track_stock = 1
         AND quantity_cache > 0
-        AND quantity_cache <= ?
+        AND quantity_cache <= COALESCE(reorder_level, ?)
       ORDER BY quantity_cache ASC
     ''',
       [threshold],
@@ -479,7 +507,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('bi.created_at', from, to);
     return db.rawQuery('''
       SELECT bi.product_name AS name,
-             ROUND(COALESCE(SUM(bi.subtotal), 0), 2) AS revenue,
+             ROUND(COALESCE(SUM($_lineAmount), 0), 2) AS revenue,
              ROUND(COALESCE(SUM(bi.quantity), 0), 2) AS units
       FROM bill_items bi
       WHERE bi.deleted_at IS NULL $where
@@ -563,7 +591,7 @@ mixin DatabaseKpi {
       SELECT CAST(COUNT(*) AS REAL)
            / NULLIF(COUNT(DISTINCT substr(b.created_at, 1, 10)), 0) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL $where
+      WHERE b.deleted_at IS NULL AND b.document_type <> 'credit_note' $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -574,7 +602,7 @@ mixin DatabaseKpi {
     final r = await db.rawQuery('''
       SELECT ROUND(COALESCE(AVG(CAST(b.item_count AS REAL)), 0), 2) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL $where
+      WHERE b.deleted_at IS NULL AND b.document_type <> 'credit_note' $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -586,6 +614,7 @@ mixin DatabaseKpi {
         CAST(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS REAL)
         / NULLIF(COUNT(*), 0) * 100, 2) AS v
       FROM bills
+      WHERE document_type <> 'credit_note'
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }

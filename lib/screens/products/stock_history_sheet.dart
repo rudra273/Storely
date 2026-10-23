@@ -63,8 +63,10 @@ class _StockMovementHistorySheet extends StatelessWidget {
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: movements.length,
-                      separatorBuilder: (_, _) =>
-                          Divider(height: 1, color: AppColors.borderOf(context)),
+                      separatorBuilder: (_, _) => Divider(
+                        height: 1,
+                        color: AppColors.borderOf(context),
+                      ),
                       itemBuilder: (_, index) =>
                           _StockMovementRow(movement: movements[index]),
                     ),
@@ -108,7 +110,9 @@ class _StockMovementRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _movementLabel(movement.movementType),
+                  movement.reason == null
+                      ? _movementLabel(movement.movementType)
+                      : StockAdjustmentReason.label(movement.reason),
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 2),
@@ -116,8 +120,7 @@ class _StockMovementRow extends StatelessWidget {
                   [
                     _formatFullDate(movement.createdAt),
                     if (movement.sourceType != null) movement.sourceType!,
-                    if (movement.unitCost != null)
-                      '₹${movement.unitCost!.toStringAsFixed(2)}',
+                    if (movement.unitCost != null) rupees(movement.unitCost!),
                   ].join(' • '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
