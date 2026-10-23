@@ -7,6 +7,7 @@ import 'screens/products_screen.dart';
 import 'screens/bills_screen.dart';
 import 'screens/store_screen.dart';
 import 'screens/scan_screen.dart';
+import 'screens/startup_error_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/app_settings_service.dart';
 import 'services/cloud_service.dart';
@@ -20,17 +21,38 @@ export 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await AppSettingsService.instance.load();
-  await HomeSectionPrefs.instance.load();
-  await KpiPrefs.instance.load();
-  await CloudService.instance.initialize();
-  await ThermalPrinterService.instance.load();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
+  await _start();
+}
+
+/// Opens the database and loads settings, then runs the app. A failure shows
+/// [StartupErrorApp] (retry / save data / copy details) instead of a blank
+/// screen.
+Future<void> _start() async {
+  try {
+    // Open (and upgrade) the database first so a failure is caught here.
+    await DatabaseHelper.instance.database;
+    await AppSettingsService.instance.load();
+    await HomeSectionPrefs.instance.load();
+    await KpiPrefs.instance.load();
+    try {
+      await CloudService.instance.initialize();
+    } catch (error, stack) {
+      // Cloud sync is optional: the shop keeps working offline.
+      debugPrint('Cloud init failed: $error\n$stack');
+    }
+    await ThermalPrinterService.instance.load();
+  } catch (error, stack) {
+    debugPrint('Startup failed: $error\n$stack');
+    await DatabaseHelper.instance.close().catchError((_) {});
+    runApp(StartupErrorApp(error: error, stackTrace: stack, onRetry: _start));
+    return;
+  }
   runApp(const StorelyApp());
 }
 

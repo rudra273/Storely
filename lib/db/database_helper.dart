@@ -50,6 +50,11 @@ class DatabaseHelper
 
   DatabaseHelper._init();
 
+  /// Full path of the database file (for backups and the startup error
+  /// screen's "save a copy").
+  static Future<String> databasePath() async =>
+      join(await getDatabasesPath(), databaseFileName);
+
   @override
   Future<Database> get database async {
     if (_database != null) return _database!;
