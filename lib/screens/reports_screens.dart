@@ -5,6 +5,7 @@ import '../db/database_helper.dart';
 import '../models/bill_totals.dart';
 import '../models/shop_profile.dart';
 import '../services/gstr1_export.dart';
+import '../models/product_purchase.dart';
 import '../theme/app_theme.dart';
 import '../utils/money.dart';
 
@@ -22,6 +23,7 @@ class ReportShortcuts extends StatelessWidget {
       (Icons.trending_up_rounded, 'Profit & loss', const ProfitLossScreen()),
       (Icons.schedule_rounded, 'Dues ageing', const ReceivablesScreen()),
       (Icons.inventory_2_outlined, 'Stock value', const StockValueScreen()),
+      (Icons.event_busy_outlined, 'Expiring', const ExpiringStockScreen()),
       (Icons.receipt_long_outlined, 'GSTR-1', const Gstr1Screen()),
     ];
     return SizedBox(
@@ -752,6 +754,151 @@ class _Gstr1ScreenState extends State<Gstr1Screen> {
                   ],
                 );
               },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Expiring stock ──────────────────────────────────────────────────────────
+
+class ExpiringStockScreen extends StatefulWidget {
+  const ExpiringStockScreen({super.key});
+
+  @override
+  State<ExpiringStockScreen> createState() => _ExpiringStockScreenState();
+}
+
+class _ExpiringStockScreenState extends State<ExpiringStockScreen> {
+  int _days = 30;
+  int _reload = 0;
+
+  static String _qty(double q) =>
+      q == q.roundToDouble() ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
+
+  Future<void> _writeOff(ExpiringBatch batch) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Write off expired stock?'),
+        content: Text(
+          'Removes ${_qty(batch.quantity)} ${batch.unit ?? ''} of '
+          '${batch.productName} from stock, recorded as "Expired".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Write off'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await DatabaseHelper.instance.adjustStock(
+        batch.productId,
+        delta: -batch.quantity,
+        reason: StockAdjustmentReason.expired,
+        note: [
+          'Expired',
+          if (batch.batchNo != null) 'batch ${batch.batchNo}',
+          DateFormat('dd MMM yyyy').format(batch.expiry),
+        ].join(' · '),
+      );
+      if (!mounted) return;
+      setState(() => _reload++);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: navyAppBar(title: 'Expiring stock'),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.md,
+              AppSpacing.lg,
+              0,
+            ),
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 7, label: Text('7 days')),
+                ButtonSegment(value: 30, label: Text('30 days')),
+                ButtonSegment(value: 90, label: Text('90 days')),
+              ],
+              selected: {_days},
+              showSelectedIcon: false,
+              onSelectionChanged: (v) => setState(() => _days = v.first),
+            ),
+          ),
+          Expanded(
+            child: _ReportLoader<List<ExpiringBatch>>(
+              reloadKey: '$_days-$_reload',
+              load: () => DatabaseHelper.instance.expiringStock(days: _days),
+              builder: (batches) => batches.isEmpty
+                  ? const AppEmptyState(
+                      icon: Icons.event_available_outlined,
+                      title: 'Nothing expiring',
+                      message:
+                          'Add an expiry date when you enter a purchase to '
+                          'see stock here before it expires.',
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      itemCount: batches.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final b = batches[i];
+                        final expired = b.isExpired(today);
+                        final daysLeft = b.expiry
+                            .difference(
+                              DateTime(today.year, today.month, today.day),
+                            )
+                            .inDays;
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(b.productName),
+                          subtitle: Text(
+                            [
+                              '${_qty(b.quantity)} ${b.unit ?? ''}'.trim(),
+                              if (b.batchNo != null) 'Batch ${b.batchNo}',
+                              expired
+                                  ? 'Expired ${DateFormat('dd MMM').format(b.expiry)}'
+                                  : daysLeft == 0
+                                  ? 'Expires today'
+                                  : 'Expires in $daysLeft days',
+                            ].join(' · '),
+                            style: AppText.caption.copyWith(
+                              color: expired || daysLeft <= 7
+                                  ? AppColors.error
+                                  : null,
+                            ),
+                          ),
+                          trailing: expired
+                              ? TextButton(
+                                  onPressed: () => _writeOff(b),
+                                  child: const Text('Write off'),
+                                )
+                              : null,
+                        );
+                      },
+                    ),
             ),
           ),
         ],

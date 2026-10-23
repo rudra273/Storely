@@ -37,6 +37,7 @@ class CsvImporter {
     'hsn_code',
     'gst_percent',
     'reorder_level',
+    'mrp_price',
   ];
 
   /// Other header spellings shop files use for each column (after
@@ -66,6 +67,9 @@ class CsvImporter {
     'hsn_code': ['hsn', 'hsn_sac', 'sac', 'hsn_sac_code'],
     'gst_percent': ['gst', 'gst_rate', 'tax', 'tax_rate', 'gst_percentage'],
     'reorder_level': ['reorder', 'min_stock', 'minimum_stock', 'low_stock'],
+    // Only when the file also has a selling price column; a lone "MRP"
+    // column is taken as the selling price (above).
+    'mrp_price': ['mrp', 'printed_mrp', 'max_retail_price'],
   };
 
   static String get columnGuide =>
@@ -207,6 +211,13 @@ class CsvImporter {
         rowNumber,
         rowErrors,
       );
+      final printedMrp = _getMoney(
+        row,
+        mapping['mrp_price'],
+        'MRP',
+        rowNumber,
+        rowErrors,
+      );
       final hsn = _getString(row, mapping['hsn_code']);
       if (hsn != null && !RegExp(r'^\d{4,8}$').hasMatch(hsn)) {
         rowErrors.add('Row $rowNumber: HSN/SAC code must be 4 to 8 digits');
@@ -238,6 +249,7 @@ class CsvImporter {
           manualPrice: sellingPrice,
           quantity: quantity ?? 0,
           reorderLevel: reorderLevel,
+          printedMrp: printedMrp,
           unit: _getString(row, mapping['unit']),
           source: ProductSource.imported,
         ),

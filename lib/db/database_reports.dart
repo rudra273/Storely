@@ -88,6 +88,31 @@ class StockValueRow {
   });
 }
 
+/// Stock from one purchase batch that expires soon (or already has).
+class ExpiringBatch {
+  final int productId;
+  final String productName;
+  final String? unit;
+  final String? batchNo;
+  final DateTime expiry;
+
+  /// Estimated units of this batch still on the shelf (older stock is
+  /// assumed to sell first).
+  final double quantity;
+
+  const ExpiringBatch({
+    required this.productId,
+    required this.productName,
+    required this.unit,
+    required this.batchNo,
+    required this.expiry,
+    required this.quantity,
+  });
+
+  bool isExpired(DateTime today) =>
+      expiry.isBefore(DateTime(today.year, today.month, today.day));
+}
+
 mixin DatabaseReports {
   Future<Database> get database;
   Future<List<Expense>> getExpenses({String? from, String? to});
@@ -234,6 +259,61 @@ mixin DatabaseReports {
     }
     return byCustomer.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
+  }
+
+  /// Batches expiring within [days] (and expired ones still in stock),
+  /// soonest first. Stock on hand is matched to the newest purchases, as
+  /// older stock normally sells first.
+  Future<List<ExpiringBatch>> expiringStock({int days = 30}) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final cutoff = DateTime.now().add(Duration(days: days));
+    final products = await db.rawQuery(
+      '''
+      SELECT p.id, p.name, p.quantity_cache AS qty, u.name AS unit
+      FROM products p
+      LEFT JOIN units u ON u.id = p.unit_id
+      WHERE p.shop_id = ? AND p.deleted_at IS NULL AND p.track_stock = 1
+        AND p.quantity_cache > 0
+        AND EXISTS (
+          SELECT 1 FROM stock_movements m
+          WHERE m.product_id = p.id AND m.expiry_date IS NOT NULL
+            AND m.deleted_at IS NULL
+        )
+    ''',
+      [shopId],
+    );
+    final result = <ExpiringBatch>[];
+    for (final p in products) {
+      var remaining = (p['qty'] as num).toDouble();
+      final purchases = await db.query(
+        'stock_movements',
+        columns: ['quantity_delta', 'batch_no', 'expiry_date'],
+        where:
+            "product_id = ? AND deleted_at IS NULL AND movement_type = 'purchase'",
+        whereArgs: [p['id']],
+        orderBy: 'created_at DESC, id DESC',
+      );
+      for (final m in purchases) {
+        if (remaining <= stockQuantityEpsilon) break;
+        final qty = (m['quantity_delta'] as num).toDouble();
+        final inStock = qty < remaining ? qty : remaining;
+        remaining -= inStock;
+        final expiry = DateTime.tryParse(m['expiry_date']?.toString() ?? '');
+        if (expiry == null || expiry.isAfter(cutoff)) continue;
+        result.add(
+          ExpiringBatch(
+            productId: p['id'] as int,
+            productName: p['name'] as String,
+            unit: p['unit'] as String?,
+            batchNo: m['batch_no'] as String?,
+            expiry: expiry,
+            quantity: inStock,
+          ),
+        );
+      }
+    }
+    return result..sort((a, b) => a.expiry.compareTo(b.expiry));
   }
 
   /// Tracked products with stock, highest cost value first.

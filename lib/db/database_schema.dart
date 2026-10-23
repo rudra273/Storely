@@ -922,7 +922,13 @@ mixin DatabaseSchema {
       'track_stock': 'INTEGER NOT NULL DEFAULT 1',
       'reorder_level': 'REAL',
     });
-    await _ensureColumns(executor, 'stock_movements', {'reason': 'TEXT'});
+    await _ensureColumns(executor, 'stock_movements', {
+      'reason': 'TEXT',
+      'batch_no': 'TEXT',
+      'expiry_date': 'TEXT',
+    });
+    await _ensureColumns(executor, 'products', {'mrp_price': 'REAL'});
+    await _ensureColumns(executor, 'bill_items', {'mrp_snapshot': 'REAL'});
   }
 
   /// v20 changed these index definitions but kept their names, so the CREATE

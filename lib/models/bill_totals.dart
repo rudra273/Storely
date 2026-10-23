@@ -151,6 +151,7 @@ class BillTotals {
       igstAmountSnapshot: charged && interState ? gstUnit : 0,
       wasDirectPrice: item.wasDirectPrice,
       quantity: item.quantity,
+      mrpSnapshot: item.mrpSnapshot,
     );
   }
 }

@@ -591,6 +591,11 @@ mixin DatabaseProducts {
       cgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
       sgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
       wasDirectPrice: breakdown.wasDirectPrice,
+      mrpSnapshot:
+          product.printedMrp != null &&
+              product.printedMrp! > breakdown.sellingPrice + 0.004
+          ? product.printedMrp
+          : null,
     );
   }
 
@@ -892,6 +897,8 @@ mixin DatabaseProducts {
             : 'manual',
         supplierId: productToInsert.supplierId,
         importBatchKey: importBatchKey,
+        batchNo: product.purchaseBatchNo,
+        expiryDate: product.purchaseExpiry,
         createdAt: purchaseDate ?? productToInsert.createdAt,
       );
       await _syncProductQuantityCache(executor, id);
@@ -952,6 +959,8 @@ mixin DatabaseProducts {
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
       supplierId: updatedProduct.supplierId,
       importBatchKey: importBatchKey,
+      batchNo: product.purchaseBatchNo,
+      expiryDate: product.purchaseExpiry,
       createdAt: purchaseDate,
     );
     await _syncProductQuantityCache(executor, product.id!);
@@ -1013,6 +1022,8 @@ mixin DatabaseProducts {
     int? importRowNumber,
     String? notes,
     String? reason,
+    String? batchNo,
+    DateTime? expiryDate,
     DateTime? createdAt,
   }) async {
     if (quantityDelta == 0) return;
@@ -1041,6 +1052,8 @@ mixin DatabaseProducts {
       'import_row_number': importRowNumber,
       'notes': notes,
       'reason': reason,
+      'batch_no': _normaliseName(batchNo),
+      'expiry_date': expiryDate == null ? null : _dateOnly(expiryDate),
       'created_at': _localIso(createdAt),
       'updated_at': now.toIso8601String(),
     });

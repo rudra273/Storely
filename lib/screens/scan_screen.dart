@@ -370,6 +370,7 @@ class _ScanScreenState extends State<ScanScreen> {
       igstAmountSnapshot: item.igstAmountSnapshot,
       wasDirectPrice: item.wasDirectPrice,
       quantity: item.quantity,
+      mrpSnapshot: item.mrpSnapshot,
     );
   }
 

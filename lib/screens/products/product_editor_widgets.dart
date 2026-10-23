@@ -958,3 +958,102 @@ class _StockTrackingFields extends StatelessWidget {
     );
   }
 }
+
+/// Printed MRP, plus batch no. and expiry for the stock being purchased.
+class _MrpAndBatchFields extends StatelessWidget {
+  final TextEditingController mrpController;
+  final TextEditingController batchController;
+  final DateTime? expiryDate;
+  final bool showBatch;
+  final ValueChanged<DateTime?> onExpiryChanged;
+  final VoidCallback onChanged;
+
+  const _MrpAndBatchFields({
+    required this.mrpController,
+    required this.batchController,
+    required this.expiryDate,
+    required this.showBatch,
+    required this.onExpiryChanged,
+    required this.onChanged,
+  });
+
+  Future<void> _pickExpiry(BuildContext context) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: expiryDate ?? DateTime(now.year, now.month + 6, now.day),
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 10),
+      helpText: 'Expiry date',
+    );
+    if (picked != null) onExpiryChanged(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextFormField(
+          key: const ValueKey('product-mrp'),
+          controller: mrpController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+          ],
+          decoration: const InputDecoration(
+            labelText: 'MRP (optional)',
+            helperText: 'Printed on the pack. Bills show the saving.',
+            prefixText: '₹ ',
+            prefixIcon: Icon(Icons.local_offer_outlined, size: 18),
+          ),
+          onChanged: (_) => onChanged(),
+        ),
+        if (showBatch) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  key: const ValueKey('purchase-batch'),
+                  controller: batchController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Batch no.',
+                    hintText: 'Optional',
+                  ),
+                  onChanged: (_) => onChanged(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  key: const ValueKey('purchase-expiry'),
+                  onTap: () => _pickExpiry(context),
+                  borderRadius: AppRadius.mdRadius,
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Expiry',
+                      suffixIcon: expiryDate == null
+                          ? const Icon(Icons.event_outlined, size: 18)
+                          : IconButton(
+                              tooltip: 'Clear expiry',
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () => onExpiryChanged(null),
+                            ),
+                    ),
+                    child: Text(
+                      expiryDate == null
+                          ? 'None'
+                          : _formatFullDate(expiryDate!),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}

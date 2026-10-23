@@ -311,6 +311,7 @@ mixin DatabaseBills {
             wasDirectPrice: item.wasDirectPrice,
             quantity: -qty,
             originalItemUuid: item.uuid,
+            mrpSnapshot: item.mrpSnapshot,
             createdAt: when,
           ),
         );

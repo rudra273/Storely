@@ -90,4 +90,31 @@ void main() {
 
     expect(bytes.length, greaterThan(1000));
   });
+
+  test('bill with MRP prints the MRP column and saving', () async {
+    final bill = Bill(
+      billNumber: 'INV/2627/0009',
+      customerName: 'Asha',
+      subtotalAmount: 180,
+      totalAmount: 180,
+      itemCount: 1,
+      isPaid: true,
+      paidAmount: 180,
+      items: [
+        BillItem(
+          productName: 'Shampoo',
+          quantity: 2,
+          sellingPriceSnapshot: 90,
+          taxableValueSnapshot: 90,
+          mrpSnapshot: 99,
+        ),
+      ],
+    );
+    expect(bill.items.single.mrpSaving, 18);
+    final bytes = await BillPdfGenerator.generate(
+      bill: bill,
+      shop: ShopProfile(name: 'Shop'),
+    );
+    expect(bytes.length, greaterThan(1000));
+  });
 }

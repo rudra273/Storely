@@ -308,6 +308,14 @@ class BillPdfGenerator {
           alignment: pw.Alignment.centerRight,
           value: (_, item) => item.quantityLabel,
         ),
+      if (bill.items.any((item) => item.mrpSaving > 0))
+        _BillTableColumn(
+          label: 'MRP',
+          width: const pw.FlexColumnWidth(0.85),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) =>
+              item.mrpSnapshot == null ? '-' : _money(item.mrpSnapshot!),
+        ),
       if (settings.showRateColumn)
         _BillTableColumn(
           label: 'Rate',
@@ -423,6 +431,20 @@ class BillPdfGenerator {
               _totalRow('Grand total', bill.totalAmount, bold: true),
             ],
           ];
+    final saved = bill.isCreditNote
+        ? 0.0
+        : bill.items.fold<double>(0, (sum, item) => sum + item.mrpSaving);
+    if (saved > 0.004) {
+      rows.add(
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text(
+            'You saved ${_money(saved)} on MRP',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+      );
+    }
     if (rows.isEmpty) return pw.SizedBox();
 
     return pw.Align(
