@@ -270,6 +270,60 @@ mixin DatabaseProducts {
     notifyDatabaseChanged();
   }
 
+  /// Gives products that have neither a barcode nor a product code a short
+  /// code (e.g. P3F9A2C1) so barcode labels stay small and scannable.
+  /// Returns how many were assigned.
+  Future<int> assignShortCodes(Iterable<int> productIds) async {
+    await _requireAdminMutation();
+    final db = await database;
+    var assigned = 0;
+    await db.transaction((txn) async {
+      for (final id in productIds) {
+        final rows = await txn.query(
+          'products',
+          columns: ['uuid', 'shop_id', 'barcode', 'product_code'],
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (rows.isEmpty) continue;
+        final row = rows.single;
+        if (_normaliseName(row['barcode'] as String?) != null ||
+            _normaliseName(row['product_code'] as String?) != null) {
+          continue;
+        }
+        final hex = (row['uuid'] as String).replaceAll('-', '').toUpperCase();
+        String? code;
+        for (var length = 7; length <= hex.length; length++) {
+          final candidate = 'P${hex.substring(0, length)}';
+          final taken = await txn.query(
+            'products',
+            columns: ['id'],
+            where:
+                'shop_id = ? AND deleted_at IS NULL AND '
+                '(LOWER(product_code) = LOWER(?) OR LOWER(barcode) = LOWER(?))',
+            whereArgs: [row['shop_id'], candidate, candidate],
+            limit: 1,
+          );
+          if (taken.isEmpty) {
+            code = candidate;
+            break;
+          }
+        }
+        if (code == null) continue;
+        await txn.update(
+          'products',
+          {'product_code': code, 'updated_at': _nowIso()},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        assigned++;
+      }
+    });
+    if (assigned > 0) notifyDatabaseChanged();
+    return assigned;
+  }
+
   Future<int> deleteProduct(int id) async {
     await _requireAdminMutation();
     final db = await database;
