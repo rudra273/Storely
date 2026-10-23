@@ -14,7 +14,12 @@ class _BillCard extends StatefulWidget {
   onStatusChanged;
   final VoidCallback onRecordPayment;
 
+  /// Admin action to issue a credit note (sales return); null when not
+  /// allowed for this bill.
+  final VoidCallback? onReturn;
+
   const _BillCard({
+    this.onReturn,
     required this.bill,
     required this.onCancel,
     required this.onEdit,
@@ -159,8 +164,11 @@ class _BillCardState extends State<_BillCard> {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            _PaymentChip(status: bill.paymentStatus),
-                            if (bill.paidAmount > 0) ...[
+                            if (bill.isCreditNote)
+                              const _CreditNoteChip()
+                            else
+                              _PaymentChip(status: bill.paymentStatus),
+                            if (!bill.isCreditNote && bill.paidAmount > 0) ...[
                               const SizedBox(width: 4),
                               _MethodChip(method: bill.paymentMethod),
                             ],
@@ -191,6 +199,16 @@ class _BillCardState extends State<_BillCard> {
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Column(
                   children: [
+                    if (bill.isCreditNote && bill.originalBillNumber != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _BillMetaRow(
+                          icon: Icons.undo_rounded,
+                          text:
+                              'Against ${bill.originalBillNumber}'
+                              '${bill.cancelReason == null ? '' : ' · ${bill.cancelReason}'}',
+                        ),
+                      ),
                     if (bill.customerPhone != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -329,15 +347,24 @@ class _BillCardState extends State<_BillCard> {
                             label: 'Cancel',
                             color: AppColors.error,
                           ),
-                          _ActionButton(
-                            onPressed: widget.onEdit,
-                            icon: Icons.edit_outlined,
-                            label: 'Edit',
-                            color: AppColors.brandOf(context),
-                          ),
+                          if (!bill.isCreditNote)
+                            _ActionButton(
+                              onPressed: widget.onEdit,
+                              icon: Icons.edit_outlined,
+                              label: 'Edit',
+                              color: AppColors.brandOf(context),
+                            ),
+                          if (widget.onReturn != null)
+                            _ActionButton(
+                              onPressed: widget.onReturn!,
+                              icon: Icons.assignment_return_outlined,
+                              label: 'Return',
+                              color: AppColors.amber,
+                            ),
                         ],
-                        if (!bill.isPaid ||
-                            CloudService.instance.state.value.isAdmin)
+                        if (!bill.isCreditNote &&
+                            (!bill.isPaid ||
+                                CloudService.instance.state.value.isAdmin))
                           _ActionButton(
                             onPressed: _togglePaidStatus,
                             icon: bill.isPaid
@@ -348,14 +375,14 @@ class _BillCardState extends State<_BillCard> {
                                 ? AppColors.inkMuted
                                 : AppColors.success,
                           ),
-                        if (bill.balanceDue > 0)
+                        if (!bill.isCreditNote && bill.balanceDue > 0)
                           _ActionButton(
                             onPressed: widget.onRecordPayment,
                             icon: Icons.payments_outlined,
                             label: 'Record Payment',
                             color: AppColors.amber,
                           ),
-                        if (bill.customerPhone != null)
+                        if (!bill.isCreditNote && bill.customerPhone != null)
                           _ActionButton(
                             onPressed: widget.onSendWhatsApp,
                             icon: Icons.send_outlined,
@@ -368,12 +395,13 @@ class _BillCardState extends State<_BillCard> {
                           label: 'Share',
                           color: AppColors.brandOf(context),
                         ),
-                        _ActionButton(
-                          onPressed: _showProfitSummary,
-                          icon: Icons.trending_up_rounded,
-                          label: 'View Profit',
-                          color: AppColors.brandOf(context),
-                        ),
+                        if (!bill.isCreditNote)
+                          _ActionButton(
+                            onPressed: _showProfitSummary,
+                            icon: Icons.trending_up_rounded,
+                            label: 'View Profit',
+                            color: AppColors.brandOf(context),
+                          ),
                       ],
                     ),
                   ],
@@ -410,3 +438,25 @@ class _BillMetaRow extends StatelessWidget {
 }
 
 // ── Profit sheet ──────────────────────────────────────────────────────────────
+
+class _CreditNoteChip extends StatelessWidget {
+  const _CreditNoteChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.15),
+        borderRadius: AppRadius.smRadius,
+      ),
+      child: Text(
+        'Credit note',
+        style: AppText.caption.copyWith(
+          color: AppColors.amber,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}

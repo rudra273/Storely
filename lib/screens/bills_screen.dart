@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
+import '../models/bill_totals.dart';
 import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
 import '../services/bill_share.dart';
@@ -19,6 +20,7 @@ part 'billing/bill_profit_sheet.dart';
 part 'billing/bill_action_widgets.dart';
 part 'billing/bill_formatters.dart';
 part 'billing/bill_dialogs.dart';
+part 'billing/return_sheet.dart';
 
 class BillsScreen extends StatefulWidget {
   final int refreshToken;
@@ -111,6 +113,51 @@ class _BillsScreenState extends State<BillsScreen> {
         paymentReference: paymentReference,
       );
       await _loadBills();
+    } catch (e) {
+      _showActionError(e);
+    }
+  }
+
+  Future<void> _returnItems(Bill bill) async {
+    if (bill.id == null) return;
+    final db = DatabaseHelper.instance;
+    final returnable = await db.returnableQuantities(bill.id!);
+    final settings = await db.getBillSettings();
+    if (!mounted) return;
+    final request = await showModalBottomSheet<_ReturnRequest>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.surfaceOf(context),
+      builder: (_) => _ReturnSheet(
+        bill: bill,
+        returnable: returnable,
+        roundOff: settings.roundOffTotal,
+      ),
+    );
+    if (request == null) return;
+    try {
+      final creditNoteId = await db.createCreditNote(
+        billId: bill.id!,
+        quantities: request.quantities,
+        settlement: request.settlement,
+        refundMethod: request.refundMethod,
+        reason: request.reason,
+      );
+      await _loadBills();
+      final creditNote = await db.getBillById(creditNoteId);
+      if (!mounted || creditNote == null) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Credit note ${creditNote.billNumber} issued'),
+            action: SnackBarAction(
+              label: 'Share',
+              onPressed: () => BillShare.sharePdf(creditNote),
+            ),
+          ),
+        );
     } catch (e) {
       _showActionError(e);
     }
@@ -517,6 +564,10 @@ class _BillsScreenState extends State<BillsScreen> {
               paymentReference: reference,
             ),
             onRecordPayment: () => _recordPayment(bill),
+            onReturn:
+                !bill.isCreditNote && CloudService.instance.state.value.isAdmin
+                ? () => _returnItems(bill)
+                : null,
             onSendWhatsApp: () => _sendBillOnWhatsApp(bill),
             onSharePdf: () => _shareBillPdf(bill),
           ),

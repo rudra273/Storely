@@ -119,6 +119,13 @@ select pg_temp.check(
     updated_at = '2026-10-02T00:00:00Z' where uuid = 'pay-1'$$),
   'staff cannot change a payment');
 select pg_temp.check(
+  pg_temp.refused($$insert into public.bills (uuid, shop_id, bill_number,
+    customer_name, total_amount, item_count, document_type,
+    original_bill_uuid, created_at, updated_at)
+    values ('cn-1', 'shop-1', 'CN/2627/B0001', 'Asha', -50, 1, 'credit_note',
+    'bill-1', '2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z')$$),
+  'staff cannot issue credit notes');
+select pg_temp.check(
   pg_temp.refused($$insert into public.stock_movements (uuid, shop_id,
     product_uuid, movement_type, quantity_delta, created_at, updated_at)
     values ('mv-x', 'shop-1', 'prod-1', 'adjustment', 50,

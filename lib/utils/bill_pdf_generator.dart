@@ -20,6 +20,8 @@ class BillPdfGenerator {
     required ShopProfile? shop,
     BillSettings? settings,
   }) async {
+    // A credit note is stored negative; print it with positive figures.
+    if (bill.isCreditNote && bill.totalAmount < 0) bill = bill.negated();
     final billSettings = settings ?? BillSettings();
     final pdf = pw.Document(
       title: _billTitle(bill),
@@ -97,10 +99,9 @@ class BillPdfGenerator {
   }) {
     if (!_showHeader(settings)) return pw.SizedBox();
     final scheme = shop?.gstScheme ?? GstScheme.unregistered;
-    final title = settings.documentTitle(
-      billHasGst: billHasGst,
-      gstScheme: scheme,
-    );
+    final title = bill.isCreditNote
+        ? 'CREDIT NOTE'
+        : settings.documentTitle(billHasGst: billHasGst, gstScheme: scheme);
     final showLegend = scheme == GstScheme.composition && !billHasGst;
     final logo = settings.showShopLogo
         ? _imageProvider(settings.shopLogoBase64)
@@ -213,7 +214,13 @@ class BillPdfGenerator {
         : 'Inter-state';
 
     final cells = [
-      if (settings.showInvoiceNumber) _metaCell('Invoice No', _billTitle(bill)),
+      if (settings.showInvoiceNumber)
+        _metaCell(
+          bill.isCreditNote ? 'Credit Note No' : 'Invoice No',
+          _billTitle(bill),
+        ),
+      if (bill.isCreditNote && bill.originalBillNumber != null)
+        _metaCell('Against Invoice', bill.originalBillNumber!),
       if (settings.showInvoiceDate)
         _metaCell(
           'Date',
@@ -557,6 +564,7 @@ class BillPdfGenerator {
     ShopProfile? shop,
     BillSettings settings,
   ) {
+    if (bill.isCreditNote) return _creditNoteSettlement(bill);
     final balance = bill.balanceDue;
     final upiId = settings.upiId.trim();
     final showQr =
@@ -618,6 +626,27 @@ class BillPdfGenerator {
               pw.Text(upiId, style: const pw.TextStyle(fontSize: 7)),
             ],
           ),
+      ],
+    );
+  }
+
+  static pw.Widget _creditNoteSettlement(Bill bill) {
+    final adjusted = bill.paymentMethod == 'credit_note';
+    final settled = bill.paidAmount > 0.005;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        _kv(
+          adjusted ? 'Adjusted' : 'Refunded',
+          settled
+              ? adjusted
+                    ? '${_money(bill.paidAmount)} against '
+                          '${bill.originalBillNumber ?? 'the invoice'}'
+                    : '${_money(bill.paidAmount)} (${_paymentMode(bill)})'
+              : _money(0),
+        ),
+        if ((bill.cancelReason ?? '').isNotEmpty)
+          _kv('Reason', bill.cancelReason!),
       ],
     );
   }

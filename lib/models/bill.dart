@@ -9,6 +9,8 @@ class Bill {
   static const statusPaid = 'paid';
   static const lifecycleFinalized = 'finalized';
   static const lifecycleCancelled = 'cancelled';
+  static const documentInvoice = 'invoice';
+  static const documentCreditNote = 'credit_note';
 
   final int? id;
   final String uuid;
@@ -36,6 +38,41 @@ class Bill {
 
   /// Added to the line total to reach a whole-rupee grand total (+/- < 0.50).
   final double roundOffAmount;
+
+  /// [documentInvoice] or [documentCreditNote]. A credit note (sales return)
+  /// carries negative quantities and amounts, so sales and GST totals are
+  /// net of returns, and points at the invoice it reverses.
+  final String documentType;
+  final String? originalBillUuid;
+  final String? originalBillNumber;
+
+  bool get isCreditNote => documentType == documentCreditNote;
+
+  /// The same document with every amount and quantity sign-flipped, so a
+  /// credit note can be printed with positive figures.
+  Bill negated() {
+    double neg(double v) => v == 0 ? 0 : -v;
+    return Bill.fromMap(
+      {
+        ...toMap(),
+        'subtotal_amount': neg(subtotalAmount),
+        'discount_amount': neg(discountAmount),
+        'taxable_amount': neg(taxableAmount),
+        'cgst_amount': neg(cgstAmount),
+        'sgst_amount': neg(sgstAmount),
+        'igst_amount': neg(igstAmount),
+        'round_off_amount': neg(roundOffAmount),
+        'total_amount': neg(totalAmount),
+        'paid_amount': neg(paidAmount),
+        'balance_due': neg(balanceDue),
+        'transaction_reference': transactionReference,
+      },
+      [
+        for (final item in items)
+          BillItem.fromMap({...item.toMap(0), 'quantity': -item.quantity}),
+      ],
+    );
+  }
   final double totalAmount;
   final int itemCount;
   final bool isPaid;
@@ -83,6 +120,9 @@ class Bill {
     this.sgstAmount = 0,
     this.igstAmount = 0,
     this.roundOffAmount = 0,
+    this.documentType = documentInvoice,
+    this.originalBillUuid,
+    this.originalBillNumber,
     required this.totalAmount,
     required this.itemCount,
     this.isPaid = true,
@@ -150,6 +190,9 @@ class Bill {
     'sgst_amount': sgstAmount,
     'igst_amount': igstAmount,
     'round_off_amount': roundOffAmount,
+    'document_type': documentType,
+    'original_bill_uuid': originalBillUuid,
+    'original_bill_number': originalBillNumber,
     'total_amount': totalAmount,
     'item_count': itemCount,
     'is_paid': isPaid ? 1 : 0,
@@ -208,6 +251,11 @@ class Bill {
       sgstAmount: (map['sgst_amount'] as num?)?.toDouble() ?? 0,
       igstAmount: (map['igst_amount'] as num?)?.toDouble() ?? 0,
       roundOffAmount: (map['round_off_amount'] as num?)?.toDouble() ?? 0,
+      documentType: map['document_type'] == documentCreditNote
+          ? documentCreditNote
+          : documentInvoice,
+      originalBillUuid: map['original_bill_uuid'] as String?,
+      originalBillNumber: map['original_bill_number'] as String?,
       totalAmount: totalAmount,
       itemCount: map['item_count'] as int,
       isPaid: legacyPaid,
@@ -265,6 +313,9 @@ class BillItem {
   final double igstAmountSnapshot;
   final bool wasDirectPrice;
   double quantity;
+
+  /// On a credit note line: the invoice line being returned.
+  final String? originalItemUuid;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -338,6 +389,7 @@ class BillItem {
     this.igstAmountSnapshot = 0,
     this.wasDirectPrice = true,
     num quantity = 1,
+    this.originalItemUuid,
     this.deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -383,6 +435,7 @@ class BillItem {
     'igst_amount_snapshot': igstAmountSnapshot,
     'was_direct_price': wasDirectPrice ? 1 : 0,
     'quantity': quantity,
+    'original_item_uuid': originalItemUuid,
     'subtotal': subtotal,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
@@ -424,6 +477,7 @@ class BillItem {
           (map['igst_amount_snapshot'] as num?)?.toDouble() ?? 0,
       wasDirectPrice: (map['was_direct_price'] as int? ?? 1) == 1,
       quantity: (map['quantity'] as num).toDouble(),
+      originalItemUuid: map['original_item_uuid'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:

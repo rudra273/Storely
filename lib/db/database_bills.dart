@@ -4,6 +4,7 @@ mixin DatabaseBills {
   Future<Database> get database;
   Future<void> syncCustomersFromBills(DatabaseExecutor executor);
   Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
+  Future<BillSettings> getBillSettings();
   Future<void> _syncProductQuantityCache(
     DatabaseExecutor executor,
     int productId,
@@ -11,7 +12,15 @@ mixin DatabaseBills {
 
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
-    return db.transaction((txn) async {
+    return db.transaction((txn) => _insertBillTxn(txn, bill, items));
+  }
+
+  Future<int> _insertBillTxn(
+    Transaction txn,
+    Bill bill,
+    List<BillItem> items,
+  ) async {
+    {
       final shopId = await _activeShopId(txn);
       final billUuid = bill.uuid.isEmpty ? _newUuid() : bill.uuid;
       final billNumber = bill.billNumber.isEmpty
@@ -73,7 +82,7 @@ mixin DatabaseBills {
       }
       notifyDatabaseChanged();
       return billId;
-    });
+    }
   }
 
   Future<List<Bill>> getAllBills() async {
@@ -164,6 +173,265 @@ mixin DatabaseBills {
     return rows.isEmpty
         ? const []
         : HeldBill.decodeItems(rows.single['items_json'] as String);
+  }
+
+  // ── Credit notes (sales returns) ──
+
+  static const creditNoteSettleRefund = 'refund';
+  static const creditNoteSettleAdjust = 'adjust';
+
+  /// Quantity still returnable per invoice line (sold minus already
+  /// returned on active credit notes), keyed by the invoice line uuid.
+  Future<Map<String, double>> returnableQuantities(int billId) async {
+    final db = await database;
+    return _returnableQuantities(db, billId);
+  }
+
+  Future<Map<String, double>> _returnableQuantities(
+    DatabaseExecutor executor,
+    int billId,
+  ) async {
+    final rows = await executor.rawQuery(
+      '''
+      SELECT bi.uuid AS uuid, bi.quantity AS sold,
+        COALESCE((
+          SELECT -SUM(cni.quantity)
+          FROM bill_items cni
+          JOIN bills cn ON cn.id = cni.bill_id
+          WHERE cni.original_item_uuid = bi.uuid
+            AND cni.deleted_at IS NULL AND cn.deleted_at IS NULL
+        ), 0) AS returned
+      FROM bill_items bi
+      WHERE bi.bill_id = ? AND bi.deleted_at IS NULL
+      ''',
+      [billId],
+    );
+    return {
+      for (final row in rows)
+        row['uuid'] as String: roundMoney(
+          (row['sold'] as num).toDouble() -
+              (row['returned'] as num).toDouble(),
+        ),
+    };
+  }
+
+  /// Issues a credit note returning [quantities] (invoice line uuid ->
+  /// quantity) of invoice [billId]. Returned stock goes back to inventory.
+  /// [settlement] is [creditNoteSettleRefund] (money paid back by
+  /// [refundMethod]) or [creditNoteSettleAdjust] (reduces what the customer
+  /// still owes on the invoice). Returns the credit note's bill id.
+  Future<int> createCreditNote({
+    required int billId,
+    required Map<String, double> quantities,
+    required String settlement,
+    String refundMethod = 'cash',
+    String? reason,
+    DateTime? createdAt,
+  }) async {
+    await _requireAdminMutation();
+    final when = createdAt ?? DateTime.now();
+    final db = await database;
+    final settings = await getBillSettings();
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [billId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('Bill not found or cancelled');
+      final original = Bill.fromMap(rows.single);
+      if (original.isCreditNote) {
+        throw StateError('A credit note cannot be returned');
+      }
+      final itemRows = await txn.query(
+        'bill_items',
+        where: 'bill_id = ? AND deleted_at IS NULL',
+        whereArgs: [billId],
+      );
+      final returnable = await _returnableQuantities(txn, billId);
+      final lines = <BillItem>[];
+      for (final row in itemRows) {
+        final item = BillItem.fromMap(row);
+        final qty = quantities[item.uuid] ?? 0;
+        if (qty <= 0) continue;
+        if (qty > (returnable[item.uuid] ?? 0) + stockQuantityEpsilon) {
+          throw ArgumentError(
+            'Only ${_formatDbQuantity(returnable[item.uuid] ?? 0)} of '
+            '"${item.productName}" can be returned',
+          );
+        }
+        lines.add(
+          BillItem(
+            uuid: _newUuid(),
+            productId: item.productId,
+            productUuid: item.productUuid,
+            productName: item.productName,
+            hsnCodeSnapshot: item.hsnCodeSnapshot,
+            hsnTypeSnapshot: item.hsnTypeSnapshot,
+            unit: item.unit,
+            purchasePriceSnapshot: item.purchasePriceSnapshot,
+            sellingPriceSnapshot: item.sellingPriceSnapshot,
+            costSnapshot: item.costSnapshot,
+            profitSnapshot: item.profitSnapshot,
+            commissionSnapshot: item.commissionSnapshot,
+            gstSnapshot: item.gstSnapshot,
+            gstPercentSnapshot: item.gstPercentSnapshot,
+            taxableValueSnapshot: item.taxableValueSnapshot,
+            cgstAmountSnapshot: item.cgstAmountSnapshot,
+            sgstAmountSnapshot: item.sgstAmountSnapshot,
+            igstAmountSnapshot: item.igstAmountSnapshot,
+            wasDirectPrice: item.wasDirectPrice,
+            quantity: -qty,
+            originalItemUuid: item.uuid,
+            createdAt: when,
+          ),
+        );
+      }
+      if (lines.isEmpty) throw ArgumentError('Choose at least one item');
+
+      final totals = BillTotals.fromTaxedItems(
+        lines,
+        roundOff: settings.roundOffTotal,
+      );
+      final refund = -totals.grandTotal; // positive amount owed back
+      if (settlement == creditNoteSettleAdjust &&
+          refund > original.balanceDue + 0.005) {
+        throw ArgumentError(
+          'Adjustment is more than the ${rupees(original.balanceDue)} due on '
+          'this bill. Refund instead.',
+        );
+      }
+
+      final shopId = await _activeShopId(txn);
+      final number = await _allocateCreditNoteNumber(txn, when, shopId);
+      final creditNoteId = await _insertBillTxn(
+        txn,
+        Bill(
+          billNumber: number,
+          billType: original.billType,
+          customerName: original.customerName,
+          customerPhone: original.customerPhone,
+          customerGstin: original.customerGstin,
+          customerGstLegalName: original.customerGstLegalName,
+          customerGstTradeName: original.customerGstTradeName,
+          customerAddressSnapshot: original.customerAddressSnapshot,
+          placeOfSupplyStateCode: original.placeOfSupplyStateCode,
+          subtotalAmount: totals.subtotal,
+          discountPercent: original.discountPercent,
+          discountAmount: totals.discountAmount,
+          taxableAmount: totals.taxableAmount,
+          cgstAmount: totals.cgstAmount,
+          sgstAmount: totals.sgstAmount,
+          igstAmount: totals.igstAmount,
+          roundOffAmount: totals.roundOffAmount,
+          totalAmount: totals.grandTotal,
+          itemCount: lines.length,
+          isPaid: false,
+          paidAmount: 0,
+          documentType: Bill.documentCreditNote,
+          originalBillUuid: original.uuid,
+          originalBillNumber: original.billNumber,
+          cancelReason: _normaliseName(reason),
+          createdAt: when,
+        ),
+        lines,
+      );
+      final creditNote = (await txn.query(
+        'bills',
+        where: 'id = ?',
+        whereArgs: [creditNoteId],
+        limit: 1,
+      )).single;
+
+      // Returned goods back to stock.
+      for (final line in lines) {
+        if (line.productId == null || line.productUuid == null) continue;
+        await _insertBillStockMovement(
+          txn,
+          productId: line.productId!,
+          productUuid: line.productUuid!,
+          movementType: StockMovementType.returnIn,
+          quantityDelta: -line.quantity,
+          sourceType: 'credit_note',
+          sourceDocumentType: 'bill',
+          sourceDocumentId: creditNoteId,
+          sourceDocumentUuid: creditNote['uuid'] as String,
+          createdAt: when,
+        );
+        await _syncProductQuantityCache(txn, line.productId!);
+      }
+
+      // Settle: refund money, or reduce what is owed on the invoice. The
+      // two adjustment rows cancel out in 'collected', since no cash moves.
+      if (refund > 0.005) {
+        final isAdjust = settlement == creditNoteSettleAdjust;
+        await _insertPayment(
+          txn,
+          billId: creditNoteId,
+          bill: creditNote,
+          amount: -refund,
+          paymentMethod: isAdjust ? 'credit_note' : refundMethod,
+          paymentReference: isAdjust ? original.billNumber : null,
+          notes: isAdjust ? 'Adjusted against invoice' : 'Refund',
+          receivedAt: when,
+        );
+        if (isAdjust) {
+          await _insertPayment(
+            txn,
+            billId: billId,
+            bill: rows.single,
+            amount: refund,
+            paymentMethod: 'credit_note',
+            paymentReference: number,
+            notes: 'Credit note',
+            receivedAt: when,
+          );
+        }
+      }
+      await syncCustomersFromBills(txn);
+      notifyDatabaseChanged();
+      return creditNoteId;
+    });
+  }
+
+  /// CN/{FY}/{SEQ} with this device's letter; its own per-device counter.
+  Future<String> _allocateCreditNoteNumber(
+    DatabaseExecutor executor,
+    DateTime createdAt,
+    String shopId,
+  ) async {
+    final deviceCode = await _deviceCodeFor(executor, shopId);
+    final resetKey = InvoiceNumbering.resetKey(createdAt, 'financial_year');
+    final counterKey = 'credit_note_seq:$shopId:$resetKey';
+    final stored = await executor.query(
+      'cloud_sync_state',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [counterKey],
+      limit: 1,
+    );
+    var sequence = stored.isEmpty
+        ? 1
+        : int.tryParse(stored.single['value']?.toString() ?? '') ?? 1;
+    String format(int seq) => InvoiceNumbering.format(
+      template: 'CN/{FY}/{SEQ}',
+      date: createdAt,
+      sequence: seq,
+      padding: 4,
+      deviceCode: deviceCode,
+    );
+    var number = format(sequence);
+    while (await _billNumberExists(executor, shopId, number)) {
+      sequence++;
+      number = format(sequence);
+    }
+    await executor.insert('cloud_sync_state', {
+      'key': counterKey,
+      'value': '${sequence + 1}',
+      'updated_at': _nowIso(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return number;
   }
 
   /// One bill with its items (including a cancelled one), or null.
@@ -392,6 +660,53 @@ mixin DatabaseBills {
       if (rows.isEmpty || rows.single['deleted_at'] != null) return 0;
       final now = _nowIso();
       final billUuid = rows.single['uuid'] as String;
+      final activeCreditNotes = await txn.query(
+        'bills',
+        columns: ['bill_number'],
+        where: 'original_bill_uuid = ? AND deleted_at IS NULL',
+        whereArgs: [billUuid],
+      );
+      if (activeCreditNotes.isNotEmpty) {
+        throw StateError(
+          'This bill has credit note '
+          '${activeCreditNotes.map((r) => r['bill_number']).join(', ')}. '
+          'Cancel the credit note first.',
+        );
+      }
+      // Cancelling a credit note also undoes its adjustment on the invoice.
+      final creditNoteNumber = await txn.query(
+        'bills',
+        columns: ['bill_number', 'original_bill_uuid'],
+        where: "id = ? AND document_type = 'credit_note'",
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (creditNoteNumber.isNotEmpty) {
+        final originalUuid =
+            creditNoteNumber.single['original_bill_uuid'] as String?;
+        await txn.update(
+          'bill_payments',
+          {'deleted_at': now, 'updated_at': now},
+          where:
+              "bill_uuid = ? AND payment_method = 'credit_note' "
+              'AND payment_reference = ? AND deleted_at IS NULL',
+          whereArgs: [originalUuid, creditNoteNumber.single['bill_number']],
+        );
+        final original = await txn.query(
+          'bills',
+          columns: ['id'],
+          where: 'uuid = ?',
+          whereArgs: [originalUuid],
+          limit: 1,
+        );
+        if (original.isNotEmpty) {
+          await _updateBillPaymentSummary(
+            txn,
+            original.single['id'] as int,
+            originalUuid!,
+          );
+        }
+      }
       final customerId = rows.single['customer_id'] as int?;
       final totalAmount =
           (rows.single['total_amount'] as num?)?.toDouble() ?? 0;
@@ -700,7 +1015,8 @@ mixin DatabaseBills {
   Future<int> getBillCount() async {
     final db = await database;
     final r = await db.rawQuery(
-      'SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL',
+      "SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL "
+      "AND document_type <> 'credit_note'",
     );
     return Sqflite.firstIntValue(r) ?? 0;
   }
@@ -736,7 +1052,8 @@ mixin DatabaseBills {
     final db = await database;
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final r = await db.rawQuery(
-      'SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL AND created_at LIKE ?',
+      "SELECT COUNT(*) as c FROM bills WHERE deleted_at IS NULL "
+      "AND document_type <> 'credit_note' AND created_at LIKE ?",
       ['$today%'],
     );
     return Sqflite.firstIntValue(r) ?? 0;
@@ -885,10 +1202,16 @@ mixin DatabaseBills {
       [billUuid],
     );
     final paid = (paymentRows.single['paid'] as num?)?.toDouble() ?? 0;
-    final due = (total - paid) <= 0.005 ? 0.0 : total - paid;
-    final status = paid <= 0.005
+    // Credit notes are negative (money owed back); compare magnitudes and
+    // keep the sign, so an unrefunded credit note is never 'unpaid' dues.
+    final sign = total < 0 ? -1.0 : 1.0;
+    final totalAbs = total * sign;
+    final paidAbs = paid * sign;
+    final dueAbs = (totalAbs - paidAbs) <= 0.005 ? 0.0 : totalAbs - paidAbs;
+    final due = dueAbs * sign;
+    final status = paidAbs <= 0.005
         ? Bill.statusUnpaid
-        : due <= 0.005
+        : dueAbs <= 0.005
         ? Bill.statusPaid
         : Bill.statusPartial;
     await executor.update(

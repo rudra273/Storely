@@ -84,7 +84,7 @@ mixin DatabaseKpi {
     final where = _dateWhere('b.created_at', from, to);
     final r = await db.rawQuery('''
       SELECT COALESCE(SUM(total_amount), 0) * 1.0
-           / NULLIF(COUNT(*), 0) AS v
+           / NULLIF(SUM((CASE WHEN b.document_type = 'credit_note' THEN 0 ELSE 1 END)), 0) AS v
       FROM bills b
       WHERE b.deleted_at IS NULL $where
     ''');
@@ -143,7 +143,7 @@ mixin DatabaseKpi {
     // SQLite: strftime('%w', date) => 0=Sunday, 1=Monday ... 6=Saturday
     return db.rawQuery('''
       SELECT CAST(strftime('%w', substr(b.created_at, 1, 10)) AS INTEGER) AS dow,
-             COUNT(*) AS bills,
+             SUM((CASE WHEN b.document_type = 'credit_note' THEN 0 ELSE 1 END)) AS bills,
              COALESCE(SUM(b.total_amount), 0) AS revenue
       FROM bills b
       WHERE b.deleted_at IS NULL $where
@@ -590,7 +590,7 @@ mixin DatabaseKpi {
       SELECT CAST(COUNT(*) AS REAL)
            / NULLIF(COUNT(DISTINCT substr(b.created_at, 1, 10)), 0) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL $where
+      WHERE b.deleted_at IS NULL AND b.document_type <> 'credit_note' $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -601,7 +601,7 @@ mixin DatabaseKpi {
     final r = await db.rawQuery('''
       SELECT ROUND(COALESCE(AVG(CAST(b.item_count AS REAL)), 0), 2) AS v
       FROM bills b
-      WHERE b.deleted_at IS NULL $where
+      WHERE b.deleted_at IS NULL AND b.document_type <> 'credit_note' $where
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }
@@ -613,6 +613,7 @@ mixin DatabaseKpi {
         CAST(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS REAL)
         / NULLIF(COUNT(*), 0) * 100, 2) AS v
       FROM bills
+      WHERE document_type <> 'credit_note'
     ''');
     return (r.first['v'] as num?)?.toDouble() ?? 0;
   }

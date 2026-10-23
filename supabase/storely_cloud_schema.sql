@@ -240,6 +240,9 @@ create table if not exists public.bills (
   sgst_amount double precision not null default 0,
   igst_amount double precision not null default 0,
   round_off_amount double precision not null default 0,
+  document_type text not null default 'invoice',
+  original_bill_uuid text,
+  original_bill_number text,
   total_amount double precision not null,
   item_count integer not null,
   is_paid integer not null default 1,
@@ -278,6 +281,7 @@ create table if not exists public.bill_items (
   sgst_amount_snapshot double precision not null default 0,
   igst_amount_snapshot double precision not null default 0,
   was_direct_price integer not null default 1,
+  original_item_uuid text,
   quantity double precision not null default 0,
   subtotal double precision not null,
   device_id text,
@@ -1179,3 +1183,51 @@ begin
   end loop;
 end;
 $$;
+
+-- ── Credit notes (mirrors migrations/20261025_credit_notes.sql) ──
+create index if not exists idx_bills_original_bill
+on public.bills (original_bill_uuid) where original_bill_uuid is not null;
+
+create or replace function public.storely_zz_guard_staff_write()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  -- Derived or link columns any device may refresh.
+  ignored text[] := array[
+    'server_updated_at', 'updated_at', 'paid_amount', 'balance_due',
+    'payment_status', 'is_paid', 'payment_method', 'customer_uuid'
+  ];
+begin
+  -- Service role / dashboard (no end user) and owners/admins are not limited.
+  if auth.uid() is null or public.is_shop_admin(new.shop_id) then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if new.deleted_at is not null then
+      raise exception 'Staff cannot create cancelled records'
+        using errcode = '42501';
+    end if;
+    if tg_table_name = 'bills'
+       and (to_jsonb(new) ->> 'document_type') = 'credit_note' then
+      raise exception 'Only the owner or an admin can issue credit notes'
+        using errcode = '42501';
+    end if;
+    if tg_table_name = 'stock_movements'
+       and (to_jsonb(new) ->> 'movement_type') is distinct from 'sale' then
+      raise exception 'Staff can only record sales stock movements'
+        using errcode = '42501';
+    end if;
+    return new;
+  end if;
+
+  if (to_jsonb(new) - ignored) is distinct from (to_jsonb(old) - ignored) then
+    raise exception 'Only the owner or an admin can change or cancel %',
+      tg_table_name using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
