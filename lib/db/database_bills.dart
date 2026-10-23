@@ -294,6 +294,9 @@ mixin DatabaseBills {
         if (item.productId != null && item.productUuid != null) {
           await _insertBillStockMovement(
             txn,
+            // Same id on every device: if two phones cancel the same bill,
+            // sync keeps one stock return instead of restoring it twice.
+            uuid: 'void-$billUuid-${item.uuid}',
             productId: item.productId!,
             productUuid: item.productUuid!,
             movementType: StockMovementType.voidSale,
@@ -786,6 +789,7 @@ mixin DatabaseBills {
 
   Future<void> _insertBillStockMovement(
     DatabaseExecutor executor, {
+    String? uuid,
     required int productId,
     required String productUuid,
     required String movementType,
@@ -799,7 +803,7 @@ mixin DatabaseBills {
     final now = DateTime.now().toUtc();
     final shopId = await _activeShopId(executor);
     await executor.insert('stock_movements', {
-      'uuid': _newUuid(),
+      'uuid': uuid ?? _newUuid(),
       'shop_id': shopId,
       'product_id': productId,
       'product_uuid': productUuid,
@@ -953,17 +957,16 @@ Future<void> _adjustCustomerLedger(
   required double amountDelta,
   required int billCountDelta,
 }) async {
-  final now = _nowIso();
+  // Customer totals are derived: no updated_at bump (see sync tracking).
   await executor.rawUpdate(
     '''
     UPDATE customers
     SET
       total_purchase_amount = MAX(total_purchase_amount + ?, 0),
-      bill_count = MAX(bill_count + ?, 0),
-      updated_at = ?
+      bill_count = MAX(bill_count + ?, 0)
     WHERE id = ?
     ''',
-    [amountDelta, billCountDelta, now, customerId],
+    [amountDelta, billCountDelta, customerId],
   );
 }
 

@@ -365,13 +365,13 @@ void main() {
       );
       final rows = await db.cloudExportRows('products');
       final cloudRow = Map<String, dynamic>.from(rows.single)
-        ..['quantity_cache'] = 7.0
+        ..['name'] = 'Synced Item (cloud)'
         ..['updated_at'] = '2026-04-30T06:01:00.000Z';
 
       await db.cloudImportRows('products', [cloudRow]);
 
       final product = await db.getProductById(productId);
-      expect(product!.quantity, 7);
+      expect(product!.name, 'Synced Item (cloud)');
     });
   });
 

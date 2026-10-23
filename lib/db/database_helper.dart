@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -34,12 +36,16 @@ class DatabaseHelper
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
+  /// Database file name. Tests switch it to simulate several devices.
+  @visibleForTesting
+  static String databaseFileName = 'storely.db';
+
   DatabaseHelper._init();
 
   @override
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('storely.db');
+    _database = await _initDB(databaseFileName);
     return _database!;
   }
 

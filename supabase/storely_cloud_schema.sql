@@ -692,52 +692,72 @@ using (public.is_shop_admin(shop_id));
 
 -- ── Admin-managed tables: members can read, only owner/admin can write ──
 drop policy if exists "Members can sync app_settings" on public.app_settings;
+drop policy if exists "Members can read app_settings" on public.app_settings;
 create policy "Members can read app_settings" on public.app_settings
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert app_settings" on public.app_settings;
 create policy "Admins can insert app_settings" on public.app_settings
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update app_settings" on public.app_settings;
 create policy "Admins can update app_settings" on public.app_settings
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete app_settings" on public.app_settings;
 create policy "Admins can delete app_settings" on public.app_settings
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync bill_settings" on public.bill_settings;
+drop policy if exists "Members can read bill_settings" on public.bill_settings;
 create policy "Members can read bill_settings" on public.bill_settings
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert bill_settings" on public.bill_settings;
 create policy "Admins can insert bill_settings" on public.bill_settings
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update bill_settings" on public.bill_settings;
 create policy "Admins can update bill_settings" on public.bill_settings
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete bill_settings" on public.bill_settings;
 create policy "Admins can delete bill_settings" on public.bill_settings
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync categories" on public.categories;
+drop policy if exists "Members can read categories" on public.categories;
 create policy "Members can read categories" on public.categories
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert categories" on public.categories;
 create policy "Admins can insert categories" on public.categories
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update categories" on public.categories;
 create policy "Admins can update categories" on public.categories
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete categories" on public.categories;
 create policy "Admins can delete categories" on public.categories
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync units" on public.units;
+drop policy if exists "Members can read units" on public.units;
 create policy "Members can read units" on public.units
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert units" on public.units;
 create policy "Admins can insert units" on public.units
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update units" on public.units;
 create policy "Admins can update units" on public.units
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete units" on public.units;
 create policy "Admins can delete units" on public.units
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync suppliers" on public.suppliers;
+drop policy if exists "Members can read suppliers" on public.suppliers;
 create policy "Members can read suppliers" on public.suppliers
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert suppliers" on public.suppliers;
 create policy "Admins can insert suppliers" on public.suppliers
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update suppliers" on public.suppliers;
 create policy "Admins can update suppliers" on public.suppliers
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete suppliers" on public.suppliers;
 create policy "Admins can delete suppliers" on public.suppliers
 for delete using (public.is_shop_admin(shop_id));
 
@@ -748,22 +768,30 @@ using (public.is_shop_member(shop_id))
 with check (public.is_shop_member(shop_id));
 
 drop policy if exists "Members can sync products" on public.products;
+drop policy if exists "Members can read products" on public.products;
 create policy "Members can read products" on public.products
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert products" on public.products;
 create policy "Admins can insert products" on public.products
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update products" on public.products;
 create policy "Admins can update products" on public.products
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete products" on public.products;
 create policy "Admins can delete products" on public.products
 for delete using (public.is_shop_admin(shop_id));
 
 drop policy if exists "Members can sync invoice_series" on public.invoice_series;
+drop policy if exists "Members can read invoice_series" on public.invoice_series;
 create policy "Members can read invoice_series" on public.invoice_series
 for select using (public.is_shop_member(shop_id));
+drop policy if exists "Admins can insert invoice_series" on public.invoice_series;
 create policy "Admins can insert invoice_series" on public.invoice_series
 for insert with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can update invoice_series" on public.invoice_series;
 create policy "Admins can update invoice_series" on public.invoice_series
 for update using (public.is_shop_admin(shop_id)) with check (public.is_shop_admin(shop_id));
+drop policy if exists "Admins can delete invoice_series" on public.invoice_series;
 create policy "Admins can delete invoice_series" on public.invoice_series
 for delete using (public.is_shop_admin(shop_id));
 
@@ -813,3 +841,131 @@ create index if not exists idx_bill_payments_bill_uuid on public.bill_payments(b
 create index if not exists idx_stock_movements_shop_updated on public.stock_movements(shop_id, updated_at);
 create index if not exists idx_stock_movements_source_document
 on public.stock_movements(source_document_type, source_document_uuid);
+
+-- ── Sync v2 (mirrors migrations/20261024_sync_v2.sql) ──
+create or replace function public.storely_sync_before_write()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  sticky boolean := tg_table_name in (
+    'bills', 'bill_items', 'bill_payments', 'stock_movements'
+  );
+  incoming_ts timestamptz;
+  stored_ts timestamptz;
+  deletion jsonb;
+begin
+  new.server_updated_at := now();
+  if tg_op = 'INSERT' then
+    return new;
+  end if;
+
+  -- Deleted billing records stay deleted.
+  if sticky and old.deleted_at is not null and new.deleted_at is null then
+    new.deleted_at := old.deleted_at;
+    if tg_table_name = 'bills' then
+      new := jsonb_populate_record(new, jsonb_build_object(
+        'lifecycle_status', to_jsonb(old) ->> 'lifecycle_status',
+        'cancelled_at', to_jsonb(old) ->> 'cancelled_at',
+        'cancel_reason', to_jsonb(old) ->> 'cancel_reason'
+      ));
+    end if;
+  end if;
+
+  incoming_ts := nullif(new.updated_at, '')::timestamptz;
+  stored_ts := nullif(old.updated_at, '')::timestamptz;
+  if incoming_ts is null or stored_ts is null or incoming_ts >= stored_ts then
+    return new;
+  end if;
+
+  -- The upload is older than what is stored. Keep the stored row, except
+  -- that a deletion still applies.
+  if old.deleted_at is null and new.deleted_at is not null then
+    deletion := jsonb_build_object('deleted_at', new.deleted_at);
+    if tg_table_name = 'bills' then
+      deletion := deletion || jsonb_build_object(
+        'lifecycle_status', to_jsonb(new) ->> 'lifecycle_status',
+        'cancelled_at', to_jsonb(new) ->> 'cancelled_at',
+        'cancel_reason', to_jsonb(new) ->> 'cancel_reason'
+      );
+    end if;
+    new := jsonb_populate_record(old, deletion);
+    new.server_updated_at := now();
+    return new;
+  end if;
+  return null;
+end;
+$$;
+
+do $$
+declare
+  t text;
+  key_column text;
+begin
+  foreach t in array array[
+    'shops', 'app_settings', 'bill_settings', 'categories', 'units',
+    'suppliers', 'customers', 'products', 'invoice_series', 'bills',
+    'bill_items', 'bill_payments', 'stock_movements'
+  ] loop
+    execute format(
+      'alter table public.%I add column if not exists server_updated_at '
+      'timestamptz not null default now()', t);
+    execute format(
+      'drop trigger if exists storely_sync_before_write on public.%I', t);
+    execute format(
+      'create trigger storely_sync_before_write before insert or update '
+      'on public.%I for each row execute function '
+      'public.storely_sync_before_write()', t);
+    key_column := case t when 'app_settings' then 'key' else 'uuid' end;
+    if t = 'shops' then
+      execute 'create index if not exists idx_shops_server_updated '
+        'on public.shops (server_updated_at, uuid)';
+    else
+      execute format(
+        'create index if not exists %I on public.%I '
+        '(shop_id, server_updated_at, %I)',
+        'idx_' || t || '_shop_server_updated', t, key_column);
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function public.sync_pull(
+  p_table text,
+  p_shop_id text,
+  p_after_ts timestamptz,
+  p_after_key text,
+  p_limit integer default 500
+)
+returns setof jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  key_column text;
+  shop_column text;
+begin
+  if p_table not in (
+    'shops', 'app_settings', 'bill_settings', 'categories', 'units',
+    'suppliers', 'customers', 'products', 'invoice_series', 'bills',
+    'bill_items', 'bill_payments', 'stock_movements'
+  ) then
+    raise exception 'sync_pull: unknown table %', p_table;
+  end if;
+  key_column := case p_table when 'app_settings' then 'key' else 'uuid' end;
+  shop_column := case p_table when 'shops' then 'uuid' else 'shop_id' end;
+  return query execute format(
+    'select to_jsonb(t) from public.%I t '
+    'where t.%I = $1 and (t.server_updated_at, t.%I) > ($2, $3) '
+    'order by t.server_updated_at, t.%I limit $4',
+    p_table, shop_column, key_column, key_column)
+  using p_shop_id, p_after_ts, coalesce(p_after_key, ''),
+        least(greatest(coalesce(p_limit, 500), 1), 1000);
+end;
+$$;
+
+grant execute on function public.sync_pull(text, text, timestamptz, text, integer)
+  to authenticated;

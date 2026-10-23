@@ -15,9 +15,128 @@ const storelyCloudTables = [
   'stock_movements',
 ];
 
+/// Billing records whose deletion (cancellation) is final: a stale copy from
+/// another device can never bring them back. Mirrors the server rule in
+/// supabase/migrations/20261024_sync_v2.sql.
+const _stickyDeleteTables = {
+  'bills',
+  'bill_items',
+  'bill_payments',
+  'stock_movements',
+};
+
+/// A row that could not be applied locally or uploaded. It is skipped (and
+/// kept queued if it was an upload) instead of blocking the whole sync.
+class SyncConflict {
+  final String table;
+  final String key;
+  final String message;
+
+  const SyncConflict({
+    required this.table,
+    required this.key,
+    required this.message,
+  });
+
+  Map<String, String> toJson() => {
+    'table': table,
+    'key': key,
+    'message': message,
+  };
+
+  factory SyncConflict.fromJson(Map<String, dynamic> json) => SyncConflict(
+    table: json['table']?.toString() ?? '',
+    key: json['key']?.toString() ?? '',
+    message: json['message']?.toString() ?? '',
+  );
+
+  @override
+  String toString() => '$table/$key: $message';
+}
+
 mixin DatabaseSync {
   Future<Database> get database;
   Future<void> rebuildAllProductQuantityCaches(DatabaseExecutor executor);
+  Future<void> _updateBillPaymentSummary(
+    DatabaseExecutor executor,
+    int billId,
+    String billUuid,
+  );
+
+  static const _conflictsKey = 'sync_conflicts';
+
+  /// Rows changed on this device and not yet uploaded, in cloud shape.
+  Future<List<Map<String, dynamic>>> cloudDirtyRows(String table) async {
+    final db = await database;
+    final shopId = await _activeShopId(db);
+    final rows = await db.query(
+      table,
+      where: table == 'shops'
+          ? 'sync_dirty = 1 AND uuid = ?'
+          : 'sync_dirty = 1 AND shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'updated_at ASC',
+    );
+    return [for (final row in rows) await _toCloudMap(db, table, row)];
+  }
+
+  /// Marks uploaded rows as in sync — unless they were edited again while
+  /// the upload was in flight (updated_at moved on), which keeps them queued.
+  Future<void> markCloudRowsClean(
+    String table,
+    List<Map<String, dynamic>> uploaded,
+  ) async {
+    if (uploaded.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final row in uploaded) {
+        if (table == 'app_settings') {
+          await txn.update(
+            table,
+            {'sync_dirty': 0},
+            where: 'shop_id = ? AND key = ? AND updated_at = ?',
+            whereArgs: [row['shop_id'], row['key'], row['updated_at']],
+          );
+        } else {
+          await txn.update(
+            table,
+            {'sync_dirty': 0},
+            where: 'uuid = ? AND updated_at = ?',
+            whereArgs: [row['uuid'], row['updated_at']],
+          );
+        }
+      }
+    });
+  }
+
+  /// "Start fresh" first sync: existing local rows are not uploaded.
+  Future<void> markAllCloudRowsClean() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final table in ['shops', ...storelyCloudTables]) {
+        await txn.update(table, {'sync_dirty': 0});
+      }
+    });
+  }
+
+  Future<void> saveSyncConflicts(List<SyncConflict> conflicts) async {
+    await setCloudSyncState(
+      _conflictsKey,
+      conflicts.isEmpty
+          ? null
+          : jsonEncode([for (final c in conflicts) c.toJson()]),
+    );
+  }
+
+  Future<List<SyncConflict>> getSyncConflicts() async {
+    final raw = await getCloudSyncState(_conflictsKey);
+    if (raw == null || raw.isEmpty) return const [];
+    final decoded = jsonDecode(raw) as List;
+    return [
+      for (final item in decoded)
+        SyncConflict.fromJson(Map<String, dynamic>.from(item as Map)),
+    ];
+  }
 
   Future<String?> getCloudSyncState(String key) async {
     final db = await database;
@@ -104,35 +223,75 @@ mixin DatabaseSync {
     return false;
   }
 
-  Future<void> cloudImportRows(
+  /// Applies pulled cloud rows. A row that cannot be applied (e.g. a unique
+  /// clash with a different local record) is reported as a conflict and
+  /// skipped; it never aborts the rest of the page.
+  Future<List<SyncConflict>> cloudImportRows(
     String table,
     List<Map<String, dynamic>> rows,
   ) async {
-    if (rows.isEmpty) return;
+    if (rows.isEmpty) return const [];
+    final conflicts = <SyncConflict>[];
     final db = await database;
     await db.transaction((txn) async {
       final activeShopId = await _activeShopId(txn);
+      final touchedBillUuids = <String>{};
       for (final row in rows) {
-        final localMap = await _fromCloudMap(txn, table, row);
-        if (localMap == null) continue;
-        // Defense-in-depth tenant isolation: never write a row that belongs to
-        // a different shop into the local database. The pull query already
-        // filters by shop_id, but a server-side RLS gap or a shared cloud
-        // project must not be able to leak another shop's data onto this
-        // device (and from there back up on the next push).
-        if (!_belongsToActiveShop(table, localMap, activeShopId)) continue;
-        if (table == 'app_settings') {
-          await _upsertAppSetting(txn, localMap);
-          continue;
+        final key = table == 'app_settings'
+            ? row['key']?.toString() ?? ''
+            : row['uuid']?.toString() ?? '';
+        try {
+          final localMap = await _fromCloudMap(txn, table, row);
+          if (localMap == null) continue;
+          // Defense-in-depth tenant isolation: never write a row that belongs
+          // to a different shop into the local database. The pull query
+          // already filters by shop_id, but a server-side RLS gap or a shared
+          // cloud project must not be able to leak another shop's data onto
+          // this device (and from there back up on the next push).
+          if (!_belongsToActiveShop(table, localMap, activeShopId)) continue;
+          if (table == 'app_settings') {
+            await _upsertAppSetting(txn, localMap);
+            continue;
+          }
+          if (key.isEmpty) continue;
+          await _upsertUuidRow(txn, table, key, localMap);
+          if (table == 'bills') touchedBillUuids.add(key);
+          if (table == 'bill_payments') {
+            final billUuid = row['bill_uuid']?.toString();
+            if (billUuid != null) touchedBillUuids.add(billUuid);
+          }
+        } on DatabaseException catch (error) {
+          conflicts.add(
+            SyncConflict(table: table, key: key, message: '$error'),
+          );
+        } on StateError catch (error) {
+          conflicts.add(
+            SyncConflict(table: table, key: key, message: error.message),
+          );
         }
-        final uuid = localMap['uuid']?.toString();
-        if (uuid == null || uuid.isEmpty) continue;
-        await _upsertUuidRow(txn, table, uuid, localMap);
       }
-      if (table == 'stock_movements') {
+      // Derived data is recomputed locally, never taken from another device.
+      if (table == 'stock_movements' || table == 'products') {
         await rebuildAllProductQuantityCaches(txn);
       }
+      for (final billUuid in touchedBillUuids) {
+        final bill = await txn.query(
+          'bills',
+          columns: ['id'],
+          where: 'uuid = ?',
+          whereArgs: [billUuid],
+          limit: 1,
+        );
+        if (bill.isNotEmpty) {
+          await _updateBillPaymentSummary(
+            txn,
+            bill.single['id'] as int,
+            billUuid,
+          );
+        }
+      }
     });
+    return conflicts;
   }
 
   /// True when [map] either has no tenant column or its `shop_id` matches the
@@ -210,10 +369,13 @@ mixin DatabaseSync {
   ) async {
     final map = Map<String, dynamic>.from(row)
       ..remove('id')
+      ..remove('server_updated_at')
       ..['sync_dirty'] = DatabaseSchema.syncDirtyFromCloud;
     switch (table) {
       case 'products':
         map
+          // Stock is rebuilt from the synced ledger, never copied.
+          ..remove('quantity_cache')
           ..remove('category_uuid')
           ..remove('supplier_uuid')
           ..remove('unit_uuid')
@@ -283,7 +445,7 @@ mixin DatabaseSync {
   ) async {
     final existing = await executor.query(
       table,
-      columns: ['id', 'updated_at'],
+      columns: ['id', 'updated_at', 'deleted_at'],
       where: 'uuid = ?',
       whereArgs: [uuid],
       limit: 1,
@@ -301,14 +463,39 @@ mixin DatabaseSync {
       }
       return;
     }
-    final localUpdatedAt = existing.single['updated_at']?.toString();
+    final local = existing.single;
+    final localDeleted = local['deleted_at'] != null;
+    final cloudDeleted = map['deleted_at'] != null;
+    // Cancelled billing records stay cancelled.
+    if (_stickyDeleteTables.contains(table) && localDeleted && !cloudDeleted) {
+      return;
+    }
+    final localUpdatedAt = local['updated_at']?.toString();
     final cloudUpdatedAt = map['updated_at']?.toString();
-    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
+    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) {
+      // An older copy still carries a deletion: apply just that.
+      if (cloudDeleted && !localDeleted) {
+        await executor.update(
+          table,
+          {
+            'deleted_at': map['deleted_at'],
+            if (table == 'bills') ...{
+              'lifecycle_status': map['lifecycle_status'],
+              'cancelled_at': map['cancelled_at'],
+              'cancel_reason': map['cancel_reason'],
+            },
+          },
+          where: 'id = ?',
+          whereArgs: [local['id']],
+        );
+      }
+      return;
+    }
     await executor.update(
       table,
       map..remove('id'),
       where: 'id = ?',
-      whereArgs: [existing.single['id']],
+      whereArgs: [local['id']],
     );
   }
 
@@ -357,26 +544,15 @@ mixin DatabaseSync {
       return;
     }
 
-    // bills have a live-row unique index on (shop_id, bill_number)
-    // (idx_bills_shop_bill_number) — a collision means the same invoice number
-    // exists locally under a different uuid (e.g. the bill was created before
-    // cloud sync, then pulled back with the cloud's uuid). Merge onto that
-    // single local bill and re-point its children's bill_uuid.
+    // A different bill with the same number already exists here. Two bills
+    // are never merged by number (that mixed up two real sales); with a
+    // device letter in every number this only happens for bills made before
+    // the device joined the shop. Report it instead.
     if (table == 'bills') {
-      final billNumber = map['bill_number']?.toString();
-      if (billNumber == null || billNumber.isEmpty) {
-        throw StateError(
-          'Unresolvable unique conflict importing bills without bill_number '
-          '(uuid=${map['uuid']})',
-        );
-      }
-      await _mergeBillRow(
-        executor,
-        map,
-        shopId: shopId,
-        billNumber: billNumber,
+      throw StateError(
+        'Bill number ${map['bill_number']} already used by another bill on '
+        'this device',
       );
-      return;
     }
 
     // customers have a live-row unique index on (shop_id, phone)
@@ -435,60 +611,6 @@ mixin DatabaseSync {
       where: 'id = ?',
       whereArgs: [matches.single['id']],
     );
-  }
-
-  /// Merge a pulled cloud bill onto the single live local bill that shares its
-  /// (shop_id, bill_number). Like [_mergeMatchingRow] this only proceeds when
-  /// there is exactly one live match and the cloud copy is newer, but it must
-  /// also re-point the local bill's children: bill_items and bill_payments
-  /// reference the bill by bill_uuid, so adopting the cloud uuid would orphan
-  /// them otherwise. bill_id links are preserved because the local row keeps
-  /// its id.
-  Future<void> _mergeBillRow(
-    DatabaseExecutor executor,
-    Map<String, dynamic> map, {
-    required String shopId,
-    required String billNumber,
-  }) async {
-    final matches = await executor.query(
-      'bills',
-      columns: ['id', 'uuid', 'updated_at'],
-      where: 'shop_id = ? AND bill_number = ? AND deleted_at IS NULL',
-      whereArgs: [shopId, billNumber],
-      limit: 2,
-    );
-    // Ambiguous (more than one candidate) or none: do not guess.
-    if (matches.length != 1) return;
-    final localUpdatedAt = matches.single['updated_at']?.toString();
-    final cloudUpdatedAt = map['updated_at']?.toString();
-    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
-
-    final localId = matches.single['id'];
-    final oldUuid = matches.single['uuid']?.toString();
-    final newUuid = map['uuid']?.toString();
-
-    await executor.update(
-      'bills',
-      map..remove('id'),
-      where: 'id = ?',
-      whereArgs: [localId],
-    );
-
-    // Re-point children from the old local uuid to the adopted cloud uuid so
-    // bill_uuid joins (payment refs, the bills↔payments JOIN) keep resolving.
-    if (oldUuid != null &&
-        newUuid != null &&
-        oldUuid.isNotEmpty &&
-        oldUuid != newUuid) {
-      for (final childTable in const ['bill_items', 'bill_payments']) {
-        await executor.update(
-          childTable,
-          {'bill_uuid': newUuid},
-          where: 'bill_uuid = ?',
-          whereArgs: [oldUuid],
-        );
-      }
-    }
   }
 
   Future<void> _upsertAppSetting(
