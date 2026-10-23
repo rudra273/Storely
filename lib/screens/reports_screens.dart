@@ -3,14 +3,14 @@ import 'package:intl/intl.dart';
 
 import '../db/database_helper.dart';
 import '../models/bill_totals.dart';
+import '../models/shop_profile.dart';
+import '../services/gstr1_export.dart';
 import '../theme/app_theme.dart';
 import '../utils/money.dart';
 
 /// Report shortcuts shown at the top of the Reports (KPI) screen.
 class ReportShortcuts extends StatelessWidget {
-  final VoidCallback? onGstr1;
-
-  const ReportShortcuts({super.key, this.onGstr1});
+  const ReportShortcuts({super.key});
 
   void _open(BuildContext context, Widget screen) =>
       Navigator.push(context, MaterialPageRoute<void>(builder: (_) => screen));
@@ -22,6 +22,7 @@ class ReportShortcuts extends StatelessWidget {
       (Icons.trending_up_rounded, 'Profit & loss', const ProfitLossScreen()),
       (Icons.schedule_rounded, 'Dues ageing', const ReceivablesScreen()),
       (Icons.inventory_2_outlined, 'Stock value', const StockValueScreen()),
+      (Icons.receipt_long_outlined, 'GSTR-1', const Gstr1Screen()),
     ];
     return SizedBox(
       height: 92,
@@ -39,12 +40,6 @@ class ReportShortcuts extends StatelessWidget {
               icon: icon,
               label: label,
               onTap: () => _open(context, screen),
-            ),
-          if (onGstr1 != null)
-            _ShortcutTile(
-              icon: Icons.receipt_long_outlined,
-              label: 'GSTR-1',
-              onTap: onGstr1!,
             ),
         ],
       ),
@@ -597,6 +592,174 @@ class StockValueScreen extends StatelessWidget {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+// ── GSTR-1 ──────────────────────────────────────────────────────────────────
+
+class Gstr1Screen extends StatefulWidget {
+  const Gstr1Screen({super.key});
+
+  @override
+  State<Gstr1Screen> createState() => _Gstr1ScreenState();
+}
+
+class _Gstr1ScreenState extends State<Gstr1Screen> {
+  // GSTR-1 is filed for the previous month, so start there.
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month - 1);
+  bool _sharing = false;
+
+  Future<(ShopProfile?, Gstr1Export?)> _load() async {
+    final db = DatabaseHelper.instance;
+    final shop = await db.getShopProfile();
+    if (shop == null || !shop.gstRegistered) return (shop, null);
+    final last = DateTime(_month.year, _month.month + 1, 0);
+    final bills = await db.getBillsBetween(
+      _day(_month),
+      _day(last),
+      includeCancelled: true,
+    );
+    return (shop, Gstr1Export(shop: shop, bills: bills));
+  }
+
+  Future<void> _share(Gstr1Export export) async {
+    setState(() => _sharing = true);
+    try {
+      await export.share(_month);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not export: $error')));
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final isCurrent = _month.year == now.year && _month.month == now.month;
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: navyAppBar(title: 'GSTR-1'),
+      body: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous month',
+                onPressed: () => setState(
+                  () => _month = DateTime(_month.year, _month.month - 1),
+                ),
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              Expanded(
+                child: Text(
+                  DateFormat('MMMM yyyy').format(_month),
+                  textAlign: TextAlign.center,
+                  style: AppText.subtitle,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next month',
+                onPressed: isCurrent
+                    ? null
+                    : () => setState(
+                        () => _month = DateTime(_month.year, _month.month + 1),
+                      ),
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+          Expanded(
+            child: _ReportLoader<(ShopProfile?, Gstr1Export?)>(
+              reloadKey: _day(_month),
+              load: _load,
+              builder: (data) {
+                final export = data.$2;
+                if (export == null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xxl),
+                      child: Text(
+                        'GSTR-1 is for shops on the regular GST scheme. Set '
+                        'your GSTIN and scheme in Store → Shop profile.',
+                        textAlign: TextAlign.center,
+                        style: AppText.caption,
+                      ),
+                    ),
+                  );
+                }
+                final t = export.totals();
+                final sheets = export.sheets();
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.xxxl,
+                  ),
+                  children: [
+                    AppCard(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _Line('Taxable value', rupees(t.taxable), bold: true),
+                          _Line('IGST', rupees(t.igst)),
+                          _Line('CGST', rupees(t.cgst)),
+                          _Line('SGST', rupees(t.sgst)),
+                          const Divider(),
+                          _Line(
+                            'Total tax',
+                            rupees(roundMoney(t.igst + t.cgst + t.sgst)),
+                            bold: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    AppCard(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Workbook sheets', style: AppText.label),
+                          for (final e in sheets.entries)
+                            _Line(e.key, '${e.value.length - 1} rows'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    FilledButton.icon(
+                      key: const ValueKey('gstr1-export'),
+                      onPressed: _sharing || export.bills.isEmpty
+                          ? null
+                          : () => _share(export),
+                      icon: const Icon(Icons.ios_share_rounded),
+                      label: Text(
+                        export.bills.isEmpty
+                            ? 'No bills this month'
+                            : 'Export Excel for your CA',
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Laid out like the GST offline tool (b2b, b2cl, b2cs, '
+                      'cdnr, hsn, docs). Have your CA review it before '
+                      'filing. Cess, exports and e-commerce sales are not '
+                      'included.',
+                      style: AppText.caption,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

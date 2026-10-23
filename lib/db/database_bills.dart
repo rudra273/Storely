@@ -107,6 +107,34 @@ mixin DatabaseBills {
     ];
   }
 
+  /// Bills dated [from]..[to] (yyyy-MM-dd, inclusive), oldest first, with
+  /// their items. Cancelled bills come back too when [includeCancelled]
+  /// (their items are left out).
+  Future<List<Bill>> getBillsBetween(
+    String from,
+    String to, {
+    bool includeCancelled = false,
+  }) async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where:
+          'shop_id = ? AND substr(created_at, 1, 10) BETWEEN ? AND ?'
+          '${includeCancelled ? '' : ' AND deleted_at IS NULL'}',
+      whereArgs: [await _activeShopId(db), from, to],
+      orderBy: 'created_at ASC, id ASC',
+    );
+    final itemsByBillId = await _itemsByBillId(
+      db,
+      billMaps,
+      includeDeleted: false,
+    );
+    return [
+      for (final map in billMaps)
+        Bill.fromMap(map, itemsByBillId[map['id']] ?? const []),
+    ];
+  }
+
   // ── Held bills and the auto-saved cart (device-local) ──
 
   Future<int> holdBill(String label, List<BillItem> items) async {
