@@ -12,6 +12,8 @@ import '../models/supplier.dart';
 import '../services/app_lock_service.dart';
 import '../services/cloud_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/thermal/thermal_printer_service.dart';
+import 'store/printer_setup_sheet.dart';
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';

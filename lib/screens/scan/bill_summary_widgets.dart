@@ -59,6 +59,30 @@ class _BillCreatedDialog extends StatefulWidget {
 
 class _BillCreatedDialogState extends State<_BillCreatedDialog> {
   bool _sharing = false;
+  bool _printing = false;
+
+  Future<void> _print() async {
+    final bill = widget.bill;
+    if (bill == null || _printing) return;
+    setState(() => _printing = true);
+    try {
+      await ThermalPrinterService.instance.printBill(bill);
+    } on PrinterException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Printing failed. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
 
   Future<void> _share() async {
     final bill = widget.bill;
@@ -109,6 +133,23 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
               label: const Text('Share PDF (WhatsApp, print…)'),
             ),
           ),
+          if (ThermalPrinterService.instance.isConfigured) ...[
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: widget.bill == null || _printing ? null : _print,
+                icon: _printing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.print_rounded),
+                label: const Text('Print receipt'),
+              ),
+            ),
+          ],
         ],
       ),
       actions: [

@@ -9,6 +9,7 @@ import '../models/bill_totals.dart';
 import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
 import '../services/bill_share.dart';
+import '../services/thermal/thermal_printer_service.dart';
 import 'scan_screen.dart';
 import 'shared/record_payment_dialog.dart';
 import 'store/bill_settings_screen.dart';

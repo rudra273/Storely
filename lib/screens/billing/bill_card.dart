@@ -103,6 +103,22 @@ class _BillCardState extends State<_BillCard> {
     );
   }
 
+  Future<void> _print() async {
+    try {
+      await ThermalPrinterService.instance.printBill(widget.bill);
+    } on PrinterException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Printing failed. Try again.')),
+      );
+    }
+  }
+
   Future<void> _showProfitSummary() {
     return showModalBottomSheet<void>(
       context: context,
@@ -388,6 +404,13 @@ class _BillCardState extends State<_BillCard> {
                             icon: Icons.send_outlined,
                             label: 'WhatsApp',
                             color: AppColors.success,
+                          ),
+                        if (ThermalPrinterService.instance.isConfigured)
+                          _ActionButton(
+                            onPressed: _print,
+                            icon: Icons.print_outlined,
+                            label: 'Print',
+                            color: AppColors.brandOf(context),
                           ),
                         _ActionButton(
                           onPressed: widget.onSharePdf,

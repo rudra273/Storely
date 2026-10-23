@@ -140,6 +140,27 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
               style: AppText.caption.copyWith(color: AppColors.error),
             ),
           ],
+          const SizedBox(height: AppSpacing.sm),
+          ListenableBuilder(
+            listenable: ThermalPrinterService.instance,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const _PanelIcon(icon: Icons.print_outlined),
+              title: const Text('Receipt printer'),
+              subtitle: Text(
+                printerLabel(ThermalPrinterService.instance),
+                style: AppText.caption,
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                backgroundColor: AppColors.surfaceOf(context),
+                builder: (_) => const PrinterSetupSheet(),
+              ),
+            ),
+          ),
           const SizedBox(height: AppSpacing.lg),
           SizedBox(
             width: double.infinity,

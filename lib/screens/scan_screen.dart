@@ -9,6 +9,7 @@ import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../services/app_settings_service.dart';
 import '../services/bill_share.dart';
+import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
