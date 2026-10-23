@@ -66,9 +66,9 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
           AppSpacing.md,
         ),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: AppColors.surfaceOf(context),
           borderRadius: AppRadius.lgRadius,
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: AppColors.borderOf(context)),
         ),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.xl),
@@ -81,7 +81,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                   width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.border,
+                    color: AppColors.borderOf(context),
                     borderRadius: AppRadius.pillRadius,
                   ),
                 ),
@@ -90,7 +90,7 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
               Text('${_billDisplayId(bill)} Profit', style: AppText.title),
               const SizedBox(height: AppSpacing.lg),
               AppCard(
-                color: AppColors.bg,
+                color: AppColors.bgOf(context),
                 child: Column(
                   children: [
                     _ProfitRow('Sales (after discount)', revenue),
@@ -131,18 +131,18 @@ class _BillProfitSheetState extends State<_BillProfitSheet> {
                               suffixText: '%',
                               border: OutlineInputBorder(
                                 borderRadius: AppRadius.smRadius,
-                                borderSide: const BorderSide(
-                                  color: AppColors.border,
+                                borderSide: BorderSide(
+                                  color: AppColors.borderOf(context),
                                 ),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: AppRadius.smRadius,
-                                borderSide: const BorderSide(
-                                  color: AppColors.border,
+                                borderSide: BorderSide(
+                                  color: AppColors.borderOf(context),
                                 ),
                               ),
                               filled: true,
-                              fillColor: AppColors.surface,
+                              fillColor: AppColors.surfaceOf(context),
                             ),
                             onChanged: (value) => setState(() {
                               _commissionPercent = (double.tryParse(value) ?? 0)
@@ -207,7 +207,7 @@ class _ProfitRow extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: color ?? AppColors.inkMuted,
+              color: color ?? AppColors.inkMutedOf(context),
               fontSize: fontSize,
               fontWeight: isBold ? FontWeight.w700 : FontWeight.normal,
             ),

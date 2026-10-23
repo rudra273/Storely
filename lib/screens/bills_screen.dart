@@ -603,7 +603,9 @@ class _BillsScreenState extends State<BillsScreen> {
               _searchQuery.isEmpty
                   ? 'No cancelled bills'
                   : 'No cancelled bills match your search',
-              style: AppText.body.copyWith(color: AppColors.inkMuted),
+              style: AppText.body.copyWith(
+                color: AppColors.inkMutedOf(context),
+              ),
             ),
           ),
         ),

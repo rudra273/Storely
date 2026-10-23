@@ -238,9 +238,9 @@ class _CancelledBillCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const LeadingIconChip(
+              LeadingIconChip(
                 icon: Icons.block_rounded,
-                color: AppColors.inkMuted,
+                color: AppColors.inkMutedOf(context),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
@@ -276,7 +276,7 @@ class _CancelledBillCard extends StatelessWidget {
                     rupees(bill.totalAmount),
                     style: AppText.subtitle.copyWith(
                       fontSize: 14,
-                      color: AppColors.inkMuted,
+                      color: AppColors.inkMutedOf(context),
                       decoration: TextDecoration.lineThrough,
                     ),
                   ),
@@ -310,7 +310,7 @@ class _CancelledBillCard extends StatelessWidget {
                 onPressed: () => showBillHistory(context, bill),
                 icon: Icons.history_rounded,
                 label: 'History',
-                color: AppColors.inkMuted,
+                color: AppColors.inkMutedOf(context),
               ),
             ],
           ),

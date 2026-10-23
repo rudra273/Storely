@@ -851,10 +851,10 @@ class _StatTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(AppSpacing.sm),
             decoration: BoxDecoration(
-              color: AppColors.bg,
+              color: AppColors.bgOf(context),
               borderRadius: AppRadius.smRadius,
             ),
-            child: Icon(icon, size: 16, color: AppColors.inkMuted),
+            child: Icon(icon, size: 16, color: AppColors.inkMutedOf(context)),
           ),
           const SizedBox(width: AppSpacing.md),
           Column(
@@ -1206,11 +1206,13 @@ class _EmptyState extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 20, color: AppColors.inkFaint),
+          Icon(icon, size: 20, color: AppColors.inkFaintOf(context)),
           const SizedBox(width: AppSpacing.sm),
           Text(
             message,
-            style: AppText.caption.copyWith(color: AppColors.inkMuted),
+            style: AppText.caption.copyWith(
+              color: AppColors.inkMutedOf(context),
+            ),
           ),
         ],
       ),

@@ -438,10 +438,10 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
         trailing: IconButton(
           tooltip: 'Remove',
           onPressed: _committing ? null : () => _removeDraft(index),
-          icon: const Icon(
+          icon: Icon(
             Icons.close_rounded,
             size: 18,
-            color: AppColors.inkMuted,
+            color: AppColors.inkMutedOf(context),
           ),
         ),
       ),

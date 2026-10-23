@@ -105,11 +105,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final periodKey = '${_from ?? ''}_${_to ?? ''}';
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text(
-          'Reports',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
+      appBar: navyAppBar(
+        title: 'Reports',
         actions: [
           IconButton(
             tooltip: 'Customize dashboard',

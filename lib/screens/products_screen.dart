@@ -2377,12 +2377,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
               if (_allProducts.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
-                  child: Center(
-                    child: StatusPill(
-                      label: '${_allProducts.length}',
-                      variant: PillVariant.info,
-                    ),
-                  ),
+                  child: Center(child: HeaderCount(_allProducts.length)),
                 ),
               IconButton(
                 onPressed: () {

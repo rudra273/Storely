@@ -141,3 +141,30 @@ PreferredSizeWidget navyAppBar({
     actions: actions,
   );
 }
+
+/// A count shown next to a dark header's title (e.g. number of products).
+class HeaderCount extends StatelessWidget {
+  final int count;
+
+  const HeaderCount(this.count, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$count',
+        semanticsLabel: '$count items',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}

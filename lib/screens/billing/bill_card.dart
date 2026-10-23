@@ -206,7 +206,7 @@ class _BillCardState extends State<_BillCard> {
                       _expanded
                           ? Icons.keyboard_arrow_up
                           : Icons.keyboard_arrow_down,
-                      color: AppColors.inkFaint,
+                      color: AppColors.inkFaintOf(context),
                       size: 20,
                     ),
                   ],
@@ -245,7 +245,7 @@ class _BillCardState extends State<_BillCard> {
                             Icon(
                               Icons.phone_outlined,
                               size: 15,
-                              color: AppColors.inkMuted,
+                              color: AppColors.inkMutedOf(context),
                             ),
                             const SizedBox(width: AppSpacing.sm),
                             Text(bill.customerPhone!, style: AppText.caption),
@@ -400,7 +400,7 @@ class _BillCardState extends State<_BillCard> {
                                 : Icons.check_circle_outline,
                             label: bill.isPaid ? 'Mark Unpaid' : 'Mark Paid',
                             color: bill.isPaid
-                                ? AppColors.inkMuted
+                                ? AppColors.inkMutedOf(context)
                                 : AppColors.success,
                           ),
                         if (!bill.isCreditNote && bill.balanceDue > 0)
@@ -441,7 +441,7 @@ class _BillCardState extends State<_BillCard> {
                           onPressed: () => showBillHistory(context, bill),
                           icon: Icons.history_rounded,
                           label: 'History',
-                          color: AppColors.inkMuted,
+                          color: AppColors.inkMutedOf(context),
                         ),
                       ],
                     ),
@@ -469,7 +469,7 @@ class _BillMetaRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 15, color: AppColors.inkMuted),
+          Icon(icon, size: 15, color: AppColors.inkMutedOf(context)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(child: Text(text, style: AppText.caption)),
         ],
