@@ -27,9 +27,13 @@ class _AccountSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<CloudState>(
-      valueListenable: CloudService.instance.state,
-      builder: (context, state, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        CloudService.instance.state,
+        SyncStatus.instance,
+      ]),
+      builder: (context, _) {
+        final state = CloudService.instance.state.value;
         final email = state.user?.email;
         final role = state.shopRole;
         final roleLabel = role != null && role.isNotEmpty
@@ -54,7 +58,13 @@ class _AccountSection extends StatelessWidget {
         } else if (!state.isConfigured || !state.isSignedIn) {
           syncSubtitle = 'Sign in to enable backup & sync';
         } else if (lastSync != null) {
-          syncSubtitle = 'Last synced $lastSync';
+          final status = SyncStatus.instance;
+          syncSubtitle = [
+            'Last synced $lastSync',
+            if (status.pendingTotal > 0) '${status.pendingTotal} waiting',
+            if (status.conflicts.isNotEmpty)
+              '${status.conflicts.length} not synced',
+          ].join(' · ');
         } else {
           syncSubtitle = 'Tap to sync now';
         }
@@ -81,7 +91,7 @@ class _AccountSection extends StatelessWidget {
               title: 'Cloud Backup & Sync',
               subtitle: syncSubtitle,
               icon: Icons.cloud_sync_outlined,
-              onTap: canSync ? () => onSync() : onSetup,
+              onTap: canSync ? () => showSyncStatusSheet(context) : onSetup,
             ),
             if (canManageMembers) ...[
               const SizedBox(height: AppSpacing.sm),

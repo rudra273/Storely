@@ -107,6 +107,22 @@ void main() {
     await on('b', () => sync(admin: false));
   }
 
+  test('pending counts show what is waiting and clear after sync', () async {
+    await setUpShop();
+    await on('b', () async {
+      expect(await db.pendingSyncCounts(), isEmpty);
+      final billId = await sell('Rice');
+      final pending = await db.pendingSyncCounts();
+      expect(pending['bills'], 1);
+      expect(pending['bill_items'], 1);
+      final bill = await db.getBillById(billId);
+      expect(await db.unsyncedBillUuids(), {bill!.uuid});
+      await sync(admin: false);
+      expect(await db.pendingSyncCounts(), isEmpty);
+      expect(await db.unsyncedBillUuids(), isEmpty);
+    });
+  });
+
   test('expenses sync to other phones, deletions too', () async {
     await setUpShop();
     await on('a', () async {

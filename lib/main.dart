@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'db/database_helper.dart';
@@ -14,6 +16,7 @@ import 'services/cloud_service.dart';
 import 'services/home_section_prefs.dart';
 import 'services/thermal/thermal_printer_service.dart';
 import 'services/kpi_prefs.dart';
+import 'services/sync_status.dart';
 import 'theme/app_theme.dart';
 import 'utils/test_keys.dart';
 
@@ -47,6 +50,7 @@ Future<void> _start() async {
       debugPrint('Cloud init failed: $error\n$stack');
     }
     await ThermalPrinterService.instance.load();
+    unawaited(SyncStatus.instance.refresh());
   } catch (error, stack) {
     debugPrint('Startup failed: $error\n$stack');
     await DatabaseHelper.instance.close().catchError((_) {});

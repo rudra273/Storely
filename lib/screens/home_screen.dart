@@ -10,6 +10,7 @@ import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
 import 'suppliers_screen.dart';
 import 'expenses_screen.dart';
+import 'shared/sync_status_widgets.dart';
 import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
@@ -184,6 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? _HomeSearchField(controller: _homeSearchCtrl)
                       : null,
                   actions: [
+                    if (!_searchOpen) const SyncStatusIcon(color: Colors.white),
                     IconButton(
                       onPressed: _toggleSearch,
                       icon: Icon(

@@ -15,6 +15,8 @@ import '../services/app_settings_service.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import 'store/printer_setup_sheet.dart';
 import 'store/backup_sheet.dart';
+import 'shared/sync_status_widgets.dart';
+import '../services/sync_status.dart';
 import '../main.dart' show AppGate;
 import 'analytics_screen.dart';
 import 'about_app_screen.dart';

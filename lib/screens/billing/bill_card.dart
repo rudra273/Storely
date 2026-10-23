@@ -18,8 +18,12 @@ class _BillCard extends StatefulWidget {
   /// allowed for this bill.
   final VoidCallback? onReturn;
 
+  /// Not uploaded to cloud yet (only set when the phone syncs).
+  final bool waitingToSync;
+
   const _BillCard({
     this.onReturn,
+    this.waitingToSync = false,
     required this.bill,
     required this.onCancel,
     required this.onEdit,
@@ -215,6 +219,14 @@ class _BillCardState extends State<_BillCard> {
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Column(
                   children: [
+                    if (widget.waitingToSync)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _BillMetaRow(
+                          icon: Icons.cloud_upload_outlined,
+                          text: 'Saved on this phone · waiting to sync',
+                        ),
+                      ),
                     if (bill.isCreditNote && bill.originalBillNumber != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),

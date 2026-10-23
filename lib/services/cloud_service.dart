@@ -1,3 +1,4 @@
+import 'sync_status.dart';
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -248,6 +249,7 @@ class CloudService with WidgetsBindingObserver {
 
     DatabaseHelper.instance.onDatabaseChanged = () {
       if (!state.value.isConfigured || !state.value.isSignedIn) return;
+      SyncStatus.instance.refresh();
       _debounceTimer?.cancel();
       _debounceTimer = Timer(const Duration(seconds: 2), () {
         syncNow(reason: 'Local data changed');
@@ -568,6 +570,7 @@ class CloudService with WidgetsBindingObserver {
     _syncInFlight = _sync(reason: reason, firstSyncMode: firstSyncMode)
         .whenComplete(() {
           _syncInFlight = null;
+          SyncStatus.instance.refresh();
         });
     return _syncInFlight!;
   }

@@ -137,6 +137,31 @@ mixin DatabaseSync {
     });
   }
 
+  /// Rows changed on this device and not uploaded yet, per table.
+  Future<Map<String, int>> pendingSyncCounts() async {
+    final db = await database;
+    final counts = <String, int>{};
+    for (final table in ['shops', ...storelyCloudTables]) {
+      final rows = await db.rawQuery(
+        'SELECT COUNT(*) AS n FROM $table WHERE sync_dirty = 1',
+      );
+      final n = (rows.first['n'] as num).toInt();
+      if (n > 0) counts[table] = n;
+    }
+    return counts;
+  }
+
+  /// Bills (and credit notes) not uploaded yet.
+  Future<Set<String>> unsyncedBillUuids() async {
+    final db = await database;
+    final rows = await db.query(
+      'bills',
+      columns: ['uuid'],
+      where: 'sync_dirty = 1',
+    );
+    return {for (final r in rows) r['uuid'] as String};
+  }
+
   Future<void> saveSyncConflicts(List<SyncConflict> conflicts) async {
     await setCloudSyncState(
       _conflictsKey,

@@ -69,12 +69,19 @@ class _BillsScreenState extends State<BillsScreen> {
     if (oldWidget.refreshToken != widget.refreshToken) _loadBills();
   }
 
+  Set<String> _unsyncedBillUuids = const {};
+
   Future<void> _loadBills() async {
     final db = DatabaseHelper.instance;
     final bills = await db.getAllBills();
     final cancelled = await db.getCancelledBills();
+    final cloud = CloudService.instance.state.value;
+    final unsynced = cloud.isConfigured && cloud.isSignedIn
+        ? await db.unsyncedBillUuids()
+        : const <String>{};
     if (mounted) {
       setState(() {
+        _unsyncedBillUuids = unsynced;
         _bills = bills;
         _cancelledBills = cancelled;
         _isLoading = false;
@@ -556,6 +563,7 @@ class _BillsScreenState extends State<BillsScreen> {
           TestKeys.billRow(bill.id ?? bill.billNumber),
           _BillCard(
             bill: bill,
+            waitingToSync: _unsyncedBillUuids.contains(bill.uuid),
             onCancel: () => _cancelBill(bill),
             onEdit: () => _editBillDetails(bill),
             onStatusChanged: (isPaid, method, reference) => _updateBillStatus(
