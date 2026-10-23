@@ -159,6 +159,27 @@ select pg_temp.check(
   'admin cannot hard-delete a bill');
 select tests.logout();
 
+-- ── Expenses: admins write, staff only read ──
+select tests.login('00000000-0000-0000-0000-0000000000a2', 'admin@shop.in');
+insert into public.expenses (uuid, shop_id, expense_date, amount, category,
+  created_at, updated_at)
+values ('exp-1', 'shop-1', '2026-10-23T10:00:00', 1500, 'Rent',
+  '2026-10-23T10:00:00Z', '2026-10-23T10:00:00Z');
+select tests.logout();
+select tests.login('00000000-0000-0000-0000-0000000000a3', 'staff@shop.in');
+select pg_temp.check(
+  (select count(*) = 1 from public.expenses), 'staff can read expenses');
+select pg_temp.check(
+  pg_temp.refused($$insert into public.expenses (uuid, shop_id, expense_date,
+    amount, created_at, updated_at)
+    values ('exp-2', 'shop-1', 'x', 10, 'x', 'x')$$),
+  'staff cannot add expenses');
+update public.expenses set amount = 1 where uuid = 'exp-1';
+select tests.logout();
+select pg_temp.check(
+  (select amount = 1500 from public.expenses where uuid = 'exp-1'),
+  'staff cannot change expenses');
+
 -- ── Outsider sees nothing ──
 select tests.login('00000000-0000-0000-0000-0000000000a4', 'stranger@other.in');
 select pg_temp.check(

@@ -10,6 +10,7 @@ import '../models/bill_settings.dart';
 import '../models/bill_totals.dart';
 import '../models/invoice_numbering.dart';
 import '../models/customer.dart';
+import '../models/expense.dart';
 import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
@@ -24,6 +25,7 @@ part 'database_products.dart';
 part 'database_bills.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
+part 'database_expenses.dart';
 
 const _uuid = Uuid();
 const _legacyShopId = 'local-shop';
@@ -35,7 +37,8 @@ class DatabaseHelper
         DatabaseProducts,
         DatabaseBills,
         DatabaseSync,
-        DatabaseKpi {
+        DatabaseKpi,
+        DatabaseExpenses {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 

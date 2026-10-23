@@ -9,6 +9,7 @@ import 'analytics_screen.dart';
 import 'qr_sheet_screen.dart';
 import 'notifications_screen.dart';
 import 'suppliers_screen.dart';
+import 'expenses_screen.dart';
 import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
@@ -248,6 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               supplierCount: _supplierCount,
                               onSuppliers: _openSuppliers,
                               onPricing: _openPricing,
+                              onExpenses: _openExpenses,
                             ),
                             if (!HomeSectionPrefs.instance.unpaidHidden) ...[
                               const SizedBox(height: AppSpacing.xxl),
@@ -402,6 +404,13 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+    );
+  }
+
+  void _openExpenses() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const ExpensesScreen()),
     );
   }
 
@@ -584,6 +593,7 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
   final int supplierCount;
   final VoidCallback onSuppliers;
   final VoidCallback onPricing;
+  final VoidCallback onExpenses;
 
   const _WorkspaceShortcutsSection({
     required this.customerCount,
@@ -591,6 +601,7 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
     required this.supplierCount,
     required this.onSuppliers,
     required this.onPricing,
+    required this.onExpenses,
   });
 
   @override
@@ -624,6 +635,14 @@ class _WorkspaceShortcutsSection extends StatelessWidget {
               subtitle: 'GST & rates',
               color: AppColors.inkMutedOf(context),
               onTap: onPricing,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            _WorkspaceTile(
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'Expenses',
+              subtitle: 'Rent, salary',
+              color: AppColors.inkMutedOf(context),
+              onTap: onExpenses,
             ),
           ],
         ),

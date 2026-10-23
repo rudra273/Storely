@@ -196,6 +196,7 @@ mixin DatabaseSchema {
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
     await _createHeldBillTables(executor);
+    await _createExpenseTables(executor);
   }
 
   /// Carts parked with "Hold" (kind 'held') and the auto-saved cart being

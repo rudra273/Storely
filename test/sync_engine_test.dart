@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/expense.dart';
 import 'package:storely/models/invoice_numbering.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/product_purchase.dart';
@@ -105,6 +106,30 @@ void main() {
     beforeJoin?.call();
     await on('b', () => sync(admin: false));
   }
+
+  test('expenses sync to other phones, deletions too', () async {
+    await setUpShop();
+    await on('a', () async {
+      await db.saveExpense(
+        Expense(date: DateTime(2026, 10, 23), amount: 1500, category: 'Rent'),
+      );
+      await sync();
+    });
+    await on('b', () async {
+      await sync(admin: false);
+      final expenses = await db.getExpenses();
+      expect(expenses.single.amount, 1500);
+      expect(expenses.single.category, 'Rent');
+    });
+    await on('a', () async {
+      await db.deleteExpense((await db.getExpenses()).single.id!);
+      await sync();
+    });
+    await on('b', () async {
+      await sync(admin: false);
+      expect(await db.getExpenses(), isEmpty);
+    });
+  });
 
   test('a joining device receives the shop catalog and stock', () async {
     await on('a', () async {

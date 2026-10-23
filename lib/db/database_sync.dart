@@ -13,6 +13,7 @@ const storelyCloudTables = [
   'bill_items',
   'bill_payments',
   'stock_movements',
+  'expenses',
 ];
 
 /// Billing records whose deletion (cancellation) is final: a stale copy from
@@ -226,6 +227,7 @@ mixin DatabaseSync {
       'bill_items',
       'bill_payments',
       'stock_movements',
+      'expenses',
     ]) {
       final rows = await db.query(
         table,

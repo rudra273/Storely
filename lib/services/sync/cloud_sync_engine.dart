@@ -78,6 +78,7 @@ class CloudSyncEngine {
     'suppliers',
     'products',
     'invoice_series',
+    'expenses',
   };
 
   static const syncedTables = ['shops', ...storelyCloudTables];
