@@ -5,6 +5,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
+import '../services/app_settings_service.dart';
+import '../services/bill_share.dart';
 import '../models/bill.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
@@ -21,14 +23,11 @@ part 'scan/quantity_input.dart';
 enum BillingEntryMode { scan, manual }
 
 class ScanScreen extends StatefulWidget {
-  final BillingEntryMode initialMode;
+  /// Null opens the mode the shop used last (Scan or Search).
+  final BillingEntryMode? initialMode;
   final Bill? duplicateFromBill;
 
-  const ScanScreen({
-    super.key,
-    this.initialMode = BillingEntryMode.scan,
-    this.duplicateFromBill,
-  });
+  const ScanScreen({super.key, this.initialMode, this.duplicateFromBill});
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -45,6 +44,7 @@ class _ScanScreenState extends State<ScanScreen> {
   final List<BillItem> _items = [];
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
+  Map<int, int> _saleCounts = const {};
   late BillingEntryMode _entryMode;
   bool _isProcessing = false;
   bool _isSavingBill = false;
@@ -61,9 +61,12 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _entryMode = widget.duplicateFromBill == null
-        ? widget.initialMode
-        : BillingEntryMode.manual;
+    _entryMode = widget.duplicateFromBill != null
+        ? BillingEntryMode.manual
+        : widget.initialMode ??
+              (AppSettingsService.instance.billingSearchFirst
+                  ? BillingEntryMode.manual
+                  : BillingEntryMode.scan);
     if (widget.duplicateFromBill != null) {
       _items.addAll(widget.duplicateFromBill!.items.map(_copyItemForNewBill));
     }
@@ -80,9 +83,18 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _loadProducts() async {
     final products = await DatabaseHelper.instance.getAllProducts();
+    final saleCounts = await DatabaseHelper.instance.getProductSaleCounts();
     if (!mounted) return;
+    // Frequently sold items first, so the usual items are one tap away.
+    products.sort((a, b) {
+      final byCount = (saleCounts[b.id] ?? 0).compareTo(saleCounts[a.id] ?? 0);
+      return byCount != 0
+          ? byCount
+          : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
     setState(() {
       _allProducts = products;
+      _saleCounts = saleCounts;
       _isLoadingProducts = false;
     });
     _applyProductSearch();
@@ -214,6 +226,8 @@ class _ScanScreenState extends State<ScanScreen> {
     if (!mounted) return;
     _addBillItem(item);
     HapticFeedback.selectionClick();
+    // Ready for the next item: clear the search after an add.
+    if (_productSearchCtrl.text.isNotEmpty) _productSearchCtrl.clear();
   }
 
   BillItem _copyItemForNewBill(BillItem item) {
@@ -450,7 +464,7 @@ class _ScanScreenState extends State<ScanScreen> {
       // The bill is saved: empty the cart now so no path back to this screen
       // (e.g. Android back on the success dialog) can save it a second time.
       setState(() => _items.clear());
-      await _showBillCreatedDialog(
+      final startNewBill = await _showBillCreatedDialog(
         billId: saved.id,
         customerName: draft.customerName.trim().isEmpty
             ? 'Walk-in Customer'
@@ -459,7 +473,12 @@ class _ScanScreenState extends State<ScanScreen> {
         itemCount: itemCount,
         isPaid: draft.paidAmount >= totalAmount - 0.005,
       );
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      if (startNewBill) {
+        _loadProducts(); // stock changed
+      } else {
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (!mounted) return;
       final message = e.toString().replaceFirst('Bad state: ', '');
@@ -469,62 +488,30 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _showBillCreatedDialog({
+  /// Returns true when the user wants to start another bill right away.
+  Future<bool> _showBillCreatedDialog({
     required int billId,
     required String customerName,
     required double totalAmount,
     required int itemCount,
     required bool isPaid,
   }) async {
-    final bills = await DatabaseHelper.instance.getAllBills();
-    final bill = bills.where((bill) => bill.id == billId).firstOrNull;
+    final bill = await DatabaseHelper.instance.getBillById(billId);
     final billLabel = bill?.billNumber.isNotEmpty == true
-        ? bill!.billNumber.replaceFirst(RegExp(r'^SHOP-LOCAL-local-'), 'INV-')
+        ? bill!.billNumber
         : 'Bill #$billId';
-    if (mounted) {
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          icon: const Icon(
-            Icons.check_circle,
-            color: AppColors.success,
-            size: 48,
-          ),
-          title: const Text('Bill Created!'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                rupees(totalAmount),
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
-                style: TextStyle(color: AppColors.textMuted),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.brandOf(ctx),
-                foregroundColor: AppColors.isDark(ctx)
-                    ? Colors.black
-                    : Colors.white,
-              ),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      );
-    }
+    if (!mounted) return false;
+    final newBill = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _BillCreatedDialog(
+        bill: bill,
+        totalAmount: totalAmount,
+        summary:
+            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+      ),
+    );
+    return newBill == true;
   }
 
   void _updateQty(int index, int delta) {
@@ -602,6 +589,9 @@ class _ScanScreenState extends State<ScanScreen> {
             _entryMode = selection.first;
             _showAddedStatus = false;
           });
+          AppSettingsService.instance.setBillingSearchFirst(
+            selection.first == BillingEntryMode.manual,
+          );
         },
       ),
     );
@@ -627,7 +617,20 @@ class _ScanScreenState extends State<ScanScreen> {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          MobileScanner(onDetect: _onDetect),
+          MobileScanner(
+            onDetect: _onDetect,
+            errorBuilder: (context, error, _) => _ScannerUnavailable(
+              message:
+                  error.errorCode == MobileScannerErrorCode.permissionDenied
+                  ? 'Camera permission is off. Allow it in Settings, or add '
+                        'items by search.'
+                  : 'Camera is not available. Add items by search.',
+              onUseSearch: () {
+                setState(() => _entryMode = BillingEntryMode.manual);
+                AppSettingsService.instance.setBillingSearchFirst(true);
+              },
+            ),
+          ),
           Center(
             child: Container(
               width: 200,
@@ -691,6 +694,14 @@ class _ScanScreenState extends State<ScanScreen> {
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
+          if (_productSearchCtrl.text.isEmpty && _saleCounts.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Frequently sold first', style: AppText.caption),
+              ),
+            ),
           const SizedBox(height: AppSpacing.sm),
           Expanded(
             child: _isLoadingProducts
@@ -738,166 +749,222 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget build(BuildContext context) {
     final isDark = AppColors.isDark(context);
     final headerSurface = isDark ? AppColors.darkBg : AppColors.navy;
-    return Scaffold(
-      backgroundColor: headerSurface,
-      appBar: AppBar(
-        title: Text(
-          widget.duplicateFromBill != null
-              ? 'Duplicate Bill'
-              : _entryMode == BillingEntryMode.scan
-              ? 'Scan & Bill'
-              : 'Manual Bill',
-        ),
+    return PopScope(
+      canPop: _items.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final discard = await _confirmDiscard();
+        if (!discard || !context.mounted) return;
+        setState(() => _items.clear());
+        Navigator.pop(context);
+      },
+      child: Scaffold(
         backgroundColor: headerSurface,
-        foregroundColor: Colors.white,
-        actions: [
-          const AppInfoAction(
-            title: 'Billing Help',
-            intro:
-                'Build the bill first, then complete checkout with customer and payment details.',
-            sections: [
-              AppInfoSection(
-                title: 'Add items',
-                points: [
-                  'Scan mode reads Storely product labels and barcode values.',
-                  'Manual mode lets you search by product name, code, category, or supplier.',
-                  'Use quantity controls on each bill row before completing the bill.',
-                ],
-              ),
-              AppInfoSection(
-                title: 'Complete bill',
-                points: [
-                  'Before Generate Bill, this screen is your editable draft.',
-                  'Complete Bill opens checkout for customer, discount, and payment details.',
-                  'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
-                  'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
-                  'If stock is insufficient, bill creation is blocked before saving.',
-                ],
-              ),
-            ],
+        appBar: AppBar(
+          title: Text(
+            widget.duplicateFromBill != null
+                ? 'Duplicate Bill'
+                : _entryMode == BillingEntryMode.scan
+                ? 'Scan & Bill'
+                : 'Manual Bill',
           ),
-          if (_items.isNotEmpty)
-            TextButton(
-              onPressed: () => setState(() => _items.clear()),
-              child: const Text(
-                'Clear',
-                style: TextStyle(color: AppColors.amber),
-              ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxHeight < 520;
-                final panelHeight = (constraints.maxHeight * 0.42).clamp(
-                  180.0,
-                  280.0,
-                );
-
-                return Column(
-                  children: [
-                    const SizedBox(height: 8),
-                    _buildModeSelector(),
-                    _buildEntryPanel(panelHeight),
-                    if (!compact) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _entryHintText(),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 13,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ] else
-                      const SizedBox(height: 8),
-                    Expanded(child: _buildBillItemsPanel()),
+          backgroundColor: headerSurface,
+          foregroundColor: Colors.white,
+          actions: [
+            const AppInfoAction(
+              title: 'Billing Help',
+              intro:
+                  'Build the bill first, then complete checkout with customer and payment details.',
+              sections: [
+                AppInfoSection(
+                  title: 'Add items',
+                  points: [
+                    'Scan mode reads Storely product labels and barcode values.',
+                    'Manual mode lets you search by product name, code, category, or supplier.',
+                    'Use quantity controls on each bill row before completing the bill.',
                   ],
-                );
-              },
+                ),
+                AppInfoSection(
+                  title: 'Complete bill',
+                  points: [
+                    'Before Generate Bill, this screen is your editable draft.',
+                    'Complete Bill opens checkout for customer, discount, and payment details.',
+                    'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
+                    'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
+                    'If stock is insufficient, bill creation is blocked before saving.',
+                  ],
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      // ── Bottom Total + Complete Button ──
-      bottomNavigationBar: _items.isNotEmpty
-          ? Container(
-              color: AppColors.bgOf(context),
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.sm,
-              ),
-              child: SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xl,
-                    vertical: AppSpacing.md,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.isDark(context)
-                        ? AppColors.darkSurfaceRaised
-                        : AppColors.navy,
-                    borderRadius: AppRadius.lgRadius,
-                  ),
-                  child: Row(
-                    children: [
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Total',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            rupees(_subtotal),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      TestKeys.tag(
-                        TestKeys.scanBillBtn,
-                        FilledButton.icon(
-                          onPressed: _openBillSheet,
-                          icon: const Icon(Icons.receipt_long_rounded),
-                          label: const Text(
-                            'Bill',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.amber,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                        button: true,
-                      ),
-                    ],
-                  ),
+            if (_items.isNotEmpty)
+              TextButton(
+                onPressed: _clearWithUndo,
+                child: const Text(
+                  'Clear',
+                  style: TextStyle(color: AppColors.amber),
                 ),
               ),
-            )
-          : null,
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxHeight < 520;
+                  final panelHeight = (constraints.maxHeight * 0.42).clamp(
+                    180.0,
+                    280.0,
+                  );
+
+                  return Column(
+                    children: [
+                      const SizedBox(height: 8),
+                      _buildModeSelector(),
+                      _buildEntryPanel(panelHeight),
+                      if (!compact) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _entryHintText(),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ] else
+                        const SizedBox(height: 8),
+                      Expanded(child: _buildBillItemsPanel()),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        // ── Bottom Total + Complete Button ──
+        bottomNavigationBar: _items.isNotEmpty
+            ? Container(
+                color: AppColors.bgOf(context),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                ),
+                child: SafeArea(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl,
+                      vertical: AppSpacing.md,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.isDark(context)
+                          ? AppColors.darkSurfaceRaised
+                          : AppColors.navy,
+                      borderRadius: AppRadius.lgRadius,
+                    ),
+                    child: Row(
+                      children: [
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Total',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.7),
+                                fontSize: 12,
+                              ),
+                            ),
+                            Text(
+                              rupees(_subtotal),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        TestKeys.tag(
+                          TestKeys.scanBillBtn,
+                          FilledButton.icon(
+                            onPressed: _openBillSheet,
+                            icon: const Icon(Icons.receipt_long_rounded),
+                            label: const Text(
+                              'Bill',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.amber,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                          button: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : null,
+      ),
     );
+  }
+
+  Future<bool> _confirmDiscard() async {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard this bill?'),
+        content: Text(
+          '${_items.length} item${_items.length == 1 ? '' : 's'} in the cart '
+          'will be removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep Billing'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    return discard == true;
+  }
+
+  void _clearWithUndo() {
+    final removed = List<BillItem>.of(_items);
+    setState(() => _items.clear());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cleared ${removed.length} item${removed.length == 1 ? '' : 's'}',
+          ),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              if (!mounted || _items.isNotEmpty) return;
+              setState(() => _items.addAll(removed));
+            },
+          ),
+        ),
+      );
   }
 
   Widget _buildBillItemsPanel() {
@@ -975,8 +1042,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               onPressed: () => _updateQty(i, -1),
                               icon: const Icon(Icons.remove, size: 18),
                               constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                                minWidth: 48,
+                                minHeight: 48,
                               ),
                             ),
                             SizedBox(
@@ -991,8 +1058,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               onPressed: () => _updateQty(i, 1),
                               icon: const Icon(Icons.add, size: 18),
                               constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                                minWidth: 48,
+                                minHeight: 48,
                               ),
                             ),
                           ],

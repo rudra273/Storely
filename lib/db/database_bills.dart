@@ -98,6 +98,49 @@ mixin DatabaseBills {
     ];
   }
 
+  /// One bill with its items (including a cancelled one), or null.
+  Future<Bill?> getBillById(int id) async {
+    final db = await database;
+    final billMaps = await db.query(
+      'bills',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (billMaps.isEmpty) return null;
+    final items = await _itemsByBillId(db, billMaps, includeDeleted: true);
+    final refs = await _latestPaymentRefByBillUuid(db, billMaps);
+    final map = billMaps.single;
+    return Bill.fromMap({
+      ...map,
+      'transaction_reference': refs[map['uuid']],
+    }, items[map['id']] ?? const []);
+  }
+
+  /// How many bills each product appeared on in the last [days] days, for
+  /// putting frequently sold items first while billing.
+  Future<Map<int, int>> getProductSaleCounts({int days = 60}) async {
+    final db = await database;
+    final since = DateTime.now()
+        .subtract(Duration(days: days))
+        .toIso8601String()
+        .substring(0, 10);
+    final rows = await db.rawQuery(
+      '''
+      SELECT bi.product_id AS product_id, COUNT(DISTINCT bi.bill_id) AS n
+      FROM bill_items bi
+      WHERE bi.deleted_at IS NULL AND bi.product_id IS NOT NULL
+        AND substr(bi.created_at, 1, 10) >= ?
+      GROUP BY bi.product_id
+      ''',
+      [since],
+    );
+    return {
+      for (final row in rows)
+        row['product_id'] as int: (row['n'] as num).toInt(),
+    };
+  }
+
   /// Cancelled bills are soft-deleted (deleted_at is set) so they stay out of
   /// every sales/KPI/ledger aggregate, but their lifecycle record is preserved.
   /// This surfaces them for reference/audit, newest first.

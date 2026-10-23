@@ -39,7 +39,8 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
 
   var _discountPercent = 0.0;
   var _billType = Bill.typeB2c;
-  var _paymentStatus = Bill.statusUnpaid;
+  // Most counter sales are paid on the spot.
+  var _paymentStatus = Bill.statusPaid;
   var _paymentMethod = 'cash';
   var _hideCustomerSuggestions = false;
 
@@ -78,7 +79,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
       );
     }
     _billType = bill.billType;
-    _paymentStatus = Bill.statusUnpaid;
+    _paymentStatus = Bill.statusPaid;
     _paymentMethod = 'cash';
     _hideCustomerSuggestions = true;
   }

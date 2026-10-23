@@ -270,6 +270,38 @@ void main() {
       expect(await db.kpiCollected(from: day, to: day), 1);
     });
 
+    test('getBillById and frequently-sold counts', () async {
+      final tea = await db.insertProduct(
+        Product(name: 'Tea', mrp: 0, purchasePrice: 10, quantity: 50),
+      );
+      final salt = await db.insertProduct(
+        Product(name: 'Salt', mrp: 0, purchasePrice: 10, quantity: 50),
+      );
+      Future<int> sell(int productId) async {
+        final item = await db.buildBillItemForProduct(
+          (await db.getProductById(productId))!,
+        );
+        return db.insertBill(
+          Bill(
+            customerName: 'C',
+            subtotalAmount: item.subtotal,
+            totalAmount: item.subtotal,
+            itemCount: 1,
+          ),
+          [item],
+        );
+      }
+
+      final first = await sell(tea);
+      await sell(tea);
+      await sell(salt);
+
+      final bill = await db.getBillById(first);
+      expect(bill!.items.single.productId, tea);
+      expect(await db.getBillById(99999), isNull);
+      expect(await db.getProductSaleCounts(), {tea: 2, salt: 1});
+    });
+
     test('only admins can mark a paid bill unpaid', () async {
       final billId = await db.insertBill(
         Bill(customerName: 'Customer', totalAmount: 50, itemCount: 1),

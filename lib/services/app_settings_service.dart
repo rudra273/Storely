@@ -23,16 +23,21 @@ enum AppThemePreference {
 class AppSettingsService extends ChangeNotifier {
   static const _themePreferenceKey = 'app_theme_preference';
   static const _appLockEnabledKey = 'app_lock_enabled';
+  static const _billingSearchFirstKey = 'billing_search_first';
   static final AppSettingsService instance = AppSettingsService._();
 
   AppSettingsService._();
 
   AppThemePreference _themePreference = AppThemePreference.system;
   bool _appLockEnabled = false;
+  bool _billingSearchFirst = false;
 
   AppThemePreference get themePreference => _themePreference;
   ThemeMode get themeMode => _themePreference.themeMode;
   bool get appLockEnabled => _appLockEnabled;
+
+  /// Billing opens in Search (true) or Scan mode: whichever was used last.
+  bool get billingSearchFirst => _billingSearchFirst;
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -40,6 +45,15 @@ class AppSettingsService extends ChangeNotifier {
       prefs.getString(_themePreferenceKey),
     );
     _appLockEnabled = prefs.getBool(_appLockEnabledKey) ?? false;
+    _billingSearchFirst = prefs.getBool(_billingSearchFirstKey) ?? false;
+  }
+
+  /// Remembered quietly (no rebuild of the app).
+  Future<void> setBillingSearchFirst(bool value) async {
+    if (_billingSearchFirst == value) return;
+    _billingSearchFirst = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_billingSearchFirstKey, value);
   }
 
   Future<void> setThemePreference(AppThemePreference value) async {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
@@ -8,7 +7,7 @@ import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
-import '../utils/bill_pdf_generator.dart';
+import '../services/bill_share.dart';
 import 'scan_screen.dart';
 import 'store/bill_settings_screen.dart';
 import '../utils/money.dart';
@@ -269,20 +268,7 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _shareBillPdf(Bill bill) async {
-    final db = DatabaseHelper.instance;
-    final shop = await db.getShopProfile();
-    final settings = await db.getBillSettings();
-    final bytes = await BillPdfGenerator.generate(
-      bill: bill,
-      shop: shop,
-      settings: settings,
-    );
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: BillPdfGenerator.filename(bill),
-    );
-  }
+  Future<void> _shareBillPdf(Bill bill) => BillShare.sharePdf(bill);
 
   String? _whatsAppPhone(String? value) {
     final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
