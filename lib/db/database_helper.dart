@@ -26,6 +26,7 @@ part 'database_bills.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
 part 'database_expenses.dart';
+part 'database_reports.dart';
 
 const _uuid = Uuid();
 const _legacyShopId = 'local-shop';
@@ -38,7 +39,8 @@ class DatabaseHelper
         DatabaseBills,
         DatabaseSync,
         DatabaseKpi,
-        DatabaseExpenses {
+        DatabaseExpenses,
+        DatabaseReports {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 

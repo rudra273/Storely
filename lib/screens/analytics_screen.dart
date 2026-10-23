@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
-import '../main.dart';
 import '../services/kpi_prefs.dart';
+import '../theme/app_theme.dart';
 import 'kpi_widgets.dart';
+import 'reports_screens.dart';
 
 const _donutColors = [
   Color(0xFF1B2838),
@@ -22,10 +23,10 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  // date range: null = all time
-  String? _from;
-  String? _to;
-  int _periodIdx = 3; // 0=7d 1=30d 2=90d 3=All
+  // Date range (yyyy-MM-dd, inclusive); null = open-ended.
+  late String? _from = _dayOffset(0);
+  late String? _to = _dayOffset(0);
+  _Period _period = _Period.today;
 
   @override
   void initState() {
@@ -44,21 +45,47 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     if (mounted) setState(() {});
   }
 
-  void _setPeriod(int idx) {
-    // "Last N days" includes today, so it starts N - 1 days ago.
-    String startOfLast(int days) => DateTime.now()
-        .subtract(Duration(days: days - 1))
-        .toIso8601String()
-        .substring(0, 10);
+  static String _day(DateTime d) => d.toIso8601String().substring(0, 10);
+
+  /// The local calendar day [days] before today.
+  static String _dayOffset(int days) {
+    final now = DateTime.now();
+    return _day(DateTime(now.year, now.month, now.day - days));
+  }
+
+  Future<void> _setPeriod(_Period period) async {
+    if (period == _Period.custom) {
+      final now = DateTime.now();
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2020),
+        lastDate: now,
+        initialDateRange: DateTimeRange(
+          start: DateTime(now.year, now.month, 1),
+          end: now,
+        ),
+      );
+      if (!mounted || picked == null) return;
+      setState(() {
+        _period = period;
+        _from = _day(picked.start);
+        _to = _day(picked.end);
+      });
+      return;
+    }
+    final now = DateTime.now();
+    final (from, to) = switch (period) {
+      _Period.today => (_dayOffset(0), _dayOffset(0)),
+      _Period.yesterday => (_dayOffset(1), _dayOffset(1)),
+      // "Last N days" includes today, so it starts N - 1 days ago.
+      _Period.week => (_dayOffset(6), null),
+      _Period.month => (_day(DateTime(now.year, now.month, 1)), null),
+      _Period.all || _Period.custom => (null, null),
+    };
     setState(() {
-      _periodIdx = idx;
-      _to = null;
-      _from = switch (idx) {
-        0 => startOfLast(7),
-        1 => startOfLast(30),
-        2 => startOfLast(90),
-        _ => null,
-      };
+      _period = period;
+      _from = from;
+      _to = to;
     });
   }
 
@@ -80,7 +107,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
-          'KPI Dashboard',
+          'Reports',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [
@@ -93,8 +120,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ),
       body: CustomScrollView(
         slivers: [
+          const SliverToBoxAdapter(child: ReportShortcuts()),
           SliverToBoxAdapter(
-            child: _PeriodFilter(selected: _periodIdx, onSelect: _setPeriod),
+            child: _PeriodFilter(selected: _period, onSelect: _setPeriod),
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -809,56 +837,47 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
 };
 
 // ── Period Filter ────────────────────────────────────────────────────────────
+enum _Period {
+  today('Today'),
+  yesterday('Yesterday'),
+  week('7 Days'),
+  month('This Month'),
+  all('All Time'),
+  custom('Custom…');
+
+  final String label;
+  const _Period(this.label);
+}
+
 class _PeriodFilter extends StatelessWidget {
-  final int selected;
-  final ValueChanged<int> onSelect;
+  final _Period selected;
+  final ValueChanged<_Period> onSelect;
   const _PeriodFilter({required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    const labels = ['7 Days', '30 Days', '90 Days', 'All Time'];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        0,
+      ),
       child: Row(
-        children: List.generate(labels.length, (i) {
-          final active = i == selected;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () => onSelect(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: active
-                      ? AppColors.brandOf(context)
-                      : AppColors.surfaceOf(context),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: active
-                        ? AppColors.brandOf(context)
-                        : AppColors.borderOf(context),
-                  ),
-                ),
-                child: Text(
-                  labels[i],
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: active
-                        ? (AppColors.isDark(context)
-                              ? Colors.black
-                              : Colors.white)
-                        : AppColors.inkMutedOf(context),
-                  ),
-                ),
+        children: [
+          for (final period in _Period.values)
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.sm),
+              child: ChoiceChip(
+                key: ValueKey('period-${period.name}'),
+                label: Text(period.label),
+                selected: period == selected,
+                showCheckmark: false,
+                onSelected: (_) => onSelect(period),
               ),
             ),
-          );
-        }),
+        ],
       ),
     );
   }
