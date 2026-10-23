@@ -176,10 +176,8 @@ Future<void> showNeedsAttentionSettings(
 }) {
   return showDialog(
     context: context,
-    builder: (ctx) => _NeedsAttentionSheet(
-      threshold: threshold,
-      onThreshold: onThreshold,
-    ),
+    builder: (ctx) =>
+        _NeedsAttentionSheet(threshold: threshold, onThreshold: onThreshold),
   );
 }
 

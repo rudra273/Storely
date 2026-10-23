@@ -238,8 +238,12 @@ class _KpiTileState<T> extends State<_KpiTile<T>> {
 // Maps each KPI id (matching kpiCatalogue) to a widget builder. Kept in sync
 // with kpi_prefs.dart by id.
 typedef _KpiBuilder =
-    Widget Function(BuildContext context, DatabaseHelper db, String? from,
-        String? to);
+    Widget Function(
+      BuildContext context,
+      DatabaseHelper db,
+      String? from,
+      String? to,
+    );
 
 final Map<String, _KpiBuilder> _kpiBuilders = {
   // ── Sales & Revenue ─────────────────────────────────────────────────────
@@ -287,60 +291,54 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
       ),
     ),
   ),
-  'revenue_trend': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Revenue Trend',
-        load: () => db.kpiDailyRevenueTrend(from: from, to: to),
-        builder: (rows) {
-          final data = rows
-              .map(
-                (r) => (
-                  label: r['day'] as String,
-                  value: (r['revenue'] as num).toDouble(),
-                ),
-              )
-              .toList();
-          return KpiLineChart(title: 'Daily Revenue Trend', data: data);
-        },
-      ),
-  'payment_method': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Collections by Payment Method',
-        load: () => db.kpiRevenueByPaymentMethod(from: from, to: to),
-        builder: (rows) {
-          final segs = rows
-              .asMap()
-              .entries
-              .map(
-                (e) => (
-                  label: _fmtMethod(e.value['method'] as String),
-                  value: (e.value['total'] as num).toDouble(),
-                  color: _donutColors[e.key % _donutColors.length],
-                ),
-              )
-              .toList();
-          return KpiDonut(
-            title: 'Collections by Payment Method',
-            segments: segs,
-          );
-        },
-      ),
-  'unpaid_bills': (ctx, db, from, to) =>
-      _KpiTile<Map<String, dynamic>>(
-        title: 'Unpaid Bills',
-        load: () => db.kpiUnpaidBillsValue(),
-        builder: (m) {
-          final count = m['count'] as int;
-          final total = m['total'] as double;
-          return KpiCard(
-            title: 'UNPAID BILLS',
-            value: fmtRupee(total),
-            subtitle: '$count unpaid bill${count == 1 ? '' : 's'} outstanding',
-            valueColor: count > 0 ? AppColors.error : AppColors.success,
-            icon: Icons.pending_actions_rounded,
-          );
-        },
-      ),
+  'revenue_trend': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Revenue Trend',
+    load: () => db.kpiDailyRevenueTrend(from: from, to: to),
+    builder: (rows) {
+      final data = rows
+          .map(
+            (r) => (
+              label: r['day'] as String,
+              value: (r['revenue'] as num).toDouble(),
+            ),
+          )
+          .toList();
+      return KpiLineChart(title: 'Daily Revenue Trend', data: data);
+    },
+  ),
+  'payment_method': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Collections by Payment Method',
+    load: () => db.kpiRevenueByPaymentMethod(from: from, to: to),
+    builder: (rows) {
+      final segs = rows
+          .asMap()
+          .entries
+          .map(
+            (e) => (
+              label: _fmtMethod(e.value['method'] as String),
+              value: (e.value['total'] as num).toDouble(),
+              color: _donutColors[e.key % _donutColors.length],
+            ),
+          )
+          .toList();
+      return KpiDonut(title: 'Collections by Payment Method', segments: segs);
+    },
+  ),
+  'unpaid_bills': (ctx, db, from, to) => _KpiTile<Map<String, dynamic>>(
+    title: 'Unpaid Bills',
+    load: () => db.kpiUnpaidBillsValue(),
+    builder: (m) {
+      final count = m['count'] as int;
+      final total = m['total'] as double;
+      return KpiCard(
+        title: 'UNPAID BILLS',
+        value: fmtRupee(total),
+        subtitle: '$count unpaid bill${count == 1 ? '' : 's'} outstanding',
+        valueColor: count > 0 ? AppColors.error : AppColors.success,
+        icon: Icons.pending_actions_rounded,
+      );
+    },
+  ),
   'revenue_by_category': (ctx, db, from, to) =>
       _KpiTile<List<Map<String, dynamic>>>(
         title: 'Revenue by Category',
@@ -357,29 +355,25 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
           return KpiHorizBarList(title: 'Revenue by Category', items: items);
         },
       ),
-  'busy_day': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Busy Day of Week',
-        load: () => db.kpiBusyDayOfWeek(from: from, to: to),
-        builder: (rows) {
-          final data = List.generate(7, (i) {
-            final row = rows.firstWhere(
-              (r) => (r['dow'] as int) == i,
-              orElse: () => {'dow': i, 'bills': 0, 'revenue': 0.0},
-            );
-            return (
-              label: _days[i],
-              value: (row['revenue'] as num).toDouble(),
-            );
-          });
-          return KpiBarChart(
-            title: 'Busy Day of Week (Revenue)',
-            data: data,
-            isRupee: true,
-            barColor: AppColors.amber,
-          );
-        },
-      ),
+  'busy_day': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Busy Day of Week',
+    load: () => db.kpiBusyDayOfWeek(from: from, to: to),
+    builder: (rows) {
+      final data = List.generate(7, (i) {
+        final row = rows.firstWhere(
+          (r) => (r['dow'] as int) == i,
+          orElse: () => {'dow': i, 'bills': 0, 'revenue': 0.0},
+        );
+        return (label: _days[i], value: (row['revenue'] as num).toDouble());
+      });
+      return KpiBarChart(
+        title: 'Busy Day of Week (Revenue)',
+        data: data,
+        isRupee: true,
+        barColor: AppColors.amber,
+      );
+    },
+  ),
   'gross_profit': (ctx, db, from, to) => _KpiTile<double>(
     title: 'Gross Profit',
     load: () => db.kpiGrossProfit(from: from, to: to),
@@ -422,22 +416,21 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
       ),
     ),
   ),
-  'profit_trend': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Profit Trend',
-        load: () => db.kpiMonthlyProfitTrend(from: from, to: to),
-        builder: (rows) {
-          final data = rows
-              .map(
-                (r) => (
-                  label: r['month'] as String,
-                  value: (r['profit'] as num).toDouble(),
-                ),
-              )
-              .toList();
-          return KpiLineChart(title: 'Monthly Profit Trend', data: data);
-        },
-      ),
+  'profit_trend': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Profit Trend',
+    load: () => db.kpiMonthlyProfitTrend(from: from, to: to),
+    builder: (rows) {
+      final data = rows
+          .map(
+            (r) => (
+              label: r['month'] as String,
+              value: (r['profit'] as num).toDouble(),
+            ),
+          )
+          .toList();
+      return KpiLineChart(title: 'Monthly Profit Trend', data: data);
+    },
+  ),
   'gst_collected': (ctx, db, from, to) => _KpiTile<double>(
     title: 'GST Collected',
     load: () => db.kpiGstCollected(from: from, to: to),
@@ -571,25 +564,24 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
       ),
     ),
   ),
-  'low_stock': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Low Stock',
-        load: () => db.kpiLowStockProducts(),
-        builder: (rows) => KpiDataTableCard(
-          title: 'Low Stock Products (< 5 units)',
-          columns: const ['Product', 'Qty'],
-          rows: rows
-              .map(
-                (r) => [
-                  r['name'] as String,
-                  fmtNum((r['quantity'] as num).toDouble()),
-                ],
-              )
-              .toList(),
-          badgeCount: rows.length,
-          badgeColor: AppColors.amber,
-        ),
-      ),
+  'low_stock': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Low Stock',
+    load: () => db.kpiLowStockProducts(),
+    builder: (rows) => KpiDataTableCard(
+      title: 'Low Stock Products (< 5 units)',
+      columns: const ['Product', 'Qty'],
+      rows: rows
+          .map(
+            (r) => [
+              r['name'] as String,
+              fmtNum((r['quantity'] as num).toDouble()),
+            ],
+          )
+          .toList(),
+      badgeCount: rows.length,
+      badgeColor: AppColors.amber,
+    ),
+  ),
   'inventory_turnover': (ctx, db, from, to) => _KpiTile<double>(
     title: 'Inventory Turnover',
     load: () => db.kpiInventoryTurnoverRate(),
@@ -601,61 +593,58 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
       icon: Icons.loop_rounded,
     ),
   ),
-  'dead_stock': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Dead Stock',
-        load: () => db.kpiDeadStock(),
-        builder: (rows) => KpiDataTableCard(
-          title: 'Dead Stock (No sales in 30 days)',
-          columns: const ['Product', 'Qty'],
-          rows: rows
-              .map(
-                (r) => [
-                  r['name'] as String,
-                  fmtNum((r['quantity'] as num).toDouble()),
-                ],
-              )
-              .toList(),
-          badgeCount: rows.length,
-        ),
-      ),
-  'slow_moving': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Slow Moving Products',
-        load: () => db.kpiSlowMovingProducts(),
-        builder: (rows) => KpiDataTableCard(
-          title: 'Slow Moving Products (< 3 units / 30 days)',
-          columns: const ['Product', 'Qty Sold'],
-          rows: rows
-              .map(
-                (r) => [
-                  r['name'] as String,
-                  fmtNum((r['qty_sold'] as num).toDouble()),
-                ],
-              )
-              .toList(),
-          badgeCount: rows.length,
-        ),
-      ),
-  'top_suppliers': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Top Suppliers',
-        load: () => db.kpiTopSuppliers(),
-        builder: (rows) {
-          final items = rows
-              .map(
-                (r) => (
-                  label: r['name'] as String,
-                  value: (r['value_received'] as num).toDouble(),
-                ),
-              )
-              .toList();
-          return KpiHorizBarList(
-            title: 'Top Suppliers by Value Received',
-            items: items,
-          );
-        },
-      ),
+  'dead_stock': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Dead Stock',
+    load: () => db.kpiDeadStock(),
+    builder: (rows) => KpiDataTableCard(
+      title: 'Dead Stock (No sales in 30 days)',
+      columns: const ['Product', 'Qty'],
+      rows: rows
+          .map(
+            (r) => [
+              r['name'] as String,
+              fmtNum((r['quantity'] as num).toDouble()),
+            ],
+          )
+          .toList(),
+      badgeCount: rows.length,
+    ),
+  ),
+  'slow_moving': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Slow Moving Products',
+    load: () => db.kpiSlowMovingProducts(),
+    builder: (rows) => KpiDataTableCard(
+      title: 'Slow Moving Products (< 3 units / 30 days)',
+      columns: const ['Product', 'Qty Sold'],
+      rows: rows
+          .map(
+            (r) => [
+              r['name'] as String,
+              fmtNum((r['qty_sold'] as num).toDouble()),
+            ],
+          )
+          .toList(),
+      badgeCount: rows.length,
+    ),
+  ),
+  'top_suppliers': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Top Suppliers',
+    load: () => db.kpiTopSuppliers(),
+    builder: (rows) {
+      final items = rows
+          .map(
+            (r) => (
+              label: r['name'] as String,
+              value: (r['value_received'] as num).toDouble(),
+            ),
+          )
+          .toList();
+      return KpiHorizBarList(
+        title: 'Top Suppliers by Value Received',
+        items: items,
+      );
+    },
+  ),
   'new_products': (ctx, db, from, to) => _KpiTile<int>(
     title: 'New Products',
     load: () => db.kpiNewProductsAdded(),
@@ -700,33 +689,29 @@ final Map<String, _KpiBuilder> _kpiBuilders = {
       ),
     ),
   ),
-  'top_customers': (ctx, db, from, to) =>
-      _KpiTile<List<Map<String, dynamic>>>(
-        title: 'Top Customers',
-        load: () => db.kpiTop10CustomersByRevenue(),
-        builder: (rows) {
-          final items = rows
-              .map(
-                (r) => (
-                  label: r['name'] as String,
-                  value: (r['total_purchase_amount'] as num).toDouble(),
-                ),
-              )
-              .toList();
-          return KpiHorizBarList(
-            title: 'Top 10 Customers by Revenue',
-            items: items,
-          );
-        },
-      ),
+  'top_customers': (ctx, db, from, to) => _KpiTile<List<Map<String, dynamic>>>(
+    title: 'Top Customers',
+    load: () => db.kpiTop10CustomersByRevenue(),
+    builder: (rows) {
+      final items = rows
+          .map(
+            (r) => (
+              label: r['name'] as String,
+              value: (r['total_purchase_amount'] as num).toDouble(),
+            ),
+          )
+          .toList();
+      return KpiHorizBarList(
+        title: 'Top 10 Customers by Revenue',
+        items: items,
+      );
+    },
+  ),
   'repeat_rate': (ctx, db, from, to) => _KpiTile<double>(
     title: 'Repeat Rate',
     load: () => db.kpiRepeatCustomerRate(),
-    builder: (v) => KpiGaugeCard(
-      title: 'Repeat Customer Rate',
-      value: v,
-      target: '> 30%',
-    ),
+    builder: (v) =>
+        KpiGaugeCard(title: 'Repeat Customer Rate', value: v, target: '> 30%'),
   ),
   'customer_value': (ctx, db, from, to) => _KpiTile<double>(
     title: 'Avg Lifetime Value',

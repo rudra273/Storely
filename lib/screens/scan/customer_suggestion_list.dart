@@ -68,7 +68,10 @@ class _CustomerSuggestionList extends StatelessWidget {
                       child: Text(
                         customer.name.trim().isEmpty
                             ? '?'
-                            : customer.name.trim().substring(0, 1).toUpperCase(),
+                            : customer.name
+                                  .trim()
+                                  .substring(0, 1)
+                                  .toUpperCase(),
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,

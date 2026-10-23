@@ -70,10 +70,7 @@ mixin DatabaseSchema {
 
   static const syncDirtyFromCloud = 2;
 
-  static const _syncTrackedTables = [
-    'shops',
-    ...storelyCloudTables,
-  ];
+  static const _syncTrackedTables = ['shops', ...storelyCloudTables];
 
   static const _localOnlyColumns = <String, Set<String>>{
     'products': {'quantity_cache', 'selling_price'},
@@ -95,11 +92,7 @@ mixin DatabaseSchema {
         'sync_dirty': 'INTEGER NOT NULL DEFAULT 1',
       });
       final info = await executor.rawQuery('PRAGMA table_info($table)');
-      final excluded = {
-        'id',
-        'sync_dirty',
-        ...?_localOnlyColumns[table],
-      };
+      final excluded = {'id', 'sync_dirty', ...?_localOnlyColumns[table]};
       final tracked = info
           .map((row) => row['name'].toString())
           .where((name) => !excluded.contains(name))

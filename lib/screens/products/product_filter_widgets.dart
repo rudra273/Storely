@@ -225,9 +225,12 @@ class _FilterSheetSection extends StatelessWidget {
                             ),
                             selected: selected.contains(option),
                             onSelected: (value) => onChanged(option, value),
-                            selectedColor: AppColors.brandOf(context).withValues(
-                              alpha: AppColors.isDark(context) ? 0.22 : 0.12,
-                            ),
+                            selectedColor: AppColors.brandOf(context)
+                                .withValues(
+                                  alpha: AppColors.isDark(context)
+                                      ? 0.22
+                                      : 0.12,
+                                ),
                             checkmarkColor: AppColors.brandOf(context),
                             side: BorderSide(
                               color: selected.contains(option)
@@ -272,7 +275,11 @@ class _PurchaseDateFilterTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.event_outlined, size: 18, color: AppColors.brandOf(context)),
+          Icon(
+            Icons.event_outlined,
+            size: 18,
+            color: AppColors.brandOf(context),
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

@@ -287,8 +287,7 @@ class BillItem {
   double get totalTaxableValue => roundMoney(taxableValueSnapshot * quantity);
   double get totalGst => roundMoney(lineAmount - totalTaxableValue);
   double get totalIgst => igstAmountSnapshot > 0 ? totalGst : 0;
-  double get totalCgst =>
-      cgstAmountSnapshot > 0 ? roundMoney(totalGst / 2) : 0;
+  double get totalCgst => cgstAmountSnapshot > 0 ? roundMoney(totalGst / 2) : 0;
   double get totalSgst =>
       sgstAmountSnapshot > 0 ? roundMoney(totalGst - totalCgst) : 0;
   double get totalNetProfit => totalProfit - totalCommission;

@@ -66,7 +66,9 @@ class BillTotals {
     }
     subtotal = roundMoney(subtotal);
     net = roundMoney(net);
-    final roundOffAmount = roundOff ? roundMoney(net.roundToDouble() - net) : 0.0;
+    final roundOffAmount = roundOff
+        ? roundMoney(net.roundToDouble() - net)
+        : 0.0;
     return BillTotals(
       subtotal: subtotal,
       discountAmount: roundMoney(subtotal - net),

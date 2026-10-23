@@ -63,8 +63,10 @@ class _StockMovementHistorySheet extends StatelessWidget {
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: movements.length,
-                      separatorBuilder: (_, _) =>
-                          Divider(height: 1, color: AppColors.borderOf(context)),
+                      separatorBuilder: (_, _) => Divider(
+                        height: 1,
+                        color: AppColors.borderOf(context),
+                      ),
                       itemBuilder: (_, index) =>
                           _StockMovementRow(movement: movements[index]),
                     ),

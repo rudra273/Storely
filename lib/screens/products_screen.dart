@@ -121,7 +121,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
         _purchaseSummaries = purchaseSummaries;
         _purchaseDateProductIds = purchaseDateProductIds;
         _lowStockThreshold = lowStockThreshold;
-        _selectedCategories.removeWhere((value) => !_categories.contains(value));
+        _selectedCategories.removeWhere(
+          (value) => !_categories.contains(value),
+        );
         _selectedSuppliers.removeWhere((value) => !_suppliers.contains(value));
         final productIds = products
             .map((product) => product.id)

@@ -491,8 +491,10 @@ class KpiBarChart extends StatelessWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: AppColors.borderOf(context),
+                    strokeWidth: 1,
+                  ),
                 ),
                 borderData: FlBorderData(show: false),
                 barGroups: data.asMap().entries.map((e) {
@@ -570,8 +572,10 @@ class KpiLineChart extends StatelessWidget {
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: AppColors.borderOf(context), strokeWidth: 1),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: AppColors.borderOf(context),
+                    strokeWidth: 1,
+                  ),
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: const AxisTitles(

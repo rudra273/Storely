@@ -14,7 +14,15 @@ class InvoiceNumbering {
   static const legacyTemplate = 'INV-{YYYY}{MM}{DD}-{SEQ}';
 
   static const maxLength = 16;
-  static const tokens = ['{FY}', '{YYYY}', '{YY}', '{MM}', '{DD}', '{SEQ}', '{DEVICE}'];
+  static const tokens = [
+    '{FY}',
+    '{YYYY}',
+    '{YY}',
+    '{MM}',
+    '{DD}',
+    '{SEQ}',
+    '{DEVICE}',
+  ];
 
   /// Financial year of [date] as "2526" for April 2025 - March 2026.
   static String financialYear(DateTime date) {

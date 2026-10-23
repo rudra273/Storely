@@ -403,24 +403,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openSuppliers() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()));
     // Refresh the supplier count after returning (a supplier may be added).
     if (mounted) _loadData();
   }
 
   Future<void> _openCustomers() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const CustomersScreen()));
     if (mounted) _loadData();
   }
 
   Future<void> _openPricing() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const PricingScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const PricingScreen()));
     if (mounted) _loadData();
   }
 

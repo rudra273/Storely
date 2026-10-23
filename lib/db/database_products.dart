@@ -1072,8 +1072,7 @@ mixin DatabaseProducts {
   Future<void> rebuildAllProductQuantityCaches(
     DatabaseExecutor executor,
   ) async {
-    await executor.rawUpdate(
-      '''
+    await executor.rawUpdate('''
       UPDATE products
       SET quantity_cache = COALESCE((
             SELECT SUM(quantity_delta)

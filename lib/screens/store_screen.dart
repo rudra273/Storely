@@ -196,9 +196,9 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showCustomerTable() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const CustomersScreen()));
     if (mounted) await _loadStoreData();
   }
 
@@ -258,9 +258,9 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showSupplierManager() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SuppliersScreen()));
     if (mounted) await _loadStoreData();
   }
 

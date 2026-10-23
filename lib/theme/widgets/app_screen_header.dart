@@ -50,14 +50,13 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: titleOverride ??
+                child:
+                    titleOverride ??
                     Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildTitle(
-                          fontSize: _lerp(20, 16, collapsed),
-                        ),
+                        _buildTitle(fontSize: _lerp(20, 16, collapsed)),
                         if (subtitle != null)
                           Opacity(
                             opacity: expanded,
@@ -99,7 +98,10 @@ class AppScreenHeaderDelegate extends SliverPersistentHeaderDelegate {
           style: base,
           children: const [
             TextSpan(text: 'Store'),
-            TextSpan(text: 'ly', style: TextStyle(color: AppColors.amber)),
+            TextSpan(
+              text: 'ly',
+              style: TextStyle(color: AppColors.amber),
+            ),
           ],
         ),
         maxLines: 1,

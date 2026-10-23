@@ -103,8 +103,7 @@ class _AppGateState extends State<AppGate> {
         cloudState.membership == CloudMembership.member;
     final profile = await DatabaseHelper.instance.getShopProfile();
     final name = profile?.name.trim();
-    final needsSetup =
-        name == null || name.isEmpty || name == 'My Shop';
+    final needsSetup = name == null || name.isEmpty || name == 'My Shop';
     if (mounted) {
       setState(() {
         _isFirstLaunch = needsSetup && !joinedCloudShop;

@@ -176,18 +176,16 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
                       },
                     ),
                     const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      switch (_gstScheme) {
-                        GstScheme.regular =>
-                          'Bills are TAX INVOICES with CGST/SGST or IGST',
-                        GstScheme.composition =>
-                          'Bills are BILLS OF SUPPLY with no tax. '
-                              'Purchase GST is included in cost',
-                        _ => 'Bills show no GST. '
+                    Text(switch (_gstScheme) {
+                      GstScheme.regular =>
+                        'Bills are TAX INVOICES with CGST/SGST or IGST',
+                      GstScheme.composition =>
+                        'Bills are BILLS OF SUPPLY with no tax. '
                             'Purchase GST is included in cost',
-                      },
-                      style: AppText.caption,
-                    ),
+                      _ =>
+                        'Bills show no GST. '
+                            'Purchase GST is included in cost',
+                    }, style: AppText.caption),
                   ],
                 );
               },

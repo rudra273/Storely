@@ -177,51 +177,51 @@ class _CustomersScreenState extends State<CustomersScreen> {
           body: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.lg,
-                    AppSpacing.lg,
-                    AppSpacing.sm,
-                  ),
-                  child: TextField(
-                    controller: _searchCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Search customers',
-                      prefixIcon: Icon(Icons.search_rounded),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: customers.isEmpty
-                      ? _EmptyCustomers(
-                          hasAny: _customers.isNotEmpty,
-                          canManage: canManage,
-                          onAdd: _addCustomer,
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg,
-                            AppSpacing.sm,
-                            AppSpacing.lg,
-                            AppSpacing.xxxl * 2,
-                          ),
-                          itemCount: customers.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: AppSpacing.sm),
-                          itemBuilder: (_, index) {
-                            final customer = customers[index];
-                            return _CustomerSummaryRow(
-                              customer: customer,
-                              pendingAmount: _pendingAmount(customer),
-                              onTap: () => _openDetail(customer),
-                            );
-                          },
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        AppSpacing.lg,
+                        AppSpacing.lg,
+                        AppSpacing.sm,
+                      ),
+                      child: TextField(
+                        controller: _searchCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Search customers',
+                          prefixIcon: Icon(Icons.search_rounded),
                         ),
+                      ),
+                    ),
+                    Expanded(
+                      child: customers.isEmpty
+                          ? _EmptyCustomers(
+                              hasAny: _customers.isNotEmpty,
+                              canManage: canManage,
+                              onAdd: _addCustomer,
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.lg,
+                                AppSpacing.sm,
+                                AppSpacing.lg,
+                                AppSpacing.xxxl * 2,
+                              ),
+                              itemCount: customers.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: AppSpacing.sm),
+                              itemBuilder: (_, index) {
+                                final customer = customers[index];
+                                return _CustomerSummaryRow(
+                                  customer: customer,
+                                  pendingAmount: _pendingAmount(customer),
+                                  onTap: () => _openDetail(customer),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
         );
       },
     );
@@ -345,7 +345,8 @@ class _CustomerSummaryRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   [
-                    if (customer.phone.isNotEmpty) _displayPhone(customer.phone),
+                    if (customer.phone.isNotEmpty)
+                      _displayPhone(customer.phone),
                     '${customer.billCount} purchase${customer.billCount != 1 ? 's' : ''}',
                   ].join(' · '),
                   style: AppText.caption,

@@ -199,9 +199,7 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         decoration: BoxDecoration(
-          color: selected
-              ? AppColors.surfaceOf(context)
-              : Colors.transparent,
+          color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
           borderRadius: AppRadius.smRadius,
           border: selected
               ? Border.all(color: AppColors.borderOf(context))
@@ -250,9 +248,7 @@ class _CancelledBillCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      bill.customerName.isEmpty
-                          ? 'Walk-in'
-                          : bill.customerName,
+                      bill.customerName.isEmpty ? 'Walk-in' : bill.customerName,
                       style: AppText.subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

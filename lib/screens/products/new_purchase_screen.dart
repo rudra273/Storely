@@ -98,9 +98,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
     final name = _drafts[index].name.toLowerCase();
     setState(() {
       _drafts.removeAt(index);
-      _importedRows.removeWhere(
-        (row) => row.name.trim().toLowerCase() == name,
-      );
+      _importedRows.removeWhere((row) => row.name.trim().toLowerCase() == name);
     });
   }
 

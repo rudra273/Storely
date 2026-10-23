@@ -23,10 +23,7 @@ class SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(
-          title,
-          style: AppText.title.copyWith(fontSize: 15),
-        ),
+        Text(title, style: AppText.title.copyWith(fontSize: 15)),
         const Spacer(),
         if (actionLabel != null && onAction != null)
           GestureDetector(

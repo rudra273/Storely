@@ -48,11 +48,7 @@ class BillPdfGenerator {
           pw.SizedBox(height: 10),
           _invoiceMeta(bill, shop, billSettings),
           pw.SizedBox(height: 16),
-          _itemsTable(
-            bill,
-            gstRegistered: billHasGst,
-            settings: billSettings,
-          ),
+          _itemsTable(bill, gstRegistered: billHasGst, settings: billSettings),
           pw.SizedBox(height: 14),
           _totals(bill, gstRegistered: billHasGst, settings: billSettings),
           pw.SizedBox(height: 20),

@@ -78,7 +78,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 34),
+        icon: const Icon(
+          Icons.delete_outline,
+          color: AppColors.error,
+          size: 34,
+        ),
         title: const Text('Delete Supplier'),
         content: Text('Remove "${supplier.name}"?'),
         actions: [
@@ -363,7 +367,9 @@ class _SupplierEditorSheetState extends State<_SupplierEditorSheet> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: Container(
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
@@ -408,8 +414,9 @@ class _SupplierEditorSheetState extends State<_SupplierEditorSheet> {
                       labelText: 'Supplier Name *',
                       prefixIcon: Icon(Icons.local_shipping_outlined, size: 18),
                     ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'Required' : null,
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Required'
+                        : null,
                   ),
                   const SizedBox(height: 10),
                   TextFormField(

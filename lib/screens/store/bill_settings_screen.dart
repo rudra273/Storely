@@ -138,9 +138,10 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
     }
   }
 
-  int get _padding => (int.tryParse(_paddingCtrl.text.trim()) ??
-          InvoiceNumbering.defaultPadding)
-      .clamp(1, 8);
+  int get _padding =>
+      (int.tryParse(_paddingCtrl.text.trim()) ??
+              InvoiceNumbering.defaultPadding)
+          .clamp(1, 8);
 
   String? _patternProblem() => InvoiceNumbering.validate(
     template: _patternCtrl.text.trim(),
@@ -1283,10 +1284,12 @@ class _BillPreviewPanel extends StatelessWidget {
   }
 
   Widget? _footer() {
-    final hasSignature = settings.showDigitalSignature &&
+    final hasSignature =
+        settings.showDigitalSignature &&
         settings.digitalSignatureBase64 != null;
-    final footerText =
-        settings.showFooterText ? settings.footerText.trim() : '';
+    final footerText = settings.showFooterText
+        ? settings.footerText.trim()
+        : '';
     if (footerText.isEmpty && !hasSignature) return null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1335,6 +1338,11 @@ class _PreviewCol {
   final _ColKind kind;
   final int dataIndex;
 
-  const _PreviewCol(this.label, this.flex, this.align, this.kind,
-      [this.dataIndex = 0]);
+  const _PreviewCol(
+    this.label,
+    this.flex,
+    this.align,
+    this.kind, [
+    this.dataIndex = 0,
+  ]);
 }

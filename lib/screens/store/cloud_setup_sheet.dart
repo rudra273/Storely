@@ -408,9 +408,7 @@ class _BackendModeSelector extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected
-                ? AppColors.surfaceOf(context)
-                : Colors.transparent,
+            color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
             borderRadius: BorderRadius.circular(11),
             border: selected
                 ? Border.all(color: AppColors.borderStrongOf(context))
@@ -502,7 +500,11 @@ class _RegisterShopPrompt extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.amber),
+          const Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: AppColors.amber,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -612,9 +614,7 @@ class _EnableCloudSection extends StatelessWidget {
             child: TextButton.icon(
               onPressed: busy ? null : onToggleAdvanced,
               icon: Icon(
-                showAdvanced
-                    ? Icons.expand_less_rounded
-                    : Icons.tune_rounded,
+                showAdvanced ? Icons.expand_less_rounded : Icons.tune_rounded,
                 size: 18,
               ),
               style: TextButton.styleFrom(

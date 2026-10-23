@@ -367,9 +367,8 @@ class _BillsScreenState extends State<BillsScreen> {
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                     ),
-                    onChanged: (val) => setState(
-                      () => _searchQuery = val.trim().toLowerCase(),
-                    ),
+                    onChanged: (val) =>
+                        setState(() => _searchQuery = val.trim().toLowerCase()),
                   ),
                   textField: true,
                 )
@@ -423,71 +422,71 @@ class _BillsScreenState extends State<BillsScreen> {
           ],
         ),
         body: RefreshIndicator(
-        color: AppColors.amber,
-        onRefresh: _loadBills,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            if (_isLoading)
-              const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_bills.isEmpty && _cancelledBills.isEmpty)
-              SliverFillRemaining(child: _buildEmpty())
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.lg,
-                  AppSpacing.lg,
-                  96,
-                ),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Always shown so the Cancelled tab stays reachable even
-                      // when there are no cancelled bills yet (count shows 0).
-                      _BillFilterTabs(
-                        showCancelled: _showCancelled,
-                        activeCount: _bills.length,
-                        cancelledCount: _cancelledBills.length,
-                        onChanged: (showCancelled) =>
-                            setState(() => _showCancelled = showCancelled),
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      if (_showCancelled) ...[
-                        ..._buildCancelledBillCards(),
-                      ] else ...[
-                        if (_searchQuery.isEmpty) ...[
-                          _UnpaidSummary(bills: _bills),
+          color: AppColors.amber,
+          onRefresh: _loadBills,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              if (_isLoading)
+                const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_bills.isEmpty && _cancelledBills.isEmpty)
+                SliverFillRemaining(child: _buildEmpty())
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                    96,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Always shown so the Cancelled tab stays reachable even
+                        // when there are no cancelled bills yet (count shows 0).
+                        _BillFilterTabs(
+                          showCancelled: _showCancelled,
+                          activeCount: _bills.length,
+                          cancelledCount: _cancelledBills.length,
+                          onChanged: (showCancelled) =>
+                              setState(() => _showCancelled = showCancelled),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        if (_showCancelled) ...[
+                          ..._buildCancelledBillCards(),
+                        ] else ...[
+                          if (_searchQuery.isEmpty) ...[
+                            _UnpaidSummary(bills: _bills),
+                          ],
+                          ..._buildGroupedBillCards(),
                         ],
-                        ..._buildGroupedBillCards(),
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-      // Hidden only when there are no bills of any kind (the full-page empty
-      // state has its own Create button). When only cancelled bills remain, the
-      // FAB must stay so a new bill is still reachable.
-      floatingActionButton:
-          !widget.isActiveMainTab ||
-              _isLoading ||
-              (_bills.isEmpty && _cancelledBills.isEmpty)
-          ? null
-          : TestKeys.tag(
-              TestKeys.createBillBtn,
-              FloatingActionButton.extended(
-                onPressed: () => _openBillCreator(BillingEntryMode.manual),
-                icon: const Icon(Icons.receipt_long_rounded),
-                label: const Text('New Bill'),
+        // Hidden only when there are no bills of any kind (the full-page empty
+        // state has its own Create button). When only cancelled bills remain, the
+        // FAB must stay so a new bill is still reachable.
+        floatingActionButton:
+            !widget.isActiveMainTab ||
+                _isLoading ||
+                (_bills.isEmpty && _cancelledBills.isEmpty)
+            ? null
+            : TestKeys.tag(
+                TestKeys.createBillBtn,
+                FloatingActionButton.extended(
+                  onPressed: () => _openBillCreator(BillingEntryMode.manual),
+                  icon: const Icon(Icons.receipt_long_rounded),
+                  label: const Text('New Bill'),
+                ),
+                button: true,
               ),
-              button: true,
-            ),
       ),
     );
   }

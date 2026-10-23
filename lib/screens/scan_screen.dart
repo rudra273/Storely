@@ -571,7 +571,6 @@ class _ScanScreenState extends State<ScanScreen> {
     return digits.padLeft(2, '0').substring(0, 2);
   }
 
-
   Widget _buildModeSelector() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

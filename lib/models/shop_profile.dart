@@ -67,10 +67,7 @@ class ShopProfile {
   /// Has a GSTIN (regular or composition).
   bool get hasGstRegistration => gstScheme != GstScheme.unregistered;
 
-  factory ShopProfile.fromMap(
-    Map<String, dynamic> map, {
-    String? gstScheme,
-  }) {
+  factory ShopProfile.fromMap(Map<String, dynamic> map, {String? gstScheme}) {
     return ShopProfile(
       id: map['id'] as int?,
       uuid: map['uuid'] as String? ?? '',
