@@ -8,6 +8,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   local_auth_windows
   print_bluetooth_thermal
   printing
+  share_plus
   url_launcher_windows
 )
 

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -9,6 +11,7 @@ import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
+import '../services/product_export.dart';
 import 'qr_sheet_screen.dart';
 import '../utils/money.dart';
 
@@ -544,31 +547,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
     }
 
     try {
-      final products = file.bytes != null
-          ? await CsvImporter.parseBytes(
-              file.bytes!,
-              fileName: file.name,
-              extension: file.extension,
-            )
-          : file.path != null
-          ? await CsvImporter.parseFile(
-              file.path!,
-              fileName: file.name,
-              extension: file.extension,
-            )
-          : throw Exception('Could not read the selected file');
+      final bytes =
+          file.bytes ??
+          (file.path != null
+              ? await File(file.path!).readAsBytes()
+              : throw Exception('Could not read the selected file'));
+      final parsed = await CsvImporter.parseBytesDetailed(
+        bytes,
+        fileName: file.name,
+        extension: file.extension,
+      );
 
       if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
+      if (!ctx.mounted) return null;
 
-      if (products.isEmpty) {
-        if (ctx.mounted) {
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            const SnackBar(content: Text('No products found in file')),
-          );
-        }
+      if (parsed.products.isEmpty && parsed.errors.isEmpty) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('No products found in file')),
+        );
         return null;
       }
-      return products;
+      if (parsed.errors.isNotEmpty) {
+        final proceed = await showDialog<bool>(
+          context: ctx,
+          builder: (_) => _ImportErrorsDialog(result: parsed),
+        );
+        if (proceed != true) return null;
+      }
+      return parsed.products;
     } catch (e) {
       if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
       _showImportError(e);
@@ -593,6 +599,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _exportProducts(ExportFormat format) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final shop = await DatabaseHelper.instance.getShopProfile();
+      await ProductExport.share(
+        _allProducts,
+        format: format,
+        shopName: shop?.name ?? 'Storely',
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not export: $error')),
+      );
+    }
   }
 
   void _openQrSheet() {
@@ -2376,6 +2398,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 icon: const Icon(Icons.qr_code_2),
                 tooltip: 'Product labels',
               ),
+              if (_allProducts.isNotEmpty)
+                PopupMenuButton<ExportFormat>(
+                  tooltip: 'Export products',
+                  icon: const Icon(Icons.file_download_outlined),
+                  onSelected: _exportProducts,
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: ExportFormat.xlsx,
+                      child: Text('Export to Excel'),
+                    ),
+                    PopupMenuItem(
+                      value: ExportFormat.csv,
+                      child: Text('Export to CSV'),
+                    ),
+                  ],
+                ),
               const AppInfoAction(
                 title: 'Products Help',
                 intro:

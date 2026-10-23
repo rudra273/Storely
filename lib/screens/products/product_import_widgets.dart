@@ -67,3 +67,67 @@ class _ProductSuggestionList extends StatelessWidget {
     );
   }
 }
+
+/// Lists rows that can't be imported; lets the user import the rest.
+/// Pops `true` to import the valid rows.
+class _ImportErrorsDialog extends StatelessWidget {
+  final ImportParseResult result;
+
+  const _ImportErrorsDialog({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = result.products.length;
+    final bad = result.errors.length;
+    return AlertDialog(
+      icon: const Icon(Icons.rule_rounded, size: 32),
+      title: Text(
+        ok == 0 ? 'No rows can be imported' : '$ok ready · $bad skipped',
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              ok == 0
+                  ? 'Fix these rows in the file and import it again.'
+                  : 'These rows have problems and will be left out. '
+                        'Fix them in the file to import them later.',
+              style: AppText.caption,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: bad,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final error = result.errors[i];
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Text('Row ${error.row}', style: AppText.label),
+                    title: Text(error.message),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        if (ok > 0)
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Import $ok row${ok == 1 ? '' : 's'}'),
+          ),
+      ],
+    );
+  }
+}
