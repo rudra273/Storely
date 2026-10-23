@@ -123,6 +123,30 @@ void main() {
     });
   });
 
+  test(
+    'use cloud copy drops a rejected edit and restores the cloud row',
+    () async {
+      await setUpShop();
+      await on('a', () async {
+        final rice = await productNamed('Rice');
+        await db.updateProduct(rice.copyWith(name: 'Rice (bad edit)'));
+        server.rejectKeys.add(rice.uuid);
+        final result = await sync();
+        final conflict = result.conflicts.single;
+        expect(conflict.key, rice.uuid);
+        await db.saveSyncConflicts(result.conflicts);
+
+        await CloudSyncEngine.useCloudCopy(db, conflict);
+        server.rejectKeys.clear();
+        final after = await sync();
+        expect(after.conflicts, isEmpty);
+        expect(await db.getSyncConflicts(), isEmpty);
+        expect(await db.cloudDirtyRows('products'), isEmpty);
+        expect((await db.getAllProducts()).single.name, 'Rice');
+      });
+    },
+  );
+
   test('expenses sync to other phones, deletions too', () async {
     await setUpShop();
     await on('a', () async {
