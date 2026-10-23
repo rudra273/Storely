@@ -9,6 +9,7 @@ import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
 import '../services/bill_share.dart';
 import 'scan_screen.dart';
+import 'shared/record_payment_dialog.dart';
 import 'store/bill_settings_screen.dart';
 import '../utils/money.dart';
 
@@ -130,9 +131,9 @@ class _BillsScreenState extends State<BillsScreen> {
 
   Future<void> _recordPayment(Bill bill) async {
     if (bill.id == null || bill.balanceDue <= 0) return;
-    final entry = await showDialog<_PaymentEntry>(
+    final entry = await showDialog<PaymentEntry>(
       context: context,
-      builder: (_) => _RecordPaymentDialog(balanceDue: bill.balanceDue),
+      builder: (_) => RecordPaymentDialog(balanceDue: bill.balanceDue),
     );
     if (entry == null) return;
     try {

@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -13,6 +11,7 @@ import '../models/bill_totals.dart';
 import '../models/gst_states.dart';
 import '../models/shop_profile.dart';
 import 'money.dart';
+import 'pdf_theme.dart';
 import 'upi.dart';
 
 class BillPdfGenerator {
@@ -22,27 +21,10 @@ class BillPdfGenerator {
     BillSettings? settings,
   }) async {
     final billSettings = settings ?? BillSettings();
-    WidgetsFlutterBinding.ensureInitialized();
-    final fontData = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
-    final boldFontData = await rootBundle.load(
-      'assets/fonts/NotoSans-Bold.ttf',
-    );
-    // Hindi/Marathi item and shop names render through the Devanagari
-    // fallback (Noto Sans has Latin and ₹ only).
-    final devanagari = await rootBundle.load(
-      'assets/fonts/NotoSansDevanagari-Regular.ttf',
-    );
-    final devanagariBold = await rootBundle.load(
-      'assets/fonts/NotoSansDevanagari-Bold.ttf',
-    );
     final pdf = pw.Document(
       title: _billTitle(bill),
       author: shop?.name ?? 'Storely',
-      theme: pw.ThemeData.withFont(
-        base: pw.Font.ttf(fontData),
-        bold: pw.Font.ttf(boldFontData),
-        fontFallback: [pw.Font.ttf(devanagari), pw.Font.ttf(devanagariBold)],
-      ),
+      theme: await storelyPdfTheme(),
     );
     // GST visibility is driven by the bill's own data, not the shop's current
     // GST-registration flag. A bill that actually carries GST amounts should

@@ -536,28 +536,100 @@ mixin DatabaseBills {
       if (amount > balance + 0.005) {
         throw ArgumentError('Payment cannot exceed balance due');
       }
-      final now = _nowIso();
-      await txn.insert('bill_payments', {
-        'uuid': _newUuid(),
-        'shop_id':
-            rows.single['shop_id'] as String? ?? await _activeShopId(txn),
-        'bill_uuid': rows.single['uuid'] as String,
-        'amount': amount,
-        'payment_method': paymentMethod,
-        'payment_reference': _normaliseName(paymentReference),
-        'notes': _normaliseName(notes),
-        'received_at': _localIso(receivedAt),
-        'created_at': now,
-        'updated_at': now,
-      });
-      await _updateBillPaymentSummary(
+      await _insertPayment(
         txn,
-        billId,
-        rows.single['uuid'] as String,
+        billId: billId,
+        bill: rows.single,
+        amount: amount,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+        notes: notes,
+        receivedAt: receivedAt,
       );
       notifyDatabaseChanged();
       return 1;
     });
+  }
+
+  /// One payment from a customer settled against their unpaid bills, oldest
+  /// first, in a single transaction. Returns how many bills it touched.
+  /// Throws if [amount] is more than they owe on [billIds].
+  Future<int> recordCustomerPayment({
+    required List<int> billIds,
+    required double amount,
+    String paymentMethod = 'cash',
+    String? paymentReference,
+    DateTime? receivedAt,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Payment amount must be positive');
+    if (billIds.isEmpty) return 0;
+    final db = await database;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'bills',
+        columns: ['id', 'uuid', 'shop_id', 'balance_due'],
+        where:
+            'deleted_at IS NULL AND balance_due > 0.005 '
+            'AND id IN (${List.filled(billIds.length, '?').join(',')})',
+        whereArgs: billIds,
+        orderBy: 'created_at ASC, id ASC',
+      );
+      final totalDue = rows.fold<double>(
+        0,
+        (sum, row) => sum + (row['balance_due'] as num).toDouble(),
+      );
+      if (amount > totalDue + 0.005) {
+        throw ArgumentError('Payment cannot exceed the amount due');
+      }
+      var remaining = amount;
+      var touched = 0;
+      for (final row in rows) {
+        if (remaining <= 0.005) break;
+        final balance = (row['balance_due'] as num).toDouble();
+        final part = roundMoney(remaining < balance ? remaining : balance);
+        await _insertPayment(
+          txn,
+          billId: row['id'] as int,
+          bill: row,
+          amount: part,
+          paymentMethod: paymentMethod,
+          paymentReference: paymentReference,
+          notes: 'Customer payment',
+          receivedAt: receivedAt,
+        );
+        remaining = roundMoney(remaining - part);
+        touched++;
+      }
+      notifyDatabaseChanged();
+      return touched;
+    });
+  }
+
+  Future<void> _insertPayment(
+    DatabaseExecutor txn, {
+    required int billId,
+    required Map<String, Object?> bill,
+    required double amount,
+    required String paymentMethod,
+    String? paymentReference,
+    String? notes,
+    DateTime? receivedAt,
+  }) async {
+    final now = _nowIso();
+    final billUuid = bill['uuid'] as String;
+    await txn.insert('bill_payments', {
+      'uuid': _newUuid(),
+      'shop_id': bill['shop_id'] as String? ?? await _activeShopId(txn),
+      'bill_uuid': billUuid,
+      'amount': amount,
+      'payment_method': paymentMethod,
+      'payment_reference': _normaliseName(paymentReference),
+      'notes': _normaliseName(notes),
+      'received_at': _localIso(receivedAt),
+      'created_at': now,
+      'updated_at': now,
+    });
+    await _updateBillPaymentSummary(txn, billId, billUuid);
   }
 
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {

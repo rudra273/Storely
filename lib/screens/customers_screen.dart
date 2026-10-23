@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/customer.dart';
 import '../services/cloud_service.dart';
+import '../services/dues_reminder.dart';
+import '../utils/statement_pdf_generator.dart';
+import 'shared/record_payment_dialog.dart';
 import 'customer_profile_sheet.dart';
 import '../utils/money.dart';
 
@@ -141,7 +146,10 @@ class _CustomersScreenState extends State<CustomersScreen> {
         builder: (_) => _CustomerDetailScreen(
           customer: customer,
           bills: _billsFor(customer),
-          pendingAmount: _pendingAmount(customer),
+          reloadBills: () async {
+            await _load();
+            return _billsFor(customer);
+          },
           canManage: canManage,
           onEdit: canManage ? () => _editCustomer(customer) : null,
         ),
@@ -386,20 +394,132 @@ class _CustomerSummaryRow extends StatelessWidget {
 
 // ── Customer Detail (full page) ───────────────────────────────────────────────
 
-class _CustomerDetailScreen extends StatelessWidget {
+class _CustomerDetailScreen extends StatefulWidget {
   final Customer customer;
   final List<Bill> bills;
-  final double pendingAmount;
+  final Future<List<Bill>> Function() reloadBills;
   final bool canManage;
   final VoidCallback? onEdit;
 
   const _CustomerDetailScreen({
     required this.customer,
     required this.bills,
-    required this.pendingAmount,
+    required this.reloadBills,
     required this.canManage,
     this.onEdit,
   });
+
+  @override
+  State<_CustomerDetailScreen> createState() => _CustomerDetailScreenState();
+}
+
+class _CustomerDetailScreenState extends State<_CustomerDetailScreen> {
+  late List<Bill> bills = widget.bills;
+  bool _busy = false;
+
+  Customer get customer => widget.customer;
+  bool get canManage => widget.canManage;
+  VoidCallback? get onEdit => widget.onEdit;
+
+  List<Bill> get _unpaid =>
+      bills.where((b) => b.balanceDue > 0.005).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  double get pendingAmount =>
+      _unpaid.fold<double>(0, (sum, b) => sum + b.balanceDue);
+
+  Future<void> _recordPayment() async {
+    final unpaid = _unpaid;
+    if (unpaid.isEmpty) return;
+    final entry = await showDialog<PaymentEntry>(
+      context: context,
+      builder: (_) => RecordPaymentDialog(
+        balanceDue: pendingAmount,
+        title: 'Payment from ${customer.name}',
+      ),
+    );
+    if (entry == null) return;
+    await _run(() async {
+      final touched = await DatabaseHelper.instance.recordCustomerPayment(
+        billIds: [for (final b in unpaid) b.id!],
+        amount: entry.amount,
+        paymentMethod: entry.method,
+        paymentReference: entry.reference,
+      );
+      final updated = await widget.reloadBills();
+      if (!mounted) return;
+      setState(() => bills = updated);
+      _toast(
+        '${rupees(entry.amount)} received, settled against '
+        '$touched bill${touched == 1 ? '' : 's'} (oldest first)',
+      );
+    });
+  }
+
+  Future<void> _remind() async {
+    await _run(() async {
+      final db = DatabaseHelper.instance;
+      final shop = await db.getShopProfile();
+      final settings = await db.getBillSettings();
+      final text = DuesReminder.message(
+        customerName: customer.name,
+        shopName: shop?.name ?? 'our shop',
+        unpaidBills: _unpaid,
+        upiId: settings.upiId,
+      );
+      final link = DuesReminder.whatsAppLink(customer.phone, text);
+      if (link == null) {
+        _toast('Add a phone number to send a reminder');
+        return;
+      }
+      final opened = await launchUrl(
+        link,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) _toast('Unable to open WhatsApp');
+    });
+  }
+
+  Future<void> _shareStatement() async {
+    await _run(() async {
+      final db = DatabaseHelper.instance;
+      final bytes = await StatementPdfGenerator.generate(
+        customerName: customer.name,
+        customerPhone: customer.phone.isEmpty ? null : customer.phone,
+        bills: bills,
+        shop: await db.getShopProfile(),
+        settings: await db.getBillSettings(),
+      );
+      final safeName = customer.name.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '-');
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'Statement-$safeName.pdf',
+      );
+    });
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } catch (error) {
+      _toast(
+        error is ArgumentError
+            ? '${error.message}'
+            : 'Something went wrong. Please try again.',
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   List<(IconData, String)> get _detailLines {
     final lines = <(IconData, String)>[];
@@ -508,6 +628,31 @@ class _CustomerDetailScreen extends StatelessWidget {
                       : AppColors.success,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              if (pendingAmount > 0)
+                FilledButton.icon(
+                  onPressed: _busy ? null : _recordPayment,
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Text('Record payment'),
+                ),
+              if (pendingAmount > 0 && customer.phone.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _remind,
+                  icon: const Icon(Icons.chat_outlined),
+                  label: const Text('Remind'),
+                ),
+              if (bills.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _shareStatement,
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('Statement'),
+                ),
             ],
           ),
           const SizedBox(height: AppSpacing.lg),

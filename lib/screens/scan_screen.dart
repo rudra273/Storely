@@ -81,8 +81,19 @@ class _ScanScreenState extends State<ScanScreen> {
     _loadHeldCount();
   }
 
+  ScaffoldMessengerState? _messenger;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _messenger = ScaffoldMessenger.maybeOf(context);
+  }
+
   @override
   void dispose() {
+    // Billing snackbars (e.g. "Restored your unsaved bill") belong to this
+    // screen; the app-wide messenger would otherwise keep showing them.
+    _messenger?.removeCurrentSnackBar();
     _draftTimer?.cancel();
     if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
