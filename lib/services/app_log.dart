@@ -45,8 +45,9 @@ class AppLog {
   static void _add(String line) {
     final stamped = '${DateTime.now().toIso8601String()} $line';
     _lines.add(stamped);
-    if (_lines.length > maxLines)
+    if (_lines.length > maxLines) {
       _lines.removeRange(0, _lines.length - maxLines);
+    }
     try {
       _file?.writeAsStringSync('${_lines.join('\n')}\n');
     } catch (_) {}
