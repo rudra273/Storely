@@ -22,21 +22,12 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
   Future<void> _setAppLock(bool value) async {
     if (value == _appLockEnabled || _checkingAppLock) return;
 
-    if (!value) {
-      setState(() {
-        _appLockEnabled = false;
-        _appLockMessage = null;
-      });
-      await AppSettingsService.instance.setAppLockEnabled(false);
-      return;
-    }
-
     setState(() {
       _checkingAppLock = true;
       _appLockMessage = null;
     });
 
-    final supported = await AppLockService.instance.isSupported();
+    final supported = !value || await AppLockService.instance.isSupported();
     if (!mounted) return;
     if (!supported) {
       setState(() {
@@ -47,8 +38,12 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
       return;
     }
 
+    // Turning the lock off needs the same proof as turning it on, so
+    // whoever picks up an unlocked phone cannot simply switch it off.
     final result = await AppLockService.instance.authenticate(
-      reason: 'Confirm your device lock to enable Storely App Lock',
+      reason: value
+          ? 'Confirm your device lock to enable Storely App Lock'
+          : 'Confirm your device lock to turn off Storely App Lock',
     );
     if (!mounted) return;
 
@@ -61,11 +56,11 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
     }
 
     setState(() {
-      _appLockEnabled = true;
+      _appLockEnabled = value;
       _checkingAppLock = false;
       _appLockMessage = null;
     });
-    await AppSettingsService.instance.setAppLockEnabled(true);
+    await AppSettingsService.instance.setAppLockEnabled(value);
   }
 
   @override

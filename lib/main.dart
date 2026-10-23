@@ -32,6 +32,8 @@ Future<void> main() async {
   runApp(const StorelyApp());
 }
 
+final _navigatorKey = GlobalKey<NavigatorState>();
+
 class StorelyApp extends StatelessWidget {
   const StorelyApp({super.key});
 
@@ -45,6 +47,12 @@ class StorelyApp extends StatelessWidget {
         theme: StorelyTheme.light(),
         darkTheme: StorelyTheme.dark(),
         themeMode: AppSettingsService.instance.themeMode,
+        navigatorKey: _navigatorKey,
+        // App Lock sits above the Navigator so it covers every screen.
+        builder: (context, child) => AppLockGate(
+          navigatorKey: _navigatorKey,
+          child: child ?? const SizedBox.shrink(),
+        ),
         home: const AppGate(),
       ),
     );
@@ -113,7 +121,7 @@ class _AppGateState extends State<AppGate> {
     }
     return _isFirstLaunch
         ? WelcomeScreen(onComplete: _completeWelcome)
-        : const AppLockGate(child: AppShell());
+        : const AppShell();
   }
 }
 
