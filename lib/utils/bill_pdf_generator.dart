@@ -9,8 +9,11 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/bill.dart';
 import '../models/bill_settings.dart';
+import '../models/bill_totals.dart';
+import '../models/gst_states.dart';
 import '../models/shop_profile.dart';
 import 'money.dart';
+import 'upi.dart';
 
 class BillPdfGenerator {
   static Future<Uint8List> generate({
@@ -24,12 +27,21 @@ class BillPdfGenerator {
     final boldFontData = await rootBundle.load(
       'assets/fonts/NotoSans-Bold.ttf',
     );
+    // Hindi/Marathi item and shop names render through the Devanagari
+    // fallback (Noto Sans has Latin and ₹ only).
+    final devanagari = await rootBundle.load(
+      'assets/fonts/NotoSansDevanagari-Regular.ttf',
+    );
+    final devanagariBold = await rootBundle.load(
+      'assets/fonts/NotoSansDevanagari-Bold.ttf',
+    );
     final pdf = pw.Document(
       title: _billTitle(bill),
       author: shop?.name ?? 'Storely',
       theme: pw.ThemeData.withFont(
         base: pw.Font.ttf(fontData),
         bold: pw.Font.ttf(boldFontData),
+        fontFallback: [pw.Font.ttf(devanagari), pw.Font.ttf(devanagariBold)],
       ),
     );
     // GST visibility is driven by the bill's own data, not the shop's current
@@ -38,21 +50,49 @@ class BillPdfGenerator {
     // shared PDF matches the live preview in Bill Settings.
     final billHasGst = _billHasGst(bill);
 
+    final isA5 = billSettings.paperSize == BillSettings.paperA5;
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(28),
+        pageFormat: isA5 ? PdfPageFormat.a5 : PdfPageFormat.a4,
+        margin: pw.EdgeInsets.all(isA5 ? 18 : 28),
         build: (context) => [
           _header(bill, shop, billSettings, billHasGst: billHasGst),
           if (_showHeader(billSettings)) pw.SizedBox(height: 10),
           _partyBlock(bill, shop, billSettings),
           pw.SizedBox(height: 10),
-          _invoiceMeta(bill, shop, billSettings),
+          _invoiceMeta(bill, shop, billSettings, compact: isA5),
           pw.SizedBox(height: 16),
-          _itemsTable(bill, gstRegistered: billHasGst, settings: billSettings),
+          _itemsTable(
+            bill,
+            gstRegistered: billHasGst,
+            settings: billSettings,
+            compact: isA5,
+          ),
           pw.SizedBox(height: 14),
           _totals(bill, gstRegistered: billHasGst, settings: billSettings),
-          pw.SizedBox(height: 20),
+          if (billSettings.showAmountInWords) ...[
+            pw.SizedBox(height: 6),
+            pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text(
+                amountInWords(bill.totalAmount),
+                textAlign: pw.TextAlign.right,
+                style: const pw.TextStyle(
+                  fontSize: 8.5,
+                  color: PdfColors.grey800,
+                ),
+              ),
+            ),
+          ],
+          if (billHasGst &&
+              billSettings.showGstBreakdown &&
+              billSettings.showHsnSummary) ...[
+            pw.SizedBox(height: 12),
+            _hsnSummary(bill, compact: isA5),
+          ],
+          pw.SizedBox(height: 14),
+          _paymentBlock(bill, shop, billSettings),
+          pw.SizedBox(height: 14),
           _footer(billSettings),
         ],
       ),
@@ -176,27 +216,34 @@ class BillPdfGenerator {
   static pw.Widget _invoiceMeta(
     Bill bill,
     ShopProfile? shop,
-    BillSettings settings,
-  ) {
-    final supplyState = _cleanStateCode(
-      bill.placeOfSupplyStateCode ?? bill.customerGstin,
-    );
-    final shopState = _cleanStateCode(shop?.gstin);
+    BillSettings settings, {
+    bool compact = false,
+  }) {
+    final shopState = gstStateCode(shop?.gstin);
+    // A counter (B2C) sale is supplied in the shop's own state.
+    final supplyState =
+        _cleanStateCode(bill.placeOfSupplyStateCode ?? bill.customerGstin) ??
+        shopState;
     final supplyType = shopState == null || supplyState == null
         ? null
         : shopState == supplyState
-        ? 'Intrastate'
-        : 'Interstate';
+        ? 'Intra-state'
+        : 'Inter-state';
 
     final cells = [
       if (settings.showInvoiceNumber) _metaCell('Invoice No', _billTitle(bill)),
       if (settings.showInvoiceDate)
         _metaCell(
           'Date',
-          DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt),
+          DateFormat(
+            compact ? 'dd MMM yy, hh:mm a' : 'dd MMM yyyy, hh:mm a',
+          ).format(bill.createdAt),
         ),
       if (settings.showInvoicePlaceOfSupply)
-        _metaCell('Place of Supply', supplyState ?? '-'),
+        _metaCell(
+          'Place of Supply',
+          supplyState == null ? '-' : gstStateLabel(supplyState),
+        ),
       if (settings.showInvoiceSupplyType)
         _metaCell('Supply Type', supplyType ?? '-'),
     ];
@@ -236,6 +283,7 @@ class BillPdfGenerator {
     Bill bill, {
     required bool gstRegistered,
     required BillSettings settings,
+    bool compact = false,
   }) {
     final showGst = gstRegistered && settings.showGstBreakdown;
     final showHsn =
@@ -253,7 +301,7 @@ class BillPdfGenerator {
       if (settings.showItemNameColumn)
         _BillTableColumn(
           label: 'Item',
-          width: const pw.FlexColumnWidth(2.6),
+          width: pw.FlexColumnWidth(compact ? 2.0 : 2.6),
           alignment: pw.Alignment.centerLeft,
           value: (_, item) => item.productName,
         ),
@@ -295,7 +343,7 @@ class BillPdfGenerator {
       if (settings.showAmountColumn)
         _BillTableColumn(
           label: 'Amount',
-          width: const pw.FlexColumnWidth(0.95),
+          width: pw.FlexColumnWidth(compact ? 1.2 : 0.95),
           alignment: pw.Alignment.centerRight,
           value: (_, item) => _money(_lineAmount(item, showGst: showGst)),
         ),
@@ -313,8 +361,11 @@ class BillPdfGenerator {
       data: data,
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
       headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
-      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
-      cellStyle: const pw.TextStyle(fontSize: 8.5),
+      headerStyle: pw.TextStyle(
+        fontWeight: pw.FontWeight.bold,
+        fontSize: compact ? 7 : 9,
+      ),
+      cellStyle: pw.TextStyle(fontSize: compact ? 7 : 8.5),
       cellAlignment: pw.Alignment.centerLeft,
       headerAlignment: pw.Alignment.centerLeft,
       cellAlignments: {
@@ -325,7 +376,9 @@ class BillPdfGenerator {
         for (final entry in columns.asMap().entries)
           entry.key: entry.value.width,
       },
-      cellPadding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+      cellPadding: compact
+          ? const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 4)
+          : const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
     );
   }
 
@@ -396,12 +449,24 @@ class BillPdfGenerator {
     final footerText = settings.showFooterText
         ? settings.footerText.trim()
         : '';
-    if (footerText.isEmpty && signature == null) return pw.SizedBox();
+    final terms = settings.termsText.trim();
+    if (footerText.isEmpty && signature == null && terms.isEmpty) {
+      return pw.SizedBox();
+    }
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Divider(color: PdfColors.grey400),
+        if (terms.isNotEmpty) ...[
+          pw.SizedBox(height: 6),
+          pw.Text(
+            'Terms & Conditions',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(terms, style: const pw.TextStyle(fontSize: 8)),
+        ],
         if (footerText.isNotEmpty) ...[
           pw.SizedBox(height: 8),
           pw.Text(
@@ -431,6 +496,167 @@ class BillPdfGenerator {
           ),
         ],
       ],
+    );
+  }
+
+  /// HSN-wise tax summary (what GSTR-1 table 12 needs), one row per HSN and
+  /// tax rate.
+  static pw.Widget _hsnSummary(Bill bill, {bool compact = false}) {
+    final groups = <String, _HsnRow>{};
+    for (final item in bill.items) {
+      final hsn = item.hsnCodeSnapshot ?? '-';
+      final rate = item.gstPercentSnapshot ?? 0;
+      final row = groups.putIfAbsent(
+        '$hsn|$rate',
+        () => _HsnRow(hsn: hsn, rate: rate),
+      );
+      row.taxable += item.totalTaxableValue;
+      if (item.totalIgst > 0) {
+        row.igst += item.totalIgst;
+      } else {
+        row.intraGst += item.totalGst;
+      }
+    }
+    final rows = groups.values.toList()..sort((a, b) => a.hsn.compareTo(b.hsn));
+    final hasIgst = rows.any((r) => r.igst > 0);
+    final headers = [
+      'HSN/SAC',
+      'Taxable',
+      'Rate',
+      if (hasIgst) 'IGST' else ...['CGST', 'SGST'],
+      'Total Tax',
+    ];
+    final data = [
+      for (final r in rows)
+        [
+          r.hsn,
+          _money(r.taxable),
+          _taxLabel(r.rate),
+          if (hasIgst) _money(r.igst) else ...[_money(r.cgst), _money(r.sgst)],
+          _money(r.cgst + r.sgst + r.igst),
+        ],
+    ];
+    // A Container (not a spanning Column) moves the heading and table to the
+    // next page together instead of leaving the heading behind.
+    return pw.Container(
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'HSN/SAC Summary',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+          ),
+          pw.SizedBox(height: 4),
+          pw.TableHelper.fromTextArray(
+            headers: headers,
+            data: data,
+            border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              fontSize: compact ? 7 : 8,
+            ),
+            cellStyle: pw.TextStyle(fontSize: compact ? 7 : 8),
+            cellAlignment: pw.Alignment.centerRight,
+            cellAlignments: {0: pw.Alignment.centerLeft},
+            cellPadding: const pw.EdgeInsets.symmetric(
+              horizontal: 4,
+              vertical: 3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Paid / balance due, bank details and a UPI QR for the balance due.
+  static pw.Widget _paymentBlock(
+    Bill bill,
+    ShopProfile? shop,
+    BillSettings settings,
+  ) {
+    final balance = bill.balanceDue;
+    final upiId = settings.upiId.trim();
+    final showQr =
+        settings.showUpiQr && balance > 0.005 && Upi.isValidId(upiId);
+    final bank = settings.bankDetails.trim();
+    final lines = <pw.Widget>[
+      if (settings.showPaymentDetails) ...[
+        _kv(
+          'Paid',
+          bill.paidAmount > 0.005
+              ? '${_money(bill.paidAmount)} (${_paymentMode(bill)})'
+              : _money(0),
+        ),
+        _kv('Balance due', _money(balance), bold: balance > 0.005),
+      ],
+      if (bank.isNotEmpty) ...[
+        pw.SizedBox(height: 6),
+        pw.Text(
+          'Bank details',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5),
+        ),
+        pw.Text(bank, style: const pw.TextStyle(fontSize: 8)),
+      ],
+    ];
+    if (lines.isEmpty && !showQr) return pw.SizedBox();
+
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: lines,
+          ),
+        ),
+        if (showQr)
+          pw.Column(
+            children: [
+              pw.BarcodeWidget(
+                barcode: pw.Barcode.qrCode(),
+                data: Upi.paymentLink(
+                  upiId: upiId,
+                  payeeName: shop?.name ?? '',
+                  amount: balance,
+                  note: 'Bill ${_billTitle(bill)}',
+                  reference: bill.billNumber,
+                ),
+                width: 84,
+                height: 84,
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(
+                'Scan to pay ${_money(balance)}',
+                style: pw.TextStyle(
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.Text(upiId, style: const pw.TextStyle(fontSize: 7)),
+            ],
+          ),
+      ],
+    );
+  }
+
+  static String _paymentMode(Bill bill) =>
+      bill.paymentMethod == 'online' ? 'UPI/Online' : 'Cash';
+
+  static pw.Widget _kv(String label, String value, {bool bold = false}) {
+    final style = pw.TextStyle(
+      fontSize: 9,
+      fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+    );
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      child: pw.Row(
+        mainAxisSize: pw.MainAxisSize.min,
+        children: [
+          pw.SizedBox(width: 70, child: pw.Text(label, style: style)),
+          pw.Text(value, style: style),
+        ],
+      ),
     );
   }
 
@@ -527,7 +753,7 @@ class BillPdfGenerator {
       if (phone != null && settings.showCustomerPhone) 'Phone: $phone',
       if (address != null && settings.showCustomerAddress) 'Address: $address',
       if (settings.showCustomerPlaceOfSupply && isB2b && supplyState != null)
-        'Place of Supply: $supplyState',
+        'Place of Supply: ${gstStateLabel(supplyState)}',
     ];
   }
 
@@ -603,4 +829,18 @@ class _BillTableColumn {
     required this.alignment,
     required this.value,
   });
+}
+
+class _HsnRow {
+  final String hsn;
+  final double rate;
+  double taxable = 0;
+  double intraGst = 0;
+  double igst = 0;
+
+  _HsnRow({required this.hsn, required this.rate});
+
+  // Split once per row (not per line) so CGST and SGST stay equal.
+  double get cgst => roundMoney(intraGst / 2);
+  double get sgst => roundMoney(intraGst - cgst);
 }

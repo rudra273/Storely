@@ -284,6 +284,13 @@ mixin DatabaseSchema {
         show_grand_total INTEGER NOT NULL DEFAULT 1,
         show_footer_text INTEGER NOT NULL DEFAULT 1,
         round_off_total INTEGER NOT NULL DEFAULT 1,
+        paper_size TEXT NOT NULL DEFAULT 'a4',
+        upi_id TEXT,
+        show_upi_qr INTEGER NOT NULL DEFAULT 1,
+        show_amount_in_words INTEGER NOT NULL DEFAULT 1,
+        show_hsn_summary INTEGER NOT NULL DEFAULT 1,
+        terms_text TEXT,
+        bank_details TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT
@@ -854,6 +861,13 @@ mixin DatabaseSchema {
       'show_grand_total': 'INTEGER NOT NULL DEFAULT 1',
       'show_footer_text': 'INTEGER NOT NULL DEFAULT 1',
       'round_off_total': 'INTEGER NOT NULL DEFAULT 1',
+      'paper_size': "TEXT NOT NULL DEFAULT 'a4'",
+      'upi_id': "TEXT",
+      'show_upi_qr': "INTEGER NOT NULL DEFAULT 1",
+      'show_amount_in_words': "INTEGER NOT NULL DEFAULT 1",
+      'show_hsn_summary': "INTEGER NOT NULL DEFAULT 1",
+      'terms_text': "TEXT",
+      'bank_details': "TEXT",
     });
   }
 

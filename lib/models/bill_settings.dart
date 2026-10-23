@@ -51,6 +51,25 @@ class BillSettings {
 
   /// Round the grand total to the nearest rupee with a 'Round off' line.
   final bool roundOffTotal;
+
+  /// PDF page size: [paperA4] or [paperA5].
+  final String paperSize;
+
+  /// Shop UPI id (name@bank). When set, unpaid invoices carry a UPI QR for
+  /// the balance due.
+  final String upiId;
+  final bool showUpiQr;
+  final bool showAmountInWords;
+  final bool showHsnSummary;
+
+  /// Free text printed at the bottom (returns policy, jurisdiction...).
+  final String termsText;
+
+  /// Free text bank block (account name, number, IFSC, bank) for B2B.
+  final String bankDetails;
+
+  static const paperA4 = 'a4';
+  static const paperA5 = 'a5';
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -100,6 +119,13 @@ class BillSettings {
     this.showGrandTotal = true,
     this.showFooterText = true,
     this.roundOffTotal = true,
+    this.paperSize = paperA4,
+    this.upiId = '',
+    this.showUpiQr = true,
+    this.showAmountInWords = true,
+    this.showHsnSummary = true,
+    this.termsText = '',
+    this.bankDetails = '',
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
@@ -190,6 +216,13 @@ class BillSettings {
       showGrandTotal: _flag(map['show_grand_total'], fallback: true),
       showFooterText: _flag(map['show_footer_text'], fallback: true),
       roundOffTotal: _flag(map['round_off_total'], fallback: true),
+      paperSize: map['paper_size'] == paperA5 ? paperA5 : paperA4,
+      upiId: map['upi_id']?.toString().trim() ?? '',
+      showUpiQr: _flag(map['show_upi_qr'], fallback: true),
+      showAmountInWords: _flag(map['show_amount_in_words'], fallback: true),
+      showHsnSummary: _flag(map['show_hsn_summary'], fallback: true),
+      termsText: map['terms_text']?.toString().trim() ?? '',
+      bankDetails: map['bank_details']?.toString().trim() ?? '',
       createdAt: _date(map['created_at']),
       updatedAt: _date(map['updated_at']),
       deletedAt: map['deleted_at'] == null
@@ -245,6 +278,13 @@ class BillSettings {
     'show_grand_total': showGrandTotal ? 1 : 0,
     'show_footer_text': showFooterText ? 1 : 0,
     'round_off_total': roundOffTotal ? 1 : 0,
+    'paper_size': paperSize,
+    'upi_id': upiId.trim(),
+    'show_upi_qr': showUpiQr ? 1 : 0,
+    'show_amount_in_words': showAmountInWords ? 1 : 0,
+    'show_hsn_summary': showHsnSummary ? 1 : 0,
+    'terms_text': termsText.trim(),
+    'bank_details': bankDetails.trim(),
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
     'deleted_at': deletedAt?.toIso8601String(),
@@ -297,6 +337,13 @@ class BillSettings {
     bool? showGrandTotal,
     bool? showFooterText,
     bool? roundOffTotal,
+    String? paperSize,
+    String? upiId,
+    bool? showUpiQr,
+    bool? showAmountInWords,
+    bool? showHsnSummary,
+    String? termsText,
+    String? bankDetails,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? deletedAt,
@@ -355,6 +402,13 @@ class BillSettings {
       showGrandTotal: showGrandTotal ?? this.showGrandTotal,
       showFooterText: showFooterText ?? this.showFooterText,
       roundOffTotal: roundOffTotal ?? this.roundOffTotal,
+      paperSize: paperSize ?? this.paperSize,
+      upiId: upiId ?? this.upiId,
+      showUpiQr: showUpiQr ?? this.showUpiQr,
+      showAmountInWords: showAmountInWords ?? this.showAmountInWords,
+      showHsnSummary: showHsnSummary ?? this.showHsnSummary,
+      termsText: termsText ?? this.termsText,
+      bankDetails: bankDetails ?? this.bankDetails,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,

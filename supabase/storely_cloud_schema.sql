@@ -109,6 +109,13 @@ create table if not exists public.bill_settings (
   show_grand_total integer not null default 1,
   show_footer_text integer not null default 1,
   round_off_total integer not null default 1,
+  paper_size text not null default 'a4',
+  upi_id text,
+  show_upi_qr integer not null default 1,
+  show_amount_in_words integer not null default 1,
+  show_hsn_summary integer not null default 1,
+  terms_text text,
+  bank_details text,
   created_at text not null,
   updated_at text not null,
   deleted_at text

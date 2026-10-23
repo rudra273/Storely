@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/bill_settings.dart';
 import '../../models/invoice_numbering.dart';
+import '../../utils/upi.dart';
 import '../../theme/app_theme.dart';
 
 /// Full-page editor for invoice/bill appearance: numbering series, visible
@@ -27,6 +28,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   final TextEditingController _patternCtrl = TextEditingController();
   final TextEditingController _paddingCtrl = TextEditingController();
   final TextEditingController _seriesNameCtrl = TextEditingController();
+  final TextEditingController _upiCtrl = TextEditingController();
+  final TextEditingController _termsCtrl = TextEditingController();
+  final TextEditingController _bankCtrl = TextEditingController();
   BillSettings _settings = BillSettings();
   InvoiceSeriesSettings _series = const InvoiceSeriesSettings();
   bool _isLoading = true;
@@ -42,6 +46,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   void dispose() {
     _titleCtrl.dispose();
     _footerCtrl.dispose();
+    _upiCtrl.dispose();
+    _termsCtrl.dispose();
+    _bankCtrl.dispose();
     _patternCtrl.dispose();
     _paddingCtrl.dispose();
     _seriesNameCtrl.dispose();
@@ -58,6 +65,9 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       _series = series;
       _titleCtrl.text = settings.invoiceTitle;
       _footerCtrl.text = settings.footerText;
+      _upiCtrl.text = settings.upiId;
+      _termsCtrl.text = settings.termsText;
+      _bankCtrl.text = settings.bankDetails;
       _patternCtrl.text = series.formatTemplate;
       _paddingCtrl.text = series.sequencePadding.toString();
       _seriesNameCtrl.text = series.name;
@@ -110,10 +120,20 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       ).showSnackBar(SnackBar(content: Text(problem)));
       return;
     }
+    final upiProblem = _upiProblem();
+    if (upiProblem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(upiProblem)));
+      return;
+    }
     final padding = _padding;
     final settings = _settings.copyWith(
       invoiceTitle: _titleCtrl.text,
       footerText: _footerCtrl.text,
+      upiId: _upiCtrl.text.trim(),
+      termsText: _termsCtrl.text,
+      bankDetails: _bankCtrl.text,
     );
     final series = _series.copyWith(
       name: _seriesNameCtrl.text.trim().isEmpty
@@ -136,6 +156,12 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
+  }
+
+  String? _upiProblem() {
+    final value = _upiCtrl.text.trim();
+    if (value.isEmpty || Upi.isValidId(value)) return null;
+    return 'Enter a UPI ID like shopname@okicici';
   }
 
   int get _padding =>
@@ -280,6 +306,93 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                           labelText: 'Footer text',
                           prefixIcon: Icon(Icons.notes_outlined),
                         ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _termsCtrl,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Terms & conditions',
+                          hintText: 'e.g. Goods once sold are exchanged within 7 days',
+                          prefixIcon: Icon(Icons.gavel_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Paper size', style: AppText.caption),
+                      const SizedBox(height: AppSpacing.xs),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: BillSettings.paperA4,
+                            label: Text('A4'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paperA5,
+                            label: Text('A5 (half page)'),
+                          ),
+                        ],
+                        selected: {_settings.paperSize},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (value) => setState(
+                          () => _settings = _settings.copyWith(
+                            paperSize: value.first,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      const _SettingsSectionLabel(title: 'Payment'),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _upiCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'UPI ID',
+                          hintText: 'shopname@okicici',
+                          helperText:
+                              'Unpaid bills get a UPI QR for the balance due',
+                          errorText: _upiProblem(),
+                          prefixIcon: const Icon(Icons.qr_code_2_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _bankCtrl,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Bank details (optional)',
+                          hintText: 'A/c name, A/c no, IFSC, Bank',
+                          prefixIcon: Icon(Icons.account_balance_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      _ToggleGroup(
+                        title: 'Extras',
+                        children: [
+                          _switch(
+                            'UPI QR on unpaid bills',
+                            _settings.showUpiQr,
+                            (value) => _settings = _settings.copyWith(
+                              showUpiQr: value,
+                            ),
+                          ),
+                          _switch(
+                            'Amount in words',
+                            _settings.showAmountInWords,
+                            (value) => _settings = _settings.copyWith(
+                              showAmountInWords: value,
+                            ),
+                          ),
+                          _switch(
+                            'HSN tax summary (GST bills)',
+                            _settings.showHsnSummary,
+                            (value) => _settings = _settings.copyWith(
+                              showHsnSummary: value,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       _ToggleGroup(

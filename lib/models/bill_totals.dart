@@ -53,17 +53,22 @@ class BillTotals {
     var subtotal = 0.0;
     var net = 0.0;
     var taxable = 0.0;
-    var cgst = 0.0;
-    var sgst = 0.0;
+    var intraGst = 0.0;
     var igst = 0.0;
     for (final item in taxedItems) {
       subtotal += item.subtotal;
       net += item.lineAmount;
       taxable += item.totalTaxableValue;
-      cgst += item.totalCgst;
-      sgst += item.totalSgst;
-      igst += item.totalIgst;
+      if (item.totalIgst > 0) {
+        igst += item.totalIgst;
+      } else {
+        intraGst += item.totalGst;
+      }
     }
+    // Split intra-state GST once for the bill, so CGST and SGST are equal
+    // (or 1 paisa apart) instead of drifting by a paisa per line.
+    final cgst = roundMoney(intraGst / 2);
+    final sgst = roundMoney(intraGst - cgst);
     subtotal = roundMoney(subtotal);
     net = roundMoney(net);
     final roundOffAmount = roundOff
@@ -73,8 +78,8 @@ class BillTotals {
       subtotal: subtotal,
       discountAmount: roundMoney(subtotal - net),
       taxableAmount: roundMoney(taxable),
-      cgstAmount: roundMoney(cgst),
-      sgstAmount: roundMoney(sgst),
+      cgstAmount: cgst,
+      sgstAmount: sgst,
       igstAmount: roundMoney(igst),
       netAmount: net,
       roundOffAmount: roundOffAmount,
