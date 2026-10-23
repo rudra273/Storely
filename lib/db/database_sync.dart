@@ -14,6 +14,7 @@ const storelyCloudTables = [
   'bill_payments',
   'stock_movements',
   'expenses',
+  'audit_log',
 ];
 
 /// Billing records whose deletion (cancellation) is final: a stale copy from

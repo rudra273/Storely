@@ -27,6 +27,7 @@ part 'database_sync.dart';
 part 'database_kpi.dart';
 part 'database_expenses.dart';
 part 'database_reports.dart';
+part 'database_audit.dart';
 
 const _uuid = Uuid();
 const _legacyShopId = 'local-shop';
@@ -40,7 +41,8 @@ class DatabaseHelper
         DatabaseSync,
         DatabaseKpi,
         DatabaseExpenses,
-        DatabaseReports {
+        DatabaseReports,
+        DatabaseAudit {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
@@ -77,6 +79,10 @@ class DatabaseHelper
   /// true when the current user may perform catalog/settings writes. Defaults to
   /// true (local-only / no cloud guard installed).
   bool Function()? isAdminMutationAllowed;
+
+  /// Who is making changes, for the audit log (e.g. the cloud user's email).
+  /// Null means this phone's owner without a cloud account.
+  String? Function()? auditActor;
 
   Future<String> currentShopId() async {
     final db = await database;

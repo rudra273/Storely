@@ -416,6 +416,15 @@ mixin DatabaseBills {
           );
         }
       }
+      await _logBillAudit(
+        txn,
+        billUuid: original.uuid,
+        action: AuditAction.creditNote,
+        details:
+            '$number · ${rupees(refund)} '
+            '${settlement == creditNoteSettleAdjust ? 'adjusted' : 'refunded'}'
+            '${_normaliseName(reason) == null ? '' : ' · ${_normaliseName(reason)}'}',
+      );
       await syncCustomersFromBills(txn);
       notifyDatabaseChanged();
       return creditNoteId;
@@ -786,6 +795,14 @@ mixin DatabaseBills {
         where: 'id = ?',
         whereArgs: [id],
       );
+      await _logBillAudit(
+        txn,
+        billUuid: billUuid,
+        action: AuditAction.cancelled,
+        details:
+            '${_normaliseName(reason) ?? 'Cancelled'} · '
+            '${rupees(totalAmount)} · stock returned',
+      );
       if (customerId != null) {
         await _adjustCustomerLedger(
           txn,
@@ -830,13 +847,30 @@ mixin DatabaseBills {
       final balance = (bill['balance_due'] as num?)?.toDouble() ?? total;
       final now = _nowIso();
       if (!isPaid) {
+        final reversed = roundMoney(total - balance);
         await txn.update(
           'bill_payments',
           {'deleted_at': now, 'updated_at': now},
           where: 'bill_uuid = ? AND deleted_at IS NULL',
           whereArgs: [billUuid],
         );
+        if (reversed > 0.005) {
+          await _logBillAudit(
+            txn,
+            billUuid: billUuid,
+            action: AuditAction.markedUnpaid,
+            details: '${rupees(reversed)} of payments reversed',
+          );
+        }
       } else if (balance > 0.005) {
+        await _logBillAudit(
+          txn,
+          billUuid: billUuid,
+          action: AuditAction.payment,
+          details:
+              '${rupees(balance)} ${_auditMethod(paymentMethod ?? 'cash')}'
+              ' · marked paid',
+        );
         await txn.insert('bill_payments', {
           'uuid': _newUuid(),
           'shop_id': shopId,
@@ -971,21 +1005,58 @@ mixin DatabaseBills {
       'created_at': now,
       'updated_at': now,
     });
+    if (paymentMethod != 'credit_note') {
+      await _logBillAudit(
+        txn,
+        billUuid: billUuid,
+        action: AuditAction.payment,
+        details: [
+          '${amount < 0 ? 'Refund ' : ''}${rupees(amount.abs())} '
+              '${_auditMethod(paymentMethod)}',
+          ?_normaliseName(notes),
+        ].join(' · '),
+      );
+    }
     await _updateBillPaymentSummary(txn, billId, billUuid);
   }
+
+  static String _auditMethod(String method) => switch (method) {
+    'upi' => 'UPI',
+    'card' => 'card',
+    'bank' => 'bank',
+    _ => method,
+  };
 
   Future<int> updateBillProfitCommissionPercent(int id, double percent) async {
     await _requireAdminMutation();
     final db = await database;
-    final count = await db.update(
-      'bills',
-      {
-        'profit_commission_percent': percent.clamp(0, 100).toDouble(),
-        'updated_at': _nowIso(),
-      },
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    final count = await db.transaction((txn) async {
+      final before = await txn.query(
+        'bills',
+        columns: ['uuid', 'profit_commission_percent'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final value = percent.clamp(0, 100).toDouble();
+      final count = await txn.update(
+        'bills',
+        {'profit_commission_percent': value, 'updated_at': _nowIso()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      final old = (before.firstOrNull?['profit_commission_percent'] as num?)
+          ?.toDouble();
+      if (before.isNotEmpty && old != value) {
+        await _logBillAudit(
+          txn,
+          billUuid: before.single['uuid'] as String,
+          action: AuditAction.commission,
+          details: '${old ?? 0}% → $value%',
+        );
+      }
+      return count;
+    });
     notifyDatabaseChanged();
     return count;
   }
@@ -1008,7 +1079,9 @@ mixin DatabaseBills {
     final db = await database;
     final values = <String, Object?>{
       'customer_name': _normaliseName(customerName) ?? 'Walk-in Customer',
-      'customer_phone': _normaliseCustomerPhone(customerPhone),
+      // Stored as typed, like new bills (customers keep the 91-prefixed
+      // form for matching).
+      'customer_phone': _normaliseName(customerPhone),
       'updated_at': _nowIso(),
     };
     if (isB2b) {
@@ -1029,15 +1102,53 @@ mixin DatabaseBills {
       values['customer_address_snapshot'] = cleaned.customerAddressSnapshot;
       values['place_of_supply_state_code'] = cleaned.placeOfSupplyStateCode;
     }
-    final count = await db.update(
-      'bills',
-      values,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    final count = await db.transaction((txn) async {
+      final before = await txn.query(
+        'bills',
+        columns: ['uuid', ...values.keys.where((k) => k != 'updated_at')],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final count = await txn.update(
+        'bills',
+        values,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (before.isNotEmpty) {
+        final old = before.single;
+        final changes = [
+          for (final key in values.keys)
+            if (key != 'updated_at' &&
+                (old[key]?.toString() ?? '') != (values[key]?.toString() ?? ''))
+              '${_auditField(key)}: ${old[key] ?? '—'} → ${values[key] ?? '—'}',
+        ];
+        if (changes.isNotEmpty) {
+          await _logBillAudit(
+            txn,
+            billUuid: old['uuid'] as String,
+            action: AuditAction.edited,
+            details: changes.join('\n'),
+          );
+        }
+      }
+      return count;
+    });
     notifyDatabaseChanged();
     return count;
   }
+
+  static String _auditField(String column) => switch (column) {
+    'customer_name' => 'Name',
+    'customer_phone' => 'Phone',
+    'customer_gstin' => 'GSTIN',
+    'customer_gst_legal_name' => 'Legal name',
+    'customer_gst_trade_name' => 'Trade name',
+    'customer_address_snapshot' => 'Address',
+    'place_of_supply_state_code' => 'Place of supply',
+    _ => column,
+  };
 
   Future<int> getBillCount() async {
     final db = await database;

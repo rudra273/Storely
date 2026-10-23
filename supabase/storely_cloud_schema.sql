@@ -965,7 +965,7 @@ begin
   if p_table not in (
     'shops', 'app_settings', 'bill_settings', 'categories', 'units',
     'suppliers', 'customers', 'products', 'invoice_series', 'bills',
-    'bill_items', 'bill_payments', 'stock_movements', 'expenses'
+    'bill_items', 'bill_payments', 'stock_movements', 'expenses', 'audit_log'
   ) then
     raise exception 'sync_pull: unknown table %', p_table;
   end if;
@@ -1277,4 +1277,64 @@ create index if not exists idx_expenses_shop_server_updated
 on public.expenses (shop_id, server_updated_at, uuid);
 create index if not exists idx_expenses_shop_date
 on public.expenses (shop_id, expense_date);
+
+-- ── Audit log (mirrors migrations/20261028_audit_log.sql) ──
+create table if not exists public.audit_log (
+  uuid text primary key,
+  shop_id text not null references public.shops(uuid) on delete cascade,
+  entity_type text not null,
+  entity_uuid text not null,
+  action text not null,
+  details text,
+  actor text,
+  device_id text,
+  created_at text not null,
+  updated_at text not null,
+  deleted_at text,
+  server_updated_at timestamptz not null default now()
+);
+
+alter table public.audit_log enable row level security;
+
+drop policy if exists "Members can read audit log" on public.audit_log;
+create policy "Members can read audit log"
+on public.audit_log for select
+using (public.is_shop_member(shop_id));
+
+drop policy if exists "Members can add audit log" on public.audit_log;
+create policy "Members can add audit log"
+on public.audit_log for insert
+with check (public.is_shop_member(shop_id));
+
+-- Re-uploads of an entry are accepted but never change it.
+drop policy if exists "Members can resend audit log" on public.audit_log;
+create policy "Members can resend audit log"
+on public.audit_log for update
+using (public.is_shop_member(shop_id))
+with check (public.is_shop_member(shop_id));
+
+create or replace function public.storely_audit_log_immutable()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  return old;
+end;
+$$;
+
+drop trigger if exists storely_audit_log_immutable on public.audit_log;
+create trigger storely_audit_log_immutable before update
+on public.audit_log for each row execute function
+public.storely_audit_log_immutable();
+
+drop trigger if exists storely_sync_before_write on public.audit_log;
+create trigger storely_sync_before_write before insert
+on public.audit_log for each row execute function
+public.storely_sync_before_write();
+
+create index if not exists idx_audit_log_shop_server_updated
+on public.audit_log (shop_id, server_updated_at, uuid);
+create index if not exists idx_audit_log_entity
+on public.audit_log (entity_uuid);
 

@@ -215,6 +215,7 @@ class CloudService with WidgetsBindingObserver {
       }
     };
     DatabaseHelper.instance.isAdminMutationAllowed = () => state.value.isAdmin;
+    DatabaseHelper.instance.auditActor = () => state.value.user?.email;
     final prefs = await SharedPreferences.getInstance();
     final mode = _readMode(prefs);
     final lastSync = await DatabaseHelper.instance.getCloudSyncState(

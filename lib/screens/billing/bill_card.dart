@@ -425,6 +425,12 @@ class _BillCardState extends State<_BillCard> {
                             label: 'View Profit',
                             color: AppColors.brandOf(context),
                           ),
+                        _ActionButton(
+                          onPressed: () => showBillHistory(context, bill),
+                          icon: Icons.history_rounded,
+                          label: 'History',
+                          color: AppColors.inkMuted,
+                        ),
                       ],
                     ),
                   ],

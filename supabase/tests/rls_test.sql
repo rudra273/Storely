@@ -180,6 +180,24 @@ select pg_temp.check(
   (select amount = 1500 from public.expenses where uuid = 'exp-1'),
   'staff cannot change expenses');
 
+-- ── Audit log: anyone in the shop adds, nobody rewrites ──
+select tests.login('00000000-0000-0000-0000-0000000000a3', 'staff@shop.in');
+insert into public.audit_log (uuid, shop_id, entity_type, entity_uuid, action,
+  details, created_at, updated_at)
+values ('aud-1', 'shop-1', 'bill', 'bill-1', 'payment', 'Rs 100 cash',
+  '2026-10-23T10:00:00Z', '2026-10-23T10:00:00Z');
+select tests.logout();
+select tests.login('00000000-0000-0000-0000-0000000000a1', 'owner@shop.in');
+update public.audit_log set details = 'nothing happened' where uuid = 'aud-1';
+select pg_temp.check(
+  (select details = 'Rs 100 cash' from public.audit_log where uuid = 'aud-1'),
+  'audit entries cannot be rewritten, even by the owner');
+delete from public.audit_log where uuid = 'aud-1';
+select pg_temp.check(
+  exists (select 1 from public.audit_log where uuid = 'aud-1'),
+  'audit entries cannot be deleted');
+select tests.logout();
+
 -- ── Outsider sees nothing ──
 select tests.login('00000000-0000-0000-0000-0000000000a4', 'stranger@other.in');
 select pg_temp.check(

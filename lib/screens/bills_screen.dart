@@ -15,6 +15,7 @@ import 'shared/record_payment_dialog.dart';
 import 'store/bill_settings_screen.dart';
 import '../utils/money.dart';
 
+part 'billing/bill_history_sheet.dart';
 part 'billing/bill_list_widgets.dart';
 part 'billing/bill_card.dart';
 part 'billing/bill_profit_sheet.dart';

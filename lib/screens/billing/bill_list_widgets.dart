@@ -298,14 +298,21 @@ class _CancelledBillCard extends StatelessWidget {
               text: 'Reason: ${bill.cancelReason}',
             ),
           const SizedBox(height: AppSpacing.xs),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _ActionButton(
-              onPressed: onDuplicate,
-              icon: Icons.copy_rounded,
-              label: 'Duplicate as New',
-              color: AppColors.brandOf(context),
-            ),
+          Wrap(
+            children: [
+              _ActionButton(
+                onPressed: onDuplicate,
+                icon: Icons.copy_rounded,
+                label: 'Duplicate as New',
+                color: AppColors.brandOf(context),
+              ),
+              _ActionButton(
+                onPressed: () => showBillHistory(context, bill),
+                icon: Icons.history_rounded,
+                label: 'History',
+                color: AppColors.inkMuted,
+              ),
+            ],
           ),
         ],
       ),
