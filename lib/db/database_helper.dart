@@ -70,14 +70,44 @@ class DatabaseHelper
     return _activeShopId(db);
   }
 
+  /// Joins this device to an existing cloud shop. Only allowed while the
+  /// device has no business data (the sync engine checks), so everything
+  /// here is untouched defaults: the cloud is the source of truth for the
+  /// shop's profile, settings and catalog. Drop the local defaults and keep
+  /// the shop row only as a placeholder that loses to the cloud copy, so a
+  /// joining phone can never upload "My Shop" / preset units / default
+  /// settings over the shop's real ones.
   Future<void> adoptCloudShopId(String shopId) async {
     final db = await database;
     await db.transaction((txn) async {
       final current = await _activeShopId(txn);
       if (current == shopId) return;
-      await _replaceShopId(txn, current, shopId);
+      for (final table in const [
+        'app_settings',
+        'bill_settings',
+        'invoice_series',
+        'units',
+        'categories',
+        'suppliers',
+      ]) {
+        await txn.delete(table, where: 'shop_id = ?', whereArgs: [current]);
+      }
+      await txn.update(
+        'shops',
+        {
+          'uuid': shopId,
+          'created_at': _placeholderTimestamp,
+          'updated_at': _placeholderTimestamp,
+          'sync_dirty': DatabaseSchema.syncDirtyFromCloud,
+        },
+        where: 'uuid = ?',
+        whereArgs: [current],
+      );
     });
   }
+
+  /// Older than any real edit, so the cloud copy always wins.
+  static const _placeholderTimestamp = '1970-01-01T00:00:00.000Z';
 }
 
 void notifyDatabaseChanged() {

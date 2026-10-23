@@ -8,6 +8,7 @@ import 'package:storely/models/bill.dart';
 import 'package:storely/models/invoice_numbering.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/product_purchase.dart';
+import 'package:storely/models/shop_profile.dart';
 import 'package:storely/services/sync/cloud_sync_engine.dart';
 
 import 'support/fake_sync_backend.dart';
@@ -238,6 +239,40 @@ void main() {
       expect(numbers, {'INV/$fy/0001', 'INV/$fy/B0001'});
       expect((await productNamed('Rice')).quantity, 8);
     });
+  });
+
+  test('a second admin phone joining does not overwrite the shop', () async {
+    await on('a', () async {
+      server.memberShopId = await db.currentShopId();
+      await db.saveShopProfile(
+        ShopProfile(
+          name: 'Sharma Kirana',
+          gstin: '27AAAAA0000A1Z5',
+          gstScheme: GstScheme.regular,
+        ),
+      );
+      await addProduct('Rice');
+      await sync(mode: FirstSyncMode.uploadExisting);
+    });
+    final unitsBefore = server.rows('units').length;
+
+    await on('b', () async {
+      await sync(); // joins as admin
+      final profile = await db.getShopProfile();
+      expect(profile!.name, 'Sharma Kirana');
+      expect(profile.gstScheme, GstScheme.regular);
+      await sell('Rice');
+      expect((await sync()).conflicts, isEmpty);
+    });
+
+    final shop = server.rows('shops').single;
+    expect(shop['name'], 'Sharma Kirana');
+    expect(shop['gstin'], '27AAAAA0000A1Z5');
+    expect(server.rows('units'), hasLength(unitsBefore));
+    expect(server.rows('invoice_series'), hasLength(1));
+    expect(server.rows('bill_settings').length, lessThanOrEqualTo(1));
+    final fy = InvoiceNumbering.financialYear(DateTime.now());
+    expect(server.rows('bills').single['bill_number'], 'INV/$fy/B0001');
   });
 
   test('pulls page through large tables', () async {
