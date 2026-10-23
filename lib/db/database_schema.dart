@@ -36,6 +36,7 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
     await _ensureV20Columns(db);
+    await _ensureInventoryColumns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -50,6 +51,7 @@ mixin DatabaseSchema {
     await _createCleanSchema(db);
     await _ensureV16Columns(db);
     await _ensureV20Columns(db);
+    await _ensureInventoryColumns(db);
     await _runOneShotMigrations(db);
     await _ensureSyncTracking(db);
   }
@@ -909,6 +911,16 @@ mixin DatabaseSchema {
       'source_document_uuid': 'TEXT',
       'import_row_number': 'INTEGER',
     });
+  }
+
+  /// 2.0 inventory controls: per-product stock tracking and reorder level,
+  /// and a reason on manual stock adjustments.
+  Future<void> _ensureInventoryColumns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'products', {
+      'track_stock': 'INTEGER NOT NULL DEFAULT 1',
+      'reorder_level': 'REAL',
+    });
+    await _ensureColumns(executor, 'stock_movements', {'reason': 'TEXT'});
   }
 
   /// v20 changed these index definitions but kept their names, so the CREATE

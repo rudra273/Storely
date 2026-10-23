@@ -131,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _shopName = shopName;
       _lowStockThreshold = lowStockThreshold;
       _lowStockProducts = products
-          .where((p) => p.quantity <= lowStockThreshold)
+          .where((p) => p.isLowStock(lowStockThreshold))
           .toList();
     });
   }

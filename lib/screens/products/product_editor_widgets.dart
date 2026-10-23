@@ -905,3 +905,56 @@ class _SourcePill extends StatelessWidget {
     );
   }
 }
+
+/// "Track stock" switch plus the per-product reorder level.
+class _StockTrackingFields extends StatelessWidget {
+  final bool trackStock;
+  final TextEditingController reorderController;
+  final ValueChanged<bool> onTrackStockChanged;
+  final VoidCallback onChanged;
+
+  const _StockTrackingFields({
+    required this.trackStock,
+    required this.reorderController,
+    required this.onTrackStockChanged,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          key: const ValueKey('product-track-stock'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Track stock'),
+          subtitle: Text(
+            trackStock
+                ? 'Warns at billing when stock runs out'
+                : 'For services and loose items — no stock count',
+            style: AppText.caption,
+          ),
+          value: trackStock,
+          onChanged: onTrackStockChanged,
+        ),
+        if (trackStock)
+          TextFormField(
+            key: const ValueKey('product-reorder-level'),
+            controller: reorderController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,3}')),
+            ],
+            decoration: const InputDecoration(
+              labelText: 'Reorder level',
+              hintText: 'Shop default',
+              helperText: 'Marked "Low" at or below this',
+              prefixIcon: Icon(Icons.notifications_active_outlined, size: 18),
+            ),
+            onChanged: (_) => onChanged(),
+          ),
+      ],
+    );
+  }
+}

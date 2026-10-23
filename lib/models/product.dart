@@ -49,6 +49,13 @@ class Product {
   final bool directPriceToggle;
   final double? manualPrice;
   final double quantity;
+
+  /// False for services and loose items: billing never checks or warns
+  /// about their stock.
+  final bool trackStock;
+
+  /// Stock at or below this is "running low"; null uses the shop default.
+  final double? reorderLevel;
   final int? unitId;
   final String? unit;
   final String source;
@@ -81,6 +88,8 @@ class Product {
     this.directPriceToggle = false,
     this.manualPrice,
     required num quantity,
+    this.trackStock = true,
+    this.reorderLevel,
     this.unitId,
     this.unit,
     this.source = ProductSource.mobile,
@@ -101,6 +110,14 @@ class Product {
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
   String? get itemCode => productCode;
+
+  /// Tracked stock at or below this product's reorder level (or the shop
+  /// default [shopThreshold] when it has none).
+  bool isLowStock(num shopThreshold) =>
+      trackStock &&
+      quantity <=
+          (reorderLevel ?? shopThreshold.toDouble()) + stockQuantityEpsilon;
+
   double get mrp => sellingPrice;
   bool get isImported => source == ProductSource.imported;
   String get sourceLabel => isImported ? 'Imported' : 'In-app';
@@ -143,6 +160,8 @@ class Product {
     'direct_price_toggle': directPriceToggle ? 1 : 0,
     'manual_price': manualPrice,
     'quantity_cache': quantity,
+    'track_stock': trackStock ? 1 : 0,
+    'reorder_level': reorderLevel,
     'unit_id': unitId,
     'source': source,
     'device_id': deviceId,
@@ -187,6 +206,8 @@ class Product {
         (map['quantity_cache'] as num?)?.toDouble() ??
         (map['quantity'] as num?)?.toDouble() ??
         0,
+    trackStock: (map['track_stock'] as num? ?? 1) != 0,
+    reorderLevel: (map['reorder_level'] as num?)?.toDouble(),
     unitId: map['unit_id'] as int?,
     unit: _cleanOptional(map['unit_name'] as String? ?? map['unit'] as String?),
     source: map['source'] as String? ?? ProductSource.mobile,
@@ -254,6 +275,9 @@ class Product {
     bool clearManualPrice = false,
     double? manualPrice,
     num? quantity,
+    bool? trackStock,
+    bool clearReorderLevel = false,
+    double? reorderLevel,
     bool clearUnit = false,
     int? unitId,
     String? unit,
@@ -291,6 +315,8 @@ class Product {
     directPriceToggle: directPriceToggle ?? this.directPriceToggle,
     manualPrice: clearManualPrice ? null : manualPrice ?? this.manualPrice,
     quantity: quantity ?? this.quantity,
+    trackStock: trackStock ?? this.trackStock,
+    reorderLevel: clearReorderLevel ? null : reorderLevel ?? this.reorderLevel,
     unitId: clearUnit ? null : unitId ?? this.unitId,
     unit: clearUnit ? null : unit ?? this.unit,
     source: source ?? this.source,

@@ -110,7 +110,9 @@ class _StockMovementRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _movementLabel(movement.movementType),
+                  movement.reason == null
+                      ? _movementLabel(movement.movementType)
+                      : StockAdjustmentReason.label(movement.reason),
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 2),

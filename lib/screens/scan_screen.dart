@@ -384,10 +384,8 @@ class _ScanScreenState extends State<ScanScreen> {
     final available = _availableStockForItem(item);
     if (available != null) {
       final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
-      if (available <= stockQuantityEpsilon ||
-          exceedsStock(currentQty + 1, available)) {
+      if (exceedsStock(currentQty + 1, available)) {
         _showStockLimitMessage(item.productName, available);
-        return;
       }
     }
 
@@ -406,20 +404,25 @@ class _ScanScreenState extends State<ScanScreen> {
     final productId = item.productId;
     if (productId == null) return null;
     for (final product in _allProducts) {
-      if (product.id == productId) return product.quantity;
+      if (product.id == productId) {
+        return product.trackStock ? product.quantity : null;
+      }
     }
     return null;
   }
 
+  /// Selling past the recorded stock is allowed (counts often lag the
+  /// shelf); this only warns, and stock goes negative.
   void _showStockLimitMessage(String productName, double available) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(
-            available <= 0
-                ? '"$productName" is out of stock'
-                : 'Only ${_formatQuantityInput(available)} available for "$productName"',
+            available <= stockQuantityEpsilon
+                ? '"$productName" shows no stock. Added anyway.'
+                : 'Only ${_formatQuantityInput(available)} in stock for '
+                      '"$productName". Added anyway.',
           ),
         ),
       );
@@ -637,7 +640,6 @@ class _ScanScreenState extends State<ScanScreen> {
       if (available != null &&
           exceedsStock(_items[index].quantity + delta, available)) {
         _showStockLimitMessage(_items[index].productName, available);
-        return;
       }
     }
     setState(() {
@@ -651,8 +653,6 @@ class _ScanScreenState extends State<ScanScreen> {
     final available = _availableStockForItem(_items[index]);
     if (available != null && exceedsStock(quantity, available)) {
       _showStockLimitMessage(_items[index].productName, available);
-      setState(() => _items[index].quantity = available);
-      return;
     }
     setState(() => _items[index].quantity = quantity);
   }
@@ -908,7 +908,7 @@ class _ScanScreenState extends State<ScanScreen> {
                     'Complete Bill opens checkout for customer, discount, and payment details.',
                     'Saved bills keep price, GST, and profit snapshots from the moment of billing.',
                     'For corrections after saving, cancel the old bill and duplicate it as a new bill.',
-                    'If stock is insufficient, bill creation is blocked before saving.',
+                    'Selling more than the recorded stock shows a warning; stock then goes negative.',
                   ],
                 ),
               ],

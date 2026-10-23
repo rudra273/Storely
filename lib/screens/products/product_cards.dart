@@ -9,6 +9,7 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final VoidCallback onHistory;
+  final VoidCallback onAdjust;
   final VoidCallback onDelete;
 
   const _ProductCard({
@@ -20,13 +21,15 @@ class _ProductCard extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     required this.onHistory,
+    required this.onAdjust,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isLowStock = product.quantity <= lowStockThreshold;
-    final isOutOfStock = product.quantity == 0;
+    final isLowStock = product.isLowStock(lowStockThreshold);
+    final isOutOfStock =
+        product.trackStock && product.quantity <= stockQuantityEpsilon;
     final brand = AppColors.brandOf(context);
 
     return Padding(
@@ -75,30 +78,41 @@ class _ProductCard extends StatelessWidget {
                 else if (isLowStock)
                   StatusPill(label: 'Low', variant: PillVariant.low),
                 if (!selectionMode) ...[
-                  const SizedBox(width: AppSpacing.xs),
-                  InkWell(
-                    onTap: onHistory,
-                    borderRadius: AppRadius.smRadius,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.history_rounded,
-                        size: 16,
-                        color: AppColors.inkFaintOf(context),
-                      ),
+                  PopupMenuButton<VoidCallback>(
+                    tooltip: 'More',
+                    icon: Icon(
+                      Icons.more_vert_rounded,
+                      size: 20,
+                      color: AppColors.inkFaintOf(context),
                     ),
-                  ),
-                  InkWell(
-                    onTap: onDelete,
-                    borderRadius: AppRadius.smRadius,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.delete_outline,
-                        size: 16,
-                        color: AppColors.inkFaintOf(context),
+                    onSelected: (action) => action(),
+                    itemBuilder: (_) => [
+                      if (product.trackStock)
+                        PopupMenuItem(
+                          value: onAdjust,
+                          child: const ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.tune_rounded),
+                            title: Text('Adjust stock'),
+                          ),
+                        ),
+                      PopupMenuItem(
+                        value: onHistory,
+                        child: const ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.history_rounded),
+                          title: Text('Stock history'),
+                        ),
                       ),
-                    ),
+                      PopupMenuItem(
+                        value: onDelete,
+                        child: const ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline),
+                          title: Text('Delete'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -152,7 +166,9 @@ class _ProductCard extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
-                  product.quantityLabel,
+                  product.trackStock
+                      ? product.quantityLabel
+                      : 'Stock not tracked',
                   style: AppText.caption.copyWith(
                     color: isLowStock
                         ? AppColors.error

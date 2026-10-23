@@ -309,7 +309,7 @@ mixin DatabaseKpi {
     final r = await db.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM products
-      WHERE deleted_at IS NULL AND quantity_cache <= 0
+      WHERE deleted_at IS NULL AND track_stock = 1 AND quantity_cache <= 0
     ''');
     return (r.first['cnt'] as num?)?.toInt() ?? 0;
   }
@@ -323,8 +323,9 @@ mixin DatabaseKpi {
       SELECT name, quantity_cache AS quantity
       FROM products
       WHERE deleted_at IS NULL
+        AND track_stock = 1
         AND quantity_cache > 0
-        AND quantity_cache <= ?
+        AND quantity_cache <= COALESCE(reorder_level, ?)
       ORDER BY quantity_cache ASC
     ''',
       [threshold],

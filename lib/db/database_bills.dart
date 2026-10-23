@@ -209,8 +209,7 @@ mixin DatabaseBills {
     return {
       for (final row in rows)
         row['uuid'] as String: roundMoney(
-          (row['sold'] as num).toDouble() -
-              (row['returned'] as num).toDouble(),
+          (row['sold'] as num).toDouble() - (row['returned'] as num).toDouble(),
         ),
     };
   }
@@ -1258,7 +1257,7 @@ mixin DatabaseBills {
     if (item.quantity <= 0 || item.productId == null) return;
     final productRows = await executor.query(
       'products',
-      columns: ['uuid', 'name', 'quantity_cache'],
+      columns: ['uuid'],
       where: 'id = ?',
       whereArgs: [item.productId],
       limit: 1,
@@ -1266,14 +1265,8 @@ mixin DatabaseBills {
     if (productRows.isEmpty) {
       throw StateError('Product "${item.productName}" no longer exists');
     }
-    final available =
-        (productRows.single['quantity_cache'] as num?)?.toDouble() ?? 0;
-    if (exceedsStock(item.quantity, available)) {
-      final name = productRows.single['name']?.toString() ?? item.productName;
-      throw StateError(
-        'Only ${_formatDbQuantity(available)} available for "$name"',
-      );
-    }
+    // Selling more than the recorded stock is allowed (the count is often
+    // behind the shelf); billing warns first and stock goes negative.
     final productUuid =
         item.productUuid ?? productRows.single['uuid'] as String;
     await _insertBillStockMovement(

@@ -21,6 +21,7 @@ part 'products/product_bulk_actions.dart';
 part 'products/product_import_widgets.dart';
 part 'products/stock_history_sheet.dart';
 part 'products/product_cards.dart';
+part 'products/stock_adjust_sheet.dart';
 
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
@@ -606,6 +607,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
+  Future<void> _adjustStock(Product product) async {
+    final adjusted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _StockAdjustSheet(product: product),
+    );
+    if (!mounted || adjusted != true) return;
+    await _loadProducts();
+  }
+
   Future<void> _showStockHistory(Product product) async {
     final id = product.id;
     if (id == null) return;
@@ -1120,6 +1131,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ? (product.purchasePrice * product.quantity).toStringAsFixed(2)
           : '',
     );
+    var trackStock = product?.trackStock ?? true;
+    final reorderCtrl = TextEditingController(
+      text: product?.reorderLevel == null
+          ? ''
+          : _formatQuantityInput(product!.reorderLevel!),
+    );
     String? selectedCategory = product?.category;
     String? selectedSupplier = product?.supplier ?? initialSupplier;
     String? selectedUnit = product?.unit;
@@ -1418,6 +1435,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           ? double.tryParse(manualPriceCtrl.text)
                           : null,
                       quantity: existing.quantity,
+                      trackStock: trackStock,
+                      reorderLevel: double.tryParse(reorderCtrl.text.trim()),
                       source: existing.source,
                       createdAt: existing.createdAt,
                       updatedAt: existing.updatedAt,
@@ -1481,6 +1500,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         ? double.tryParse(manualPriceCtrl.text)
                         : null,
                     quantity: double.parse(qtyCtrl.text),
+                    trackStock: trackStock,
+                    reorderLevel: double.tryParse(reorderCtrl.text.trim()),
                     source: product?.source ?? ProductSource.mobile,
                     createdAt: product?.createdAt,
                     updatedAt: product?.updatedAt,
@@ -1937,6 +1958,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           },
                                         ),
                                         const SizedBox(height: 10),
+                                        _StockTrackingFields(
+                                          trackStock: trackStock,
+                                          reorderController: reorderCtrl,
+                                          onTrackStockChanged: (value) {
+                                            markEdited();
+                                            setSheet(() => trackStock = value);
+                                          },
+                                          onChanged: markEdited,
+                                        ),
+                                        const SizedBox(height: 10),
                                         Row(
                                           children: [
                                             Expanded(
@@ -2215,6 +2246,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             overheadCtrl.dispose();
             marginCtrl.dispose();
             qtyCtrl.dispose();
+            reorderCtrl.dispose();
             totalCtrl.dispose();
           });
         });
@@ -2587,6 +2619,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           : _showAddEditSheet(product: _filtered[i]),
                       onLongPress: () => _toggleProductSelection(_filtered[i]),
                       onHistory: () => _showStockHistory(_filtered[i]),
+                      onAdjust: () => _adjustStock(_filtered[i]),
                       onDelete: () => _deleteProduct(_filtered[i]),
                     ),
                   ),

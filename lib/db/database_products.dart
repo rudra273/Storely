@@ -133,7 +133,8 @@ mixin DatabaseProducts {
           quantityDelta: quantityDelta,
           unitCost: productToUpdate.purchasePrice,
           sourceType: 'manual',
-          notes: 'Manual stock adjustment',
+          reason: StockAdjustmentReason.count,
+          notes: 'Stock count corrected',
         );
         await _syncProductQuantityCache(txn, product.id!);
       }
@@ -221,6 +222,52 @@ mixin DatabaseProducts {
       notifyDatabaseChanged();
       return committed;
     });
+  }
+
+  /// Records a manual stock change with a [reason] (see
+  /// [StockAdjustmentReason]); [delta] is signed. The product's cost is
+  /// unchanged.
+  Future<void> adjustStock(
+    int productId, {
+    required double delta,
+    required String reason,
+    String? note,
+  }) async {
+    await _requireAdminMutation();
+    if (delta.abs() < stockQuantityEpsilon) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      final rows = await _queryProducts(
+        txn,
+        where: 'p.id = ?',
+        whereArgs: [productId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('Product no longer exists');
+      final product = Product.fromMap(rows.single);
+      final trimmedNote = note?.trim();
+      await _insertStockMovement(
+        txn,
+        productId: productId,
+        productUuid: product.uuid,
+        movementType: StockMovementType.adjustment,
+        quantityDelta: delta,
+        unitCost: product.purchasePrice,
+        sourceType: 'manual',
+        reason: reason,
+        notes: trimmedNote == null || trimmedNote.isEmpty
+            ? StockAdjustmentReason.label(reason)
+            : trimmedNote,
+      );
+      await txn.update(
+        'products',
+        {'updated_at': DateTime.now().toUtc().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [productId],
+      );
+      await _syncProductQuantityCache(txn, productId);
+    });
+    notifyDatabaseChanged();
   }
 
   Future<int> deleteProduct(int id) async {
@@ -643,6 +690,12 @@ mixin DatabaseProducts {
               id: existingId,
               uuid: current.uuid,
               quantity: current.quantity + p.quantity,
+              purchasePrice: weightedAverageCost(
+                onHand: current.quantity,
+                currentCost: current.purchasePrice,
+                added: p.quantity,
+                addedCost: p.purchasePrice,
+              ),
               createdAt: current.createdAt,
             ),
           );
@@ -658,7 +711,7 @@ mixin DatabaseProducts {
             productUuid: merged.uuid,
             movementType: StockMovementType.purchase,
             quantityDelta: p.quantity,
-            unitCost: merged.purchasePrice,
+            unitCost: p.purchasePrice,
             sourceType: 'import',
             supplierId: merged.supplierId,
             importBatchKey: batchKey,
@@ -863,10 +916,17 @@ mixin DatabaseProducts {
     );
     if (existing.isEmpty) return 0;
     final current = Product.fromMap(existing.single);
+    final unitCost = product.purchasePrice;
     final updatedProduct = await _prepareProductForWrite(
       executor,
       product.copyWith(
         quantity: current.quantity + quantityAdded,
+        purchasePrice: weightedAverageCost(
+          onHand: current.quantity,
+          currentCost: current.purchasePrice,
+          added: quantityAdded.toDouble(),
+          addedCost: unitCost,
+        ),
         source: source,
         updatedAt: DateTime.now().toUtc(),
       ),
@@ -888,7 +948,7 @@ mixin DatabaseProducts {
       productUuid: updatedProduct.uuid,
       movementType: StockMovementType.purchase,
       quantityDelta: quantityAdded.toDouble(),
-      unitCost: updatedProduct.purchasePrice,
+      unitCost: unitCost,
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
       supplierId: updatedProduct.supplierId,
       importBatchKey: importBatchKey,
@@ -902,9 +962,6 @@ mixin DatabaseProducts {
     DatabaseExecutor executor,
     Product product,
   ) async {
-    if (product.quantity < 0) {
-      throw ArgumentError('Product quantity cannot be negative');
-    }
     final now = DateTime.now().toUtc();
     final shopId = await _activeShopId(executor);
     final categoryId = product.category == null
@@ -955,6 +1012,7 @@ mixin DatabaseProducts {
     String? importBatchKey,
     int? importRowNumber,
     String? notes,
+    String? reason,
     DateTime? createdAt,
   }) async {
     if (quantityDelta == 0) return;
@@ -982,6 +1040,7 @@ mixin DatabaseProducts {
       'import_batch_key': importBatchKey,
       'import_row_number': importRowNumber,
       'notes': notes,
+      'reason': reason,
       'created_at': _localIso(createdAt),
       'updated_at': now.toIso8601String(),
     });
