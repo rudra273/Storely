@@ -432,4 +432,43 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get placeOfSupplyCode => 'आपूर्ति राज्य कोड';
+
+  @override
+  String get welcomeTitle => 'Storely में आपका स्वागत है';
+
+  @override
+  String get welcomeChoice =>
+      'नई दुकान शुरू करें या पहले से बनी क्लाउड दुकान से जुड़ें';
+
+  @override
+  String get welcomeCreate => 'शुरू करने के लिए अपनी दुकान का नाम लिखें';
+
+  @override
+  String get welcomeJoin =>
+      'जिस दुकान में आपको जोड़ा गया है, उससे जुड़ने के लिए साइन इन करें';
+
+  @override
+  String get startFresh => 'नई शुरुआत';
+
+  @override
+  String get joinExistingShop => 'मौजूदा दुकान से जुड़ें';
+
+  @override
+  String get shopName => 'दुकान का नाम';
+
+  @override
+  String get required => 'ज़रूरी';
+
+  @override
+  String get continueLabel => 'आगे बढ़ें';
+
+  @override
+  String get back => 'वापस';
+
+  @override
+  String get addSampleProducts => 'कुछ नमूना सामान जोड़ें';
+
+  @override
+  String get sampleProductsHint =>
+      'तुरंत बिल बनाकर देखें। इन्हें कभी भी हटा सकते हैं।';
 }

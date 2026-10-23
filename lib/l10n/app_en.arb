@@ -171,5 +171,17 @@
         "type": "int"
       }
     }
-  }
+  },
+  "welcomeTitle": "Welcome to Storely",
+  "welcomeChoice": "Start a new shop or join an existing cloud shop",
+  "welcomeCreate": "Add your shop name to get started",
+  "welcomeJoin": "Sign in to join a shop you were added to",
+  "startFresh": "Start Fresh",
+  "joinExistingShop": "Join Existing Shop",
+  "shopName": "Shop Name",
+  "required": "Required",
+  "continueLabel": "Continue",
+  "back": "Back",
+  "addSampleProducts": "Add a few sample products",
+  "sampleProductsHint": "Try billing straight away. Delete them any time."
 }

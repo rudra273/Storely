@@ -901,6 +901,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Place of supply state code'**
   String get placeOfSupplyCode;
+
+  /// No description provided for @welcomeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Welcome to Storely'**
+  String get welcomeTitle;
+
+  /// No description provided for @welcomeChoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a new shop or join an existing cloud shop'**
+  String get welcomeChoice;
+
+  /// No description provided for @welcomeCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your shop name to get started'**
+  String get welcomeCreate;
+
+  /// No description provided for @welcomeJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in to join a shop you were added to'**
+  String get welcomeJoin;
+
+  /// No description provided for @startFresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Start Fresh'**
+  String get startFresh;
+
+  /// No description provided for @joinExistingShop.
+  ///
+  /// In en, this message translates to:
+  /// **'Join Existing Shop'**
+  String get joinExistingShop;
+
+  /// No description provided for @shopName.
+  ///
+  /// In en, this message translates to:
+  /// **'Shop Name'**
+  String get shopName;
+
+  /// No description provided for @required.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get required;
+
+  /// No description provided for @continueLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get continueLabel;
+
+  /// No description provided for @back.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get back;
+
+  /// No description provided for @addSampleProducts.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a few sample products'**
+  String get addSampleProducts;
+
+  /// No description provided for @sampleProductsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Try billing straight away. Delete them any time.'**
+  String get sampleProductsHint;
 }
 
 class _AppLocalizationsDelegate

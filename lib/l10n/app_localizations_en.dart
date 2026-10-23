@@ -432,4 +432,41 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get placeOfSupplyCode => 'Place of supply state code';
+
+  @override
+  String get welcomeTitle => 'Welcome to Storely';
+
+  @override
+  String get welcomeChoice => 'Start a new shop or join an existing cloud shop';
+
+  @override
+  String get welcomeCreate => 'Add your shop name to get started';
+
+  @override
+  String get welcomeJoin => 'Sign in to join a shop you were added to';
+
+  @override
+  String get startFresh => 'Start Fresh';
+
+  @override
+  String get joinExistingShop => 'Join Existing Shop';
+
+  @override
+  String get shopName => 'Shop Name';
+
+  @override
+  String get required => 'Required';
+
+  @override
+  String get continueLabel => 'Continue';
+
+  @override
+  String get back => 'Back';
+
+  @override
+  String get addSampleProducts => 'Add a few sample products';
+
+  @override
+  String get sampleProductsHint =>
+      'Try billing straight away. Delete them any time.';
 }
