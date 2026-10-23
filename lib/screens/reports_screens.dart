@@ -147,18 +147,13 @@ class _ReportLoaderState<T> extends State<_ReportLoader<T>> {
       future: _future,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppSkeletonList(rows: 4);
         }
         if (snap.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.xxl),
-              child: Text(
-                'Could not load this report.\n${snap.error}',
-                textAlign: TextAlign.center,
-                style: AppText.caption,
-              ),
-            ),
+          return AppErrorState(
+            title: 'Could not load this report',
+            error: snap.error,
+            onRetry: () => setState(() => _future = widget.load()),
           );
         }
         return widget.builder(snap.data as T);

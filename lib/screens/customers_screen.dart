@@ -184,7 +184,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                 )
               : null,
           body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList()
               : Column(
                   children: [
                     Padding(

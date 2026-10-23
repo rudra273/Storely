@@ -203,7 +203,7 @@ class _NewPurchaseScreenState extends State<_NewPurchaseScreen> {
       setState(() => _committing = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 

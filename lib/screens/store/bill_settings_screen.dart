@@ -154,7 +154,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       setState(() => _isSaving = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -314,7 +314,8 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                         maxLines: 4,
                         decoration: const InputDecoration(
                           labelText: 'Terms & conditions',
-                          hintText: 'e.g. Goods once sold are exchanged within 7 days',
+                          hintText:
+                              'e.g. Goods once sold are exchanged within 7 days',
                           prefixIcon: Icon(Icons.gavel_rounded),
                         ),
                       ),

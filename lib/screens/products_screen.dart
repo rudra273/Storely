@@ -1571,7 +1571,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   if (mounted) {
                     ScaffoldMessenger.of(
                       context,
-                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                   }
                 }
               }
@@ -2442,7 +2442,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ],
         ),
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const AppSkeletonList()
             : _allProducts.isEmpty
             ? _buildEmpty()
             : _buildContent(),
@@ -2468,47 +2468,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: AppRadius.lgRadius,
-              ),
-              child: Icon(
-                Icons.inventory_2_outlined,
-                size: 36,
-                color: AppColors.inkFaint,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('No products yet', style: AppText.title),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Add items one by one, or enter a purchase to import a list',
-              style: AppText.caption,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            FilledButton.icon(
-              onPressed: _showQuickAdd,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add product'),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            OutlinedButton.icon(
-              onPressed: _showNewPurchaseFlow,
-              icon: const Icon(Icons.add_shopping_cart_rounded),
-              label: const Text('New purchase / import'),
-            ),
-          ],
-        ),
+    return AppEmptyState(
+      icon: Icons.inventory_2_outlined,
+      title: 'No products yet',
+      message: 'Add items one by one, or enter a purchase to import a list',
+      actionLabel: 'Add product',
+      onAction: _showQuickAdd,
+      secondaryAction: OutlinedButton.icon(
+        onPressed: _showNewPurchaseFlow,
+        icon: const Icon(Icons.add_shopping_cart_rounded),
+        label: const Text('New purchase / import'),
       ),
     );
   }

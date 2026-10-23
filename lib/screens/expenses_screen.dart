@@ -177,7 +177,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               const SizedBox(height: AppSpacing.sm),
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const AppSkeletonList()
                     : _expenses.isEmpty
                     ? Center(
                         child: Padding(

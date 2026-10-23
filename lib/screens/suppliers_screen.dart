@@ -143,7 +143,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                 )
               : null,
           body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList()
               : _suppliers.isEmpty
               ? _EmptySuppliers(canManage: canManage, onAdd: _addSupplier)
               : ListView.separated(
@@ -180,38 +180,14 @@ class _EmptySuppliers extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.local_shipping_outlined,
-              size: 56,
-              color: AppColors.inkMutedOf(context),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text('No suppliers yet', style: AppText.subtitle),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              canManage
-                  ? 'Add your suppliers to track who you buy from.'
-                  : 'Your shop has not added any suppliers yet.',
-              textAlign: TextAlign.center,
-              style: AppText.caption,
-            ),
-            if (canManage) ...[
-              const SizedBox(height: AppSpacing.lg),
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add Supplier'),
-              ),
-            ],
-          ],
-        ),
-      ),
+    return AppEmptyState(
+      icon: Icons.local_shipping_outlined,
+      title: 'No suppliers yet',
+      message: canManage
+          ? 'Add your suppliers to track who you buy from.'
+          : 'Your shop has not added any suppliers yet.',
+      actionLabel: canManage ? 'Add Supplier' : null,
+      onAction: canManage ? onAdd : null,
     );
   }
 }

@@ -296,7 +296,7 @@ class _BillsScreenState extends State<BillsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       nameCtrl.dispose();
       phoneCtrl.dispose();
@@ -472,9 +472,7 @@ class _BillsScreenState extends State<BillsScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               if (_isLoading)
-                const SliverFillRemaining(
-                  child: Center(child: CircularProgressIndicator()),
-                )
+                const SliverFillRemaining(child: AppSkeletonList())
               else if (_bills.isEmpty && _cancelledBills.isEmpty)
                 SliverFillRemaining(child: _buildEmpty())
               else
@@ -635,45 +633,18 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: AppRadius.lgRadius,
-              ),
-              child: Icon(
-                Icons.receipt_long_outlined,
-                size: 36,
-                color: AppColors.inkFaint,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('No bills yet', style: AppText.title),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Create your first bill to get started',
-              style: AppText.caption,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            TestKeys.tag(
-              TestKeys.createBillBtn,
-              FilledButton.icon(
-                onPressed: () => _openBillCreator(BillingEntryMode.manual),
-                icon: const Icon(Icons.receipt_long_rounded),
-                label: const Text('Create Bill'),
-              ),
-              button: true,
-            ),
-          ],
+    return AppEmptyState(
+      icon: Icons.receipt_long_outlined,
+      title: 'No bills yet',
+      message: 'Create your first bill to get started',
+      secondaryAction: TestKeys.tag(
+        TestKeys.createBillBtn,
+        FilledButton.icon(
+          onPressed: () => _openBillCreator(BillingEntryMode.manual),
+          icon: const Icon(Icons.receipt_long_rounded),
+          label: const Text('Create Bill'),
         ),
+        button: true,
       ),
     );
   }
