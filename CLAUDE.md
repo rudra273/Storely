@@ -13,6 +13,31 @@ palette. Do not change the bottom navigation (`AppShell` / `_BottomNavBar` in
 
 ---
 
+## Related projects (own-server migration)
+
+Storely is moving off Supabase to our own backend, plus a desktop web app. The
+master plan, phases and open questions are in [`plan.md`](plan.md) — read it
+before touching anything cloud-related.
+
+| Project | Path | Stack |
+|---|---|---|
+| Mobile app (this repo) | `/Users/rudra/projects/Storely` | Flutter, SQLite, optional sync |
+| API server | `/Users/rudra/projects/storelyapi` | Python 3.14, FastAPI, PostgreSQL 18 |
+| Web app | `/Users/rudra/projects/storelyweb` | React, TypeScript, Vite, Node 26 |
+
+- The Flutter app stays offline-first; local-only mode must keep working with no
+  account and no server. Cloud sync goes through `SyncBackend`
+  (`lib/services/sync/sync_backend.dart`); new backend = new implementation.
+- The web app is cloud-only and talks only to `storelyapi`, never to Supabase.
+- Until cutover (plan.md phase 9), Supabase stays live for installed 1.x apps;
+  keep `supabase/` in sync as before. The server schema of record for the new
+  backend will be Alembic migrations in `storelyapi`.
+- Security first: everything is encrypted in transit, and every phase passes the
+  security gate in plan.md section 6. Develop locally in Docker.
+- The verify-before-you-build rule below applies in all three projects.
+
+---
+
 ## Working rule — verify before you build (REQUIRED)
 
 When I report a defect or request a feature, do **not** start coding immediately.
