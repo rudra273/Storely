@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **proposed, nothing built yet.**
+> Last updated 2026-10-25. Status: **Phase 0 done; Phase 1 next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -256,7 +256,7 @@ security gate (section 6) passes.
   `no-new-privileges`, and small pinned base images.
 - Dependencies are pinned with lockfiles. CI runs `pip-audit`, `npm audit`,
   an image scan (Trivy) and secret scanning (gitleaks, also as a pre-commit hook).
-- Static analysis: `bandit` and `semgrep` for Python, ESLint security rules for
+- Static analysis: `bandit` for Python (`semgrep` in Phase 9), oxlint security rules for
   the web.
 
 ### 5.7 Mobile and web clients
@@ -287,7 +287,7 @@ A phase is done only when:
 1. All unit and API tests pass, including the authorization matrix for any new
    endpoint.
 2. Linters and static analysis are clean (`ruff`, `mypy`, `bandit`, `tsc`,
-   ESLint, `flutter analyze`).
+   oxlint, `flutter analyze`).
 3. Dependency, image and secret scans are clean or have a written exception.
 4. The threat model is updated for what the phase added.
 5. No new plain-HTTP path, no secret in git, no sensitive value in logs.
@@ -303,7 +303,7 @@ Python and Node versions do not matter, because everything runs in containers.
 | `db` | PostgreSQL 18 | TLS enabled; data in a named volume; tests use a throwaway database |
 | `migrate` | Runs Alembic migrations, then exits | Idempotent |
 | `api` | FastAPI with auto-reload | Serves HTTPS with a dev certificate |
-| `proxy` | Caddy with its internal certificate authority | `https://api.storely.localhost`, `https://app.storely.localhost` |
+| `proxy` | Caddy, using certificates from our own dev CA (`make certs`) | `https://api.storely.localhost`, `https://app.storely.localhost` |
 | `web` | Vite dev server | Added in Phase 5; runs in Docker |
 | `mailpit` | Catches verification/reset emails | Dev-only; web UI to read the codes |
 
@@ -318,7 +318,7 @@ Python and Node versions do not matter, because everything runs in containers.
   Homebrew has Python 3.12.13 (`python3.12`; plain `python3` is Apple's 3.9) and
   Node 26.4.0 (currently broken by a missing `libsimdjson.33` library; Node 24
   also installed). `mkcert` is not installed and is not needed, because Caddy
-  provides the local CA. Everything runs in containers, so the host versions
+  provides the local CA (superseded: see Phase 0 notes). Everything runs in containers, so the host versions
   only matter if you run a tool outside Docker.
 
 ### 7.1 Pinned runtime versions
@@ -413,7 +413,7 @@ Every phase ends with the security gate (section 6) and the user's go-ahead.
 
 ### Phase 0: Local environment and foundations (S-M)
 - `git init` both new repos; add `.gitignore`, `.env.example`, lint and format
-  config, pre-commit hooks (secret scan, ruff, ESLint).
+  config, pre-commit hooks (secret scan, ruff, oxlint).
 - `storelyapi`: FastAPI skeleton, Dockerfile (non-root, slim, pinned),
   `docker-compose.yml` with `db`, `migrate`, `api`, `proxy`, `mailpit`; TLS
   between every hop; settings from environment; `/health`; structured logging
@@ -427,6 +427,35 @@ Every phase ends with the security gate (section 6) and the user's go-ahead.
 **Done when:** `make up` serves `https://api.storely.localhost/health` over TLS,
 the API reaches Postgres over verified TLS, tests and scans run green, and the
 threat model is written.
+
+**Status: DONE 2026-10-25.** Commits: `storelyapi` f5e986a (scaffold),
+e2cc266 (Docker stack with TLS), a2bd397 (lint/security/CI), 80c6a04 (docs);
+`storelyweb` 57a64e4, 1ae6915; this repo bcc40e1 (plan).
+
+What was verified:
+- `make up` from a fresh clone starts db, migrate, api, proxy and mailpit;
+  `make verify` passes: TLS 1.0/1.1 refused, 1.2/1.3 work, certificates rejected
+  when the CA is untrusted, HTTP only redirects, security headers present, API
+  and database not published on the host, database connection encrypted with
+  plaintext, untrusted-CA and wrong-host-name connections all refused, and the
+  app database role is not superuser and cannot bypass RLS.
+- Unit tests (8) and integration tests (5) pass on Python 3.14 and PostgreSQL 18;
+  the integration tests also pass on PostgreSQL 17.11.
+- ruff, strict mypy and bandit are clean; `pip-audit`, gitleaks and the Trivy
+  production-image scan report nothing. Web: oxlint, `tsc`, Vitest, production
+  build and `npm audit` pass on Node 26.12.
+
+Deviations from the plan above:
+- One development CA (`scripts/gen-certs.sh`) signs every certificate instead of
+  Caddy's internal CA. It gives a single certificate to trust for browsers and the
+  Android emulator, and lets the proxy verify the API's certificate.
+- The web linter is oxlint (the Vite default) with security rules, not ESLint.
+- The web dev server is not in `docker compose` yet; it joins in Phase 5.
+- Not run here: the pre-commit hooks and the GitHub Actions workflows (no hosted
+  runner available). Their tools were run directly via `make lint`, `make audit`,
+  `make secrets` and `make scan-image`.
+- Threat model: `storelyapi/docs/THREAT_MODEL.md`. API contract draft:
+  `storelyapi/docs/API_CONTRACT.md` (a written contract, not yet generated OpenAPI).
 
 ### Phase 1: Database and core authentication (L)
 - Port `supabase/storely_cloud_schema.sql` and its migrations to Alembic,
@@ -584,6 +613,6 @@ SQLCipher encryption of the phone database, passkeys.
   Until cutover, keep `supabase/migrations/` in sync for the legacy backend.
 - Money is `Decimal` / `NUMERIC` on the server; round only at display.
 - Keep `flutter analyze` clean; keep `ruff`, `mypy`, `bandit` and `pytest` green
-  in `storelyapi`; keep `tsc`, ESLint and tests green in `storelyweb`.
+  in `storelyapi`; keep `tsc`, oxlint and tests green in `storelyweb`.
 - No secrets in git. The Flutter app ships only the API URL, never server keys.
 - Do not change the Android bottom navigation or app flows without being asked.
