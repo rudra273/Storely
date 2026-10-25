@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0-6 done; Phase 7 (reports) next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0-7 done; Phase 8 (web billing) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -820,6 +820,37 @@ can look products up, and changes appear on the phone after a sync.
 
 **Done when:** each report matches the phone for the fixture data, and GSTR-1
 opens cleanly in Excel.
+
+**Result (done 2026-10-25).**
+- API (`storelyapi`, `docs/API_CONTRACT.md`): owner and admin only. KPIs, day book, profit and loss,
+  receivables ageing, expiring stock, purchase register, tax summary, stock valuation, and the monthly
+  GSTR-1 (as data and as a workbook with the phone's seven sheets). Every report except GSTR-1 also
+  downloads as CSV or Excel (`format=`), money as real numbers, text never a formula. The definitions are the
+  phone's (`database_reports.dart`, `database_kpi.dart`, `gstr1_export.dart`); sums are exact decimals in
+  PostgreSQL, rounded to paise on output, except where the phone rounds each line first.
+- **Parity test** (`make test-mobile`, new scenario): the phone's own code builds a realistic shop (GST, discounts,
+  inter-state and B2B bills, partial payments, a credit note, a cancelled bill, expiring batches, expenses),
+  uploads it, and the test compares its own local reports with the server's: KPIs over three date ranges, profit
+  and loss, tax by rate, purchases, three day books, ageing, expiring (two windows), stock valuation, and every
+  cell of the GSTR-1 workbook against the phone's `Gstr1Export`. It found two real server bugs (expense dates
+  with a time, and day-book tie order); both fixed. The test fails when a bucket boundary is moved.
+- Web: Reports with eight tabs, a period picker (Today to Custom, in the address so it can be bookmarked),
+  KPI tiles, SVG charts with text alternatives (no chart library), loading/empty/error states,
+  CSV and Excel download, and "Print / Save as PDF" through the browser (no server PDF).
+- Checks: API 157 integration and 30 unit tests, hand-worked report tests (numbers checked by hand first),
+  mutation checks; web 46 tests; 42-step real-browser run including the downloads and staff refusal; phone live suite
+  15 scenarios. Fresh clone, `make verify`, scans and audit pass.
+- Differences from the phone, on purpose: numbers the phone shows unrounded are rounded to paise; day-book
+  bills with the same timestamp are ordered by bill number; "unpaid" in KPIs counts every bill with a balance
+  (as the phone does) while ageing leaves out credit notes (as the phone does).
+- Not built: server-made PDFs, e-invoice/IRN, GSTR-3B, scheduled or emailed reports, comparison with the
+  previous period, the phone's less-used KPIs (customers, slow movers, suppliers, void rate).
+
+### Still to validate yourself after Phase 7
+- [ ] Open the GSTR-1 workbook in Excel and have your CA check it against a month they already filed.
+- [ ] Compare a few real report numbers on the web against the phone app for the same month.
+- [ ] Look at the report pages on the customer's screen, and try Print / Save as PDF in their browser.
+- [ ] Decide which of the phone's other KPIs the customer actually wants on the web.
 
 ### Phase 8: Web Billing (L), priority 2
 - Create a bill: customer, items, discounts, GST, payments, round-off, invoice
