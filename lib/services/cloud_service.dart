@@ -1,88 +1,62 @@
 import 'sync_status.dart';
 import 'app_log.dart';
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
+import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
+import 'api/api_client.dart';
+import 'api/token_store.dart';
+import 'cloud/api_cloud_backend.dart';
+import 'cloud/cloud_backend.dart';
+import 'cloud/supabase_cloud_backend.dart';
 import 'sync/cloud_sync_engine.dart';
-import 'sync/sync_backend.dart';
 
+export 'cloud/cloud_backend.dart'
+    show
+        CloudEmailNotVerified,
+        CloudMfaRequired,
+        CloudUser,
+        ShopInvite,
+        ShopMember,
+        SignUpOutcome;
 export 'sync/cloud_sync_engine.dart' show FirstSyncMode, CloudSyncResult;
 
-/// Which Supabase backend the app talks to.
+/// Which cloud the app talks to.
 ///
-/// [storelyHosted] uses the bundled [CloudDefaults] credentials (Option A —
-/// zero setup for the user). [ownSupabase] uses URL + anon key the user pastes
-/// in themselves (Option B — full data ownership).
-enum CloudBackendMode { storelyHosted, ownSupabase }
+/// [storelyApi] is Storely's own server (the default for new cloud users when
+/// the build knows its address). [storelyHosted] uses the bundled [CloudDefaults]
+/// Supabase credentials and [ownSupabase] a URL + anon key the user pastes in;
+/// both are the original setup, kept until everyone has moved to the API.
+enum CloudBackendMode { storelyHosted, ownSupabase, storelyApi }
 
-/// A member of a cloud shop (joined with their profile email when available).
-class ShopMember {
-  final String userId;
-  final String role;
-  final String? email;
-  final DateTime? joinedAt;
-
-  const ShopMember({
-    required this.userId,
-    required this.role,
-    this.email,
-    this.joinedAt,
-  });
-
-  bool get isOwner => role == 'owner';
-
-  factory ShopMember.fromMap(Map<String, dynamic> map) {
-    final profile = map['profiles'];
-    return ShopMember(
-      userId: map['user_id']?.toString() ?? '',
-      role: map['role']?.toString() ?? 'staff',
-      email: profile is Map ? profile['email']?.toString() : null,
-      joinedAt: DateTime.tryParse(map['created_at']?.toString() ?? ''),
-    );
-  }
-}
-
-/// A pending invite to a cloud shop.
-class ShopInvite {
-  final String id;
-  final String email;
-  final String role;
-  final DateTime? createdAt;
-
-  const ShopInvite({
-    required this.id,
-    required this.email,
-    required this.role,
-    this.createdAt,
-  });
-
-  factory ShopInvite.fromMap(Map<String, dynamic> map) {
-    return ShopInvite(
-      id: map['id']?.toString() ?? '',
-      email: map['email']?.toString() ?? '',
-      role: map['role']?.toString() ?? 'staff',
-      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? ''),
-    );
-  }
+extension CloudBackendModeX on CloudBackendMode {
+  /// True for the options a user sees as "Storely Cloud" (not their own Supabase).
+  bool get isStorelyCloud => this != CloudBackendMode.ownSupabase;
 }
 
 class CloudConfig {
   final String url;
   final String anonKey;
 
-  const CloudConfig({required this.url, required this.anonKey});
+  /// True for the Storely API, which has no anon key and must be https.
+  final bool isApi;
+
+  const CloudConfig({required this.url, required this.anonKey}) : isApi = false;
+
+  const CloudConfig.api(this.url) : anonKey = '', isApi = true;
 
   bool get isValid {
     final uri = Uri.tryParse(url);
-    return uri != null &&
-        (uri.scheme == 'https' || uri.scheme == 'http') &&
-        uri.host.isNotEmpty &&
+    if (uri == null || uri.host.isEmpty) return false;
+    if (isApi) return uri.scheme == 'https';
+    return (uri.scheme == 'https' || uri.scheme == 'http') &&
         anonKey.trim().isNotEmpty;
   }
 }
@@ -106,7 +80,7 @@ enum CloudMembership { unknown, member, needsRegistration }
 class CloudState {
   final CloudConfig? config;
   final CloudBackendMode mode;
-  final User? user;
+  final CloudUser? user;
   final CloudSyncPhase phase;
   final CloudMembership membership;
 
@@ -155,7 +129,7 @@ class CloudState {
     CloudConfig? config,
     bool clearConfig = false,
     CloudBackendMode? mode,
-    User? user,
+    CloudUser? user,
     bool clearUser = false,
     CloudSyncPhase? phase,
     CloudMembership? membership,
@@ -195,18 +169,21 @@ class CloudService with WidgetsBindingObserver {
   static const _urlKey = 'storely_cloud_url';
   static const _anonKeyKey = 'storely_cloud_anon_key';
   static const _modeKey = 'storely_cloud_backend_mode';
+  static const _apiUserKey = 'storely_api_last_user';
   static const _lastSyncStateKey = CloudSyncEngine.lastSyncStateKey;
 
   final state = ValueNotifier<CloudState>(const CloudState());
   final _connectivity = Connectivity();
-  StreamSubscription<AuthState>? _authSubscription;
+  CloudBackend? _backend;
+  StreamSubscription<CloudUser?>? _userSubscription;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   Timer? _autoSyncTimer;
   Timer? _debounceTimer;
-  bool _clientReady = false;
   Future<void>? _syncInFlight;
 
-  SupabaseClient? get client => _clientReady ? Supabase.instance.client : null;
+  /// True when sign-up is confirmed with a code typed into the app and passwords
+  /// can be reset from the app (the Storely API), not by emailed link.
+  bool get supportsEmailCodes => _backend?.supportsEmailCodes ?? false;
 
   Future<void> initialize() async {
     DatabaseHelper.instance.assertAdminMutation = () async {
@@ -231,7 +208,7 @@ class CloudService with WidgetsBindingObserver {
       clearError: true,
     );
     if (config != null) {
-      await _initializeSupabase(config);
+      await _startBackend(config, mode);
     }
     _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen((
       results,
@@ -267,31 +244,41 @@ class CloudService with WidgetsBindingObserver {
     }
   }
 
-  /// Enable cloud sync against the Storely-hosted backend (Option A).
+  /// Enable cloud sync against Storely Cloud.
   ///
-  /// Uses the bundled [CloudDefaults] credentials — the user never has to enter
-  /// a URL or anon key.
+  /// Uses the Storely API when this build knows its address, otherwise the
+  /// bundled [CloudDefaults] Supabase credentials. Either way the user never has
+  /// to enter a URL or key.
   Future<void> useStorelyCloud() async {
-    if (!CloudDefaults.isAvailable) {
+    final CloudConfig config;
+    final CloudBackendMode mode;
+    if (CloudDefaults.apiAvailable) {
+      config = CloudConfig.api(
+        CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
+      );
+      mode = CloudBackendMode.storelyApi;
+    } else if (CloudDefaults.supabaseAvailable) {
+      config = CloudConfig(
+        url: CloudDefaults.url.replaceFirst(RegExp(r'/+$'), ''),
+        anonKey: CloudDefaults.anonKey,
+      );
+      mode = CloudBackendMode.storelyHosted;
+    } else {
       throw StateError(
         'Storely Cloud is not available in this build. Use your own Supabase project instead.',
       );
     }
-    final config = CloudConfig(
-      url: CloudDefaults.url.replaceFirst(RegExp(r'/+$'), ''),
-      anonKey: CloudDefaults.anonKey,
-    );
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_modeKey, CloudBackendMode.storelyHosted.name);
-    // Stored creds aren't needed for hosted mode; clear any stale own-Supabase
+    await prefs.setString(_modeKey, mode.name);
+    // Stored creds aren't needed for hosted modes; clear any stale own-Supabase
     // values so a later switch doesn't accidentally reuse them.
     await prefs.remove(_urlKey);
     await prefs.remove(_anonKeyKey);
-    await _initializeSupabase(config, reset: true);
+    await _startBackend(config, mode, reset: true);
     state.value = state.value.copyWith(
       config: config,
-      mode: CloudBackendMode.storelyHosted,
-      user: client?.auth.currentUser,
+      mode: mode,
+      user: _backend?.currentUser,
       message: 'Storely Cloud enabled',
       clearError: true,
     );
@@ -310,11 +297,11 @@ class CloudService with WidgetsBindingObserver {
     await prefs.setString(_modeKey, CloudBackendMode.ownSupabase.name);
     await prefs.setString(_urlKey, normalized.url);
     await prefs.setString(_anonKeyKey, normalized.anonKey);
-    await _initializeSupabase(normalized, reset: true);
+    await _startBackend(normalized, CloudBackendMode.ownSupabase, reset: true);
     state.value = state.value.copyWith(
       config: normalized,
       mode: CloudBackendMode.ownSupabase,
-      user: client?.auth.currentUser,
+      user: _backend?.currentUser,
       message: 'Cloud settings saved',
       clearError: true,
     );
@@ -330,8 +317,14 @@ class CloudService with WidgetsBindingObserver {
 
   /// Resolve the active [CloudConfig] for [mode], or null when not configured.
   CloudConfig? _resolveConfig(SharedPreferences prefs, CloudBackendMode mode) {
+    if (mode == CloudBackendMode.storelyApi) {
+      if (!CloudDefaults.apiAvailable) return null;
+      return CloudConfig.api(
+        CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
+      );
+    }
     if (mode == CloudBackendMode.storelyHosted) {
-      if (!CloudDefaults.isAvailable) return null;
+      if (!CloudDefaults.supabaseAvailable) return null;
       return CloudConfig(
         url: CloudDefaults.url.replaceFirst(RegExp(r'/+$'), ''),
         anonKey: CloudDefaults.anonKey,
@@ -350,16 +343,21 @@ class CloudService with WidgetsBindingObserver {
     await prefs.remove(_urlKey);
     await prefs.remove(_anonKeyKey);
     await prefs.remove(_modeKey);
+    await prefs.remove(_apiUserKey);
     // Reset the first-sync watermark so reconnecting cloud is a true fresh
     // start: the upload-vs-fresh choice will be offered again, instead of the
     // device assuming everything was already synced.
     await CloudSyncEngine.resetProgress(DatabaseHelper.instance);
-    await _authSubscription?.cancel();
-    _authSubscription = null;
-    if (_clientReady) {
-      await Supabase.instance.dispose();
-      _clientReady = false;
+    final backend = _backend;
+    if (backend is ApiCloudBackend) {
+      // Turning cloud off should also end this phone's session on the server.
+      try {
+        await backend.signOut();
+      } on Object {
+        // Offline: the token is wiped locally either way.
+      }
     }
+    await _stopBackend();
     state.value = const CloudState(message: 'Cloud sync disabled');
   }
 
@@ -368,77 +366,91 @@ class CloudService with WidgetsBindingObserver {
     String password, {
     bool syncAfterAuth = true,
   }) async {
-    final activeClient = _requireClient();
-    final response = await activeClient.auth.signInWithPassword(
-      email: email.trim(),
-      password: password,
-    );
-    state.value = state.value.copyWith(
-      user: response.user ?? activeClient.auth.currentUser,
-      message: 'Signed in',
-      clearError: true,
-    );
-    if (syncAfterAuth) unawaited(syncNow(reason: 'Signed in'));
+    final user = await _requireBackend().signIn(email, password);
+    _signedIn(user, 'Signed in', syncAfterAuth);
   }
 
-  Future<void> signUp(
+  /// Second step of signing in, after [CloudMfaRequired].
+  Future<void> completeMfa(String code, {bool syncAfterAuth = true}) async {
+    final user = await _requireBackend().completeMfa(code);
+    _signedIn(user, 'Signed in', syncAfterAuth);
+  }
+
+  Future<SignUpOutcome> signUp(
     String email,
     String password, {
     bool syncAfterAuth = true,
   }) async {
-    final activeClient = _requireClient();
-    final response = await activeClient.auth.signUp(
-      email: email.trim(),
-      password: password,
-    );
+    final result = await _requireBackend().signUp(email, password);
     state.value = state.value.copyWith(
-      user: response.user ?? activeClient.auth.currentUser,
-      message: response.session == null
-          ? 'Account created. Confirm email if Supabase requires it.'
-          : 'Account created',
+      user: result.user,
+      message: switch (result.outcome) {
+        SignUpOutcome.signedIn => 'Account created',
+        SignUpOutcome.confirmByEmailLink =>
+          'Account created. Confirm email if Supabase requires it.',
+        SignUpOutcome.emailCodeSent =>
+          'Account created. Enter the code we emailed you.',
+      },
       clearError: true,
     );
-    if (syncAfterAuth && response.session != null) {
+    if (syncAfterAuth && result.outcome == SignUpOutcome.signedIn) {
       unawaited(syncNow(reason: 'Signed up'));
     }
+    return result.outcome;
+  }
+
+  /// Confirms a new account with the 6-digit code that was emailed.
+  Future<void> verifyEmail(String email, String code) =>
+      _requireBackend().verifyEmail(email, code);
+
+  Future<void> resendVerificationCode(String email) =>
+      _requireBackend().resendVerificationCode(email);
+
+  /// Emails a code for resetting the password.
+  Future<void> forgotPassword(String email) =>
+      _requireBackend().forgotPassword(email);
+
+  Future<void> resetPassword(String email, String code, String newPassword) =>
+      _requireBackend().resetPassword(email, code, newPassword);
+
+  void _signedIn(CloudUser user, String message, bool syncAfterAuth) {
+    state.value = state.value.copyWith(
+      user: user,
+      message: message,
+      clearError: true,
+    );
+    if (syncAfterAuth) unawaited(syncNow(reason: message));
   }
 
   Future<bool> currentUserHasShopMembership() async {
-    final activeClient = _requireClient();
-    final user = activeClient.auth.currentUser;
-    if (user == null) return false;
-    final rows = await activeClient
-        .from('shop_members')
-        .select('shop_id')
-        .eq('user_id', user.id)
-        .limit(1);
-    return (rows as List).isNotEmpty;
+    final backend = _requireBackend();
+    if (backend.currentUser == null) return false;
+    return backend.hasShopMembership();
   }
 
   /// Register the local shop in the cloud and make the signed-in user its
-  /// owner (atomic via the create_shop RPC), then run a full sync.
+  /// owner (atomic on the server), then run a full sync.
   ///
   /// Used by the "Register your shop" flow when a signed-in owner belongs to no
   /// cloud shop yet.
   Future<void> registerShop() async {
-    final activeClient = _requireClient();
-    if (activeClient.auth.currentUser == null) {
+    final backend = _requireBackend();
+    if (backend.currentUser == null) {
       throw StateError('Sign in before registering a shop.');
     }
     final profile = await DatabaseHelper.instance.getShopProfile();
     final shopId = await DatabaseHelper.instance.currentShopId();
-    await activeClient.rpc(
-      'create_shop',
-      params: {
-        'target_shop_id': shopId,
-        'shop_name': profile?.name ?? 'My Shop',
-        'shop_phone': profile?.phone,
-        'shop_email': profile?.email,
-        'shop_gstin': profile?.gstin,
-        'shop_address': profile?.address,
-        'shop_created_at': profile?.createdAt.toIso8601String(),
-        'shop_updated_at': profile?.updatedAt.toIso8601String(),
-      },
+    await backend.registerShop(
+      ShopRegistration(
+        shopId: shopId,
+        name: profile?.name ?? 'My Shop',
+        phone: profile?.phone,
+        email: profile?.email,
+        gstin: profile?.gstin,
+        address: profile?.address,
+        createdAt: profile?.createdAt,
+        updatedAt: profile?.updatedAt,
+      ),
     );
     state.value = state.value.copyWith(
       membership: CloudMembership.member,
@@ -477,87 +489,56 @@ class CloudService with WidgetsBindingObserver {
     );
   }
 
-  // ── Member management (owner/admin only; enforced by RLS) ──────────────
+  // ── Member management (owner/admin only; enforced by the server) ───────
 
   /// Invite a person to the current shop by email. They sign up themselves and
-  /// are linked on their first sync (see accept_invite). Owner/admin only.
+  /// are linked on their first sync. Owner/admin only.
   Future<void> inviteMember(String email, String role) async {
-    final activeClient = _requireClient();
-    final user = activeClient.auth.currentUser;
-    if (user == null) throw StateError('Sign in first.');
+    final backend = _requireBackend();
+    if (backend.currentUser == null) throw StateError('Sign in first.');
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty || !normalizedEmail.contains('@')) {
       throw ArgumentError('Enter a valid email address.');
     }
-    final shopId = await DatabaseHelper.instance.currentShopId();
-    await activeClient.from('shop_invites').insert({
-      'shop_id': shopId,
-      'email': normalizedEmail,
-      'role': role,
-      'invited_by': user.id,
-    });
+    await backend.inviteMember(
+      await DatabaseHelper.instance.currentShopId(),
+      normalizedEmail,
+      role,
+    );
   }
 
-  /// The current shop's members (owner/admin only — RLS gated).
-  Future<List<ShopMember>> listMembers() async {
-    final activeClient = _requireClient();
-    final shopId = await DatabaseHelper.instance.currentShopId();
-    final rows = await activeClient
-        .from('shop_members')
-        .select('user_id, role, created_at, profiles(email)')
-        .eq('shop_id', shopId);
-    return (rows as List)
-        .map((row) => ShopMember.fromMap(Map<String, dynamic>.from(row as Map)))
-        .toList();
-  }
+  /// The current shop's members (owner/admin only).
+  Future<List<ShopMember>> listMembers() async => _requireBackend().listMembers(
+    await DatabaseHelper.instance.currentShopId(),
+  );
 
   /// Pending (not yet accepted) invites for the current shop.
-  Future<List<ShopInvite>> listPendingInvites() async {
-    final activeClient = _requireClient();
-    final shopId = await DatabaseHelper.instance.currentShopId();
-    final rows = await activeClient
-        .from('shop_invites')
-        .select('id, email, role, created_at')
-        .eq('shop_id', shopId)
-        .filter('accepted_at', 'is', null);
-    return (rows as List)
-        .map((row) => ShopInvite.fromMap(Map<String, dynamic>.from(row as Map)))
-        .toList();
-  }
+  Future<List<ShopInvite>> listPendingInvites() async => _requireBackend()
+      .listPendingInvites(await DatabaseHelper.instance.currentShopId());
 
-  /// Change a member's role. Cannot target owners (RLS rejects). Owner/admin.
-  Future<void> changeMemberRole(String userId, String role) async {
-    final activeClient = _requireClient();
-    final shopId = await DatabaseHelper.instance.currentShopId();
-    await activeClient
-        .from('shop_members')
-        .update({'role': role})
-        .eq('shop_id', shopId)
-        .eq('user_id', userId);
-  }
+  /// Change a member's role. Cannot target owners. Owner/admin.
+  Future<void> changeMemberRole(String userId, String role) async =>
+      _requireBackend().changeMemberRole(
+        await DatabaseHelper.instance.currentShopId(),
+        userId,
+        role,
+      );
 
-  /// Remove a member from the shop. Cannot remove owners (RLS rejects).
-  Future<void> removeMember(String userId) async {
-    final activeClient = _requireClient();
-    final shopId = await DatabaseHelper.instance.currentShopId();
-    await activeClient
-        .from('shop_members')
-        .delete()
-        .eq('shop_id', shopId)
-        .eq('user_id', userId);
-  }
+  /// Remove a member from the shop. Cannot remove owners.
+  Future<void> removeMember(String userId) async => _requireBackend()
+      .removeMember(await DatabaseHelper.instance.currentShopId(), userId);
 
   /// Revoke a pending invite.
-  Future<void> revokeInvite(String inviteId) async {
-    final activeClient = _requireClient();
-    await activeClient.from('shop_invites').delete().eq('id', inviteId);
-  }
+  Future<void> revokeInvite(String inviteId) async => _requireBackend()
+      .revokeInvite(await DatabaseHelper.instance.currentShopId(), inviteId);
 
   Future<void> signOut() async {
-    final activeClient = client;
-    if (activeClient != null) {
-      await activeClient.auth.signOut();
+    final backend = _backend;
+    if (backend != null) {
+      await backend.signOut();
     }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_apiUserKey);
     state.value = state.value.copyWith(
       clearUser: true,
       clearShopRole: true,
@@ -577,8 +558,8 @@ class CloudService with WidgetsBindingObserver {
   }
 
   Future<void> _sync({String? reason, FirstSyncMode? firstSyncMode}) async {
-    final activeClient = client;
-    if (activeClient == null || activeClient.auth.currentUser == null) return;
+    final backend = _backend;
+    if (backend == null || backend.currentUser == null) return;
     final connected = await _connectivity.checkConnectivity();
     if (connected.contains(ConnectivityResult.none)) return;
 
@@ -596,7 +577,7 @@ class CloudService with WidgetsBindingObserver {
           ? null
           : (knownRole == 'owner' || knownRole == 'admin');
       final result = await CloudSyncEngine(
-        backend: SupabaseSyncBackend(activeClient),
+        backend: backend.sync,
         database: DatabaseHelper.instance,
         knownIsAdmin: knownIsAdmin,
       ).sync(firstSyncMode: firstSyncMode);
@@ -625,7 +606,9 @@ class CloudService with WidgetsBindingObserver {
       }
 
       // Fetch the user's role after sync completes.
-      final role = await _fetchUserRole(activeClient);
+      final role = await backend.fetchRole(
+        await DatabaseHelper.instance.currentShopId(),
+      );
 
       state.value = state.value.copyWith(
         phase: CloudSyncPhase.idle,
@@ -647,53 +630,102 @@ class CloudService with WidgetsBindingObserver {
     }
   }
 
-  /// Query the user's role from cloud shop_members.
-  Future<String?> _fetchUserRole(SupabaseClient activeClient) async {
-    final user = activeClient.auth.currentUser;
-    if (user == null) return null;
-    try {
-      final rows = await activeClient
-          .from('shop_members')
-          .select('role')
-          .eq('shop_id', await DatabaseHelper.instance.currentShopId())
-          .eq('user_id', user.id)
-          .limit(1);
-      if ((rows as List).isEmpty) return null;
-      return rows.first['role']?.toString();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  SupabaseClient _requireClient() {
-    final activeClient = client;
-    if (activeClient == null) {
+  CloudBackend _requireBackend() {
+    final backend = _backend;
+    if (backend == null) {
       throw StateError('Cloud sync is not configured');
     }
-    return activeClient;
+    return backend;
   }
 
-  Future<void> _initializeSupabase(
-    CloudConfig config, {
+  Future<void> _stopBackend() async {
+    await _userSubscription?.cancel();
+    _userSubscription = null;
+    final backend = _backend;
+    _backend = null;
+    if (backend != null) await backend.dispose();
+  }
+
+  Future<CloudBackend> _createBackend(
+    CloudConfig config,
+    CloudBackendMode mode,
+  ) async {
+    if (mode != CloudBackendMode.storelyApi) {
+      return SupabaseCloudBackend.start(config.url, config.anonKey);
+    }
+    var agent = 'StorelyApp';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      agent = 'StorelyApp/${info.version}+${info.buildNumber}';
+    } on Object {
+      // A missing version only costs a less specific label in the sign-in alert.
+    }
+    return ApiCloudBackend(
+      ApiClient(
+        baseUrl: Uri.parse(config.url),
+        httpClient: http.Client(),
+        tokens: SecureTokenStore(),
+        userAgent: agent,
+      ),
+    );
+  }
+
+  Future<void> _startBackend(
+    CloudConfig config,
+    CloudBackendMode mode, {
     bool reset = false,
   }) async {
-    if (_clientReady && reset) {
-      await _authSubscription?.cancel();
-      _authSubscription = null;
-      await Supabase.instance.dispose();
-      _clientReady = false;
-    }
-    if (!_clientReady) {
-      await Supabase.initialize(url: config.url, anonKey: config.anonKey);
-      _clientReady = true;
-    }
-    final activeClient = Supabase.instance.client;
-    state.value = state.value.copyWith(user: activeClient.auth.currentUser);
-    _authSubscription ??= activeClient.auth.onAuthStateChange.listen((data) {
-      state.value = state.value.copyWith(user: data.session?.user);
-      if (data.session?.user != null) {
-        syncNow(reason: 'Auth restored');
-      }
+    if (_backend != null && reset) await _stopBackend();
+    _backend ??= await _createBackend(config, mode);
+    final backend = _backend!;
+    if (backend is ApiCloudBackend) await _restoreApiSession(backend);
+    state.value = state.value.copyWith(
+      user: backend.currentUser,
+      clearUser: backend.currentUser == null,
+    );
+    _userSubscription ??= backend.userChanges.listen((user) {
+      state.value = user == null
+          ? state.value.copyWith(clearUser: true)
+          : state.value.copyWith(user: user);
+      if (backend is ApiCloudBackend) unawaited(_rememberApiUser(user));
+      if (user != null) syncNow(reason: 'Auth restored');
     });
+  }
+
+  /// Picks up the session a previous launch left behind. With no network the
+  /// last known person is shown as signed in (their token is exchanged on the
+  /// first request that has signal); if the server says the session is over,
+  /// they are signed out.
+  Future<void> _restoreApiSession(ApiCloudBackend backend) async {
+    final api = backend.api;
+    if (api.user != null || !await api.hasStoredSession()) return;
+    try {
+      await api.restoreSession();
+    } on Object {
+      final cached = await _readApiUser();
+      if (cached != null) api.adoptUser(cached);
+    }
+  }
+
+  Future<void> _rememberApiUser(CloudUser? user) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (user == null) {
+      await prefs.remove(_apiUserKey);
+    } else {
+      await prefs.setString(
+        _apiUserKey,
+        jsonEncode({'id': user.id, 'email': user.email}),
+      );
+    }
+  }
+
+  Future<ApiUser?> _readApiUser() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_apiUserKey);
+    if (raw == null) return null;
+    try {
+      return ApiUser.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } on Object {
+      return null;
+    }
   }
 }

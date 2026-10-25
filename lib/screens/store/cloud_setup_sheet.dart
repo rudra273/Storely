@@ -400,7 +400,10 @@ class _BackendModeSelector extends StatelessWidget {
     required IconData icon,
     required CloudBackendMode value,
   }) {
-    final selected = mode == value;
+    // Storely's own server and the older hosted Supabase are both "Storely Cloud".
+    final selected = value == CloudBackendMode.ownSupabase
+        ? mode == value
+        : mode.isStorelyCloud;
     return Expanded(
       child: GestureDetector(
         onTap: enabled && !selected ? () => onChanged(value) : null,

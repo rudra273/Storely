@@ -117,6 +117,19 @@ class ApiClient {
     return _user;
   }
 
+  /// True when an earlier launch left a refresh token behind.
+  Future<bool> hasStoredSession() async =>
+      await _tokens.readRefreshToken() != null;
+
+  /// Starts out signed in as [user] without asking the server. Used at launch
+  /// with no network: the stored refresh token is exchanged on the first request
+  /// that needs it, so the person is not shown a sign-in screen in a shop with
+  /// no signal.
+  void adoptUser(ApiUser user) {
+    _user = user;
+    _userChanges.add(user);
+  }
+
   // ── sign-in and account ──
 
   Future<LoginResult> login(
