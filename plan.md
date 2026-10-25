@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0 and 1 done; Phase 2 next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0, 1 and 2 done; Phase 3 (sync API) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -523,6 +523,52 @@ Decisions and caveats:
 **Done when:** an owner can create a shop, invite an admin and staff, enable 2FA,
 reset a password and revoke a session, and the matrix proves no cross-shop or
 over-privileged access.
+
+**Status: DONE 2026-10-25.** `storelyapi` commits 27c7f03 (migration 0004), 6aec32b
+(password reset/change, sessions, events), 058e553 (two-factor), 29ee17f (shops, roles),
+26ed877 (email change, export, deletion), ec2507b (authorization matrix), 5a40d56
+(smoke test, docs).
+
+What was built and verified:
+- **Account security:** password reset by emailed code (answers identically for every
+  address, single use, signs every session out, clears a lockout); password change that
+  keeps the current device and signs the rest out; list and revoke sessions; log out
+  everywhere; append-only security-event log (the API role cannot edit or delete it,
+  SQL-tested); alerts for new-device sign-in, password change and two-factor changes.
+- **Two-factor (TOTP):** RFC 6238 test vectors pass; replay-proof; secret encrypted with
+  AES-256-GCM bound to the user; ten one-time recovery codes stored as keyed hashes; a
+  five-attempt challenge between password and code; turning it off needs password and a
+  code. Optional switch `require_mfa_for_admins` (default off).
+- **Shops and roles:** create (keeping the phone's own shop id), members, invites that
+  match a verified email, device letters, change role (owner only), remove or leave,
+  delete shop (owner, type the name). Roles are read from the database every request;
+  a stranger gets the same 404 as for a shop that does not exist; Row Level Security is
+  verified independently with raw SQL; identity never leaks across pooled connections.
+- **Account lifecycle:** change email (code to the new address only, identical answer if
+  taken, other devices signed out, old address told), data export (no secrets, rate
+  limited), delete account (password and, if on, a second-factor code; refuses while the
+  user owns a shop with other members; audit entry kept without a link to the account).
+- **Authorization matrix:** every route must be declared with an access level, so adding
+  a route without deciding who may call it fails the build; the public routes are an exact
+  reviewed list; each role gets exactly the allowed outcome on every shop route.
+- **Checks:** 14 unit tests, 88 integration tests, 4 SQL test files, strict typing, bandit,
+  dependency audit, secret scan and image scan are clean; `make smoke` and `make verify`
+  pass, including from a fresh clone. I broke 14 controls on purpose (session revocation,
+  JWT algorithm, reset revoking sessions, TOTP replay, 2FA enforcement, 404 for strangers,
+  admin-invite rule, shared-shop deletion, password check on deletion, undeclared route,
+  loosened owner rule and others) and each time the tests failed.
+
+Decisions and caveats:
+- You did not answer the two open questions, so I used the proposals: the staff matrix in
+  4.5, and two-factor optional with an enforcement switch for owners and admins that is
+  **off by default**. Say if you want it on.
+- Not built, deliberately: ownership transfer (the owner cannot leave or be removed; delete
+  the shop instead), regenerating recovery codes, a web page for account deletion (Phase 5),
+  and staff cost-price filtering (arrives with the product endpoints, Phase 6).
+- Pending invites show the shop id and role but not the shop name, because a non-member
+  cannot read the shop. A small server function can add the name later.
+- A secret-scan finding was the fixed test password; `.gitleaks.toml` allows only that exact
+  string and keeps every default rule (verified against planted fake keys).
 
 ### Phase 3: Sync API (L)
 - `POST /v1/sync/pull` and `/v1/sync/push` with the semantics in 4.3.
