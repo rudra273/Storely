@@ -63,6 +63,10 @@ dependencies:
   url_launcher: ^6.3.2
   uuid: ^4.5.1
   supabase_flutter: ^2.12.4
+  # Storely's own API (replaces Supabase after cutover): HTTPS client + tokens in the
+  # Android Keystore.
+  http: ^1.6.0
+  flutter_secure_storage: ^10.0.0
   shared_preferences: ^2.5.5
   connectivity_plus: ^7.1.1
   fl_chart: ^0.70.2
