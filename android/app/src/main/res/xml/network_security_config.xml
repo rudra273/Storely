@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release network rules for traffic that goes through Android's own network stack
+  (plugins, web views): HTTPS only, and only the phone's built-in certificate
+  authorities are trusted (nothing a user or malware installed).
+
+  Storely's own connections use Flutter's dart:io, which this file does not
+  govern. There the guarantees are: ApiClient refuses any non-https address, and
+  certificates are checked against the phone's trusted authorities. A debug build
+  can additionally trust the local development CA (CloudDefaults.devCaBase64,
+  honoured only when kDebugMode is true).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

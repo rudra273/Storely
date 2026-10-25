@@ -5,13 +5,13 @@ import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
-import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
 import 'api/api_client.dart';
+import 'api/http_client_factory.dart';
 import 'api/token_store.dart';
 import 'cloud/account_actions.dart';
 import 'cloud/api_cloud_backend.dart';
@@ -670,7 +670,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     return ApiCloudBackend(
       ApiClient(
         baseUrl: Uri.parse(config.url),
-        httpClient: http.Client(),
+        httpClient: createApiHttpClient(),
         tokens: SecureTokenStore(),
         userAgent: agent,
       ),

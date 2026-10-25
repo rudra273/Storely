@@ -22,6 +22,12 @@ class CloudDefaults {
 
   static bool get apiAvailable => apiUrl.startsWith('https://');
 
+  /// A development certificate authority (base64 of its PEM), for pointing a
+  /// DEBUG build at a local server:
+  ///   --dart-define=STORELY_DEV_CA_B64=...
+  /// Ignored in profile and release builds (see createApiHttpClient).
+  static const devCaBase64 = String.fromEnvironment('STORELY_DEV_CA_B64');
+
   /// True when the app was built with Storely-hosted Supabase credentials.
   static bool get supabaseAvailable => url.isNotEmpty && anonKey.isNotEmpty;
 
