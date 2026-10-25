@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phase 0 done; Phase 1 next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0 and 1 done; Phase 2 next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -472,6 +472,44 @@ Deviations from the plan above:
 
 **Done when:** a user can sign up, verify email through Mailpit, log in, refresh
 and log out, and all token and brute-force tests pass.
+
+**Status: DONE 2026-10-25.** `storelyapi` commits c625e4d (schema port and auth
+tables), 6092197 (core authentication), 1d38add (smoke test, docs).
+
+What was built and verified:
+- Migrations 0002 (auth tables, `app.uid()`, `app.email()`) and 0003 (the Supabase
+  schema ported: `auth.*` replaced, `profiles` removed, role `storely_app`). The
+  SQL is idempotent. All four SQL test files pass (the three ported ones plus a new
+  `auth_test.sql`) on PostgreSQL 17.11 and 18.6.
+- `app.email()` only returns a **verified** address, so an unverified signup can
+  never claim an invite for someone else's email (a hardening over Supabase).
+- Endpoints: `signup`, `resend-verification`, `verify-email`, `login`, `refresh`,
+  `logout`, `GET /v1/me`. argon2id plus a zxcvbn password policy; 15-minute EdDSA
+  access tokens; rotating refresh tokens with reuse detection; six-digit email
+  codes stored as keyed hashes, 5 attempts, 10 minutes; per-IP and per-email rate
+  limits; progressive login delay identical for unknown addresses; web refresh
+  cookie (`HttpOnly; Secure; SameSite=Strict`) plus a CSRF header; validation
+  errors never echo submitted values.
+- 22 auth integration tests and the 5 TLS tests run on a fresh scratch database
+  as the unprivileged role. I broke two controls on purpose (session revocation and
+  the JWT algorithm check) and confirmed the tests fail, then restored them.
+- `make smoke` runs signup -> real SMTP mail in Mailpit -> verify -> login ->
+  refresh -> logout through the TLS proxy. A fresh clone passes `make up`,
+  `smoke`, `test-integration`, `test-sql` and `verify`.
+
+Decisions and caveats:
+- Sync tables keep `double precision` money columns, exactly as the phone stores
+  them, so rows round-trip unchanged. Reports will cast to `NUMERIC` and round to
+  paise (Phase 7).
+- A refresh retried within 10 s is accepted (a lost response must not log a
+  shopkeeper out on a weak connection); replaying an older token revokes the
+  session. This is a deliberate trade-off.
+- Sign-in delay is per email, capped at 10 minutes, so an attacker who keeps
+  retrying can keep a known address delayed (recorded as residual risk in T21).
+- Mailpit's web UI was never reachable in Phase 0 (Docker cannot publish ports from
+  an internal-only network); fixed by also attaching it to the edge network.
+- Not yet built (belongs to later phases as planned): password reset and change,
+  sessions list, two-factor, account deletion (Phase 2), shops and roles.
 
 ### Phase 2: Shops, roles and account security (L)
 - Shops, members, roles, invites (create, list, accept), device registration,
