@@ -18,6 +18,8 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
+import 'package:storely/models/bill_totals.dart';
+import 'package:storely/models/pricing.dart';
 import 'package:storely/models/expense.dart';
 import 'package:storely/models/invoice_numbering.dart';
 import 'package:storely/models/product.dart';
@@ -389,6 +391,554 @@ void main() {
     },
     skip: skip,
   );
+
+  test('every web report matches the phone for the same shop data', () async {
+    final owner = await newAccount();
+    late String shopId;
+    final now = DateTime.now();
+    DateTime ago(int days, [int hour = 11]) => DateTime(
+      now.year,
+      now.month,
+      now.day,
+      hour,
+    ).subtract(Duration(days: days));
+    String day(DateTime d) => d.toIso8601String().substring(0, 10);
+
+    await on('a', () async {
+      await db.saveGlobalPricingSettings(
+        const GlobalPricingSettings(
+          defaultGstPercent: 5,
+          defaultOverheadCost: 0,
+          defaultProfitMarginPercent: 50,
+          gstRegistered: true,
+        ),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Rice',
+          mrp: 0,
+          purchasePrice: 100,
+          quantity: 20,
+          category: 'Grains',
+          unit: 'kg',
+          reorderLevel: 8,
+        ),
+        purchaseDate: ago(40),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Oil',
+          mrp: 0,
+          purchasePrice: 90,
+          quantity: 15,
+          category: 'Oils',
+          unit: 'l',
+          gstPercent: 12,
+        ),
+        purchaseDate: ago(35),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Soap',
+          mrp: 0,
+          purchasePrice: 10.5,
+          quantity: 3,
+          unit: 'pc',
+        ),
+        purchaseDate: ago(30),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Milk',
+          mrp: 0,
+          purchasePrice: 22.35,
+          quantity: 12,
+          unit: 'l',
+          purchaseBatchNo: 'M1',
+          purchaseExpiry: now.add(const Duration(days: 4)),
+        ),
+        purchaseDate: ago(5),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Curd',
+          mrp: 0,
+          purchasePrice: 31.2,
+          quantity: 6,
+          unit: 'pc',
+          purchaseBatchNo: 'C1',
+          purchaseExpiry: now.subtract(const Duration(days: 3)),
+        ),
+        purchaseDate: ago(9),
+      );
+      final rice = (await db.getAllProducts()).firstWhere(
+        (p) => p.name == 'Rice',
+      );
+      await db.restockProduct(rice, quantityAdded: 7.5, purchaseDate: ago(12));
+
+      Future<Bill> sale(
+        String name, {
+        double qty = 1,
+        int daysAgo = 0,
+        bool paid = true,
+        double partial = 0,
+        double discount = 0,
+        bool inter = false,
+        String customer = 'Asha',
+        String? phone = '9876543210',
+        String method = 'cash',
+      }) async {
+        final product = (await db.getAllProducts()).firstWhere(
+          (p) => p.name == name,
+        );
+        final cart = await db.buildBillItemForProduct(product);
+        cart.quantity = qty;
+        final item = BillTotals.taxedItem(
+          cart,
+          discountPercent: discount,
+          gstRegistered: true,
+          interState: inter,
+        );
+        final t = BillTotals.fromTaxedItems([item], roundOff: true);
+        final id = await db.insertBill(
+          Bill(
+            customerName: customer,
+            customerPhone: phone,
+            subtotalAmount: t.subtotal,
+            discountAmount: t.discountAmount,
+            discountPercent: discount,
+            taxableAmount: t.taxableAmount,
+            cgstAmount: t.cgstAmount,
+            sgstAmount: t.sgstAmount,
+            igstAmount: t.igstAmount,
+            roundOffAmount: t.roundOffAmount,
+            totalAmount: t.grandTotal,
+            itemCount: 1,
+            isPaid: paid,
+            paymentMethod: method,
+            paidAmount: paid ? t.grandTotal : partial,
+            createdAt: ago(daysAgo, 9 + (daysAgo % 8)),
+          ),
+          [item],
+        );
+        return (await db.getBillById(id))!;
+      }
+
+      final b1 = await sale('Rice', qty: 3, daysAgo: 0);
+      await sale('Oil', qty: 2, daysAgo: 0, method: 'upi', discount: 10);
+      await sale(
+        'Rice',
+        qty: 2.5,
+        daysAgo: 1,
+        paid: false,
+        customer: 'Ravi',
+        phone: null,
+      );
+      final b4 = await sale(
+        'Oil',
+        qty: 1,
+        daysAgo: 3,
+        inter: true,
+        paid: false,
+        partial: 40,
+        customer: 'Sita',
+        phone: '9000000001',
+      );
+      await sale(
+        'Soap',
+        qty: 2,
+        daysAgo: 8,
+        paid: false,
+        customer: 'Mohan',
+        phone: '9000000002',
+      );
+      await sale(
+        'Rice',
+        qty: 1,
+        daysAgo: 34,
+        paid: false,
+        customer: 'Ravi',
+        phone: null,
+      );
+      await sale(
+        'Oil',
+        qty: 3,
+        daysAgo: 70,
+        paid: false,
+        customer: 'Old Debt',
+        phone: null,
+      );
+      final cancelled = await sale('Soap', qty: 1, daysAgo: 2);
+      await db.recordBillPayment(
+        b4.id!,
+        amount: 25,
+        paymentMethod: 'upi',
+        receivedAt: ago(1),
+      );
+      await db.createCreditNote(
+        billId: b1.id!,
+        quantities: {b1.items.single.uuid: 1},
+        settlement: DatabaseBills.creditNoteSettleRefund,
+        createdAt: ago(0, 15),
+      );
+      await db.cancelBill(cancelled.id!, reason: 'wrong customer');
+      for (final e in [
+        (0, 200.0, 'Tea & snacks', 'cash'),
+        (0, 500.0, 'Rent', 'upi'),
+        (2, 150.25, 'Transport', 'cash'),
+        (33, 80.0, 'Tea & snacks', 'cash'),
+      ]) {
+        await db.saveExpense(
+          Expense(
+            date: ago(e.$1),
+            amount: e.$2,
+            category: e.$3,
+            paymentMethod: e.$4,
+          ),
+        );
+      }
+      shopId = await ownerUploads('a', owner);
+    });
+
+    final web = apis['a']!;
+    Future<Map<String, dynamic>> report(
+      String path, [
+      Map<String, String> q = const {},
+    ]) {
+      final query = q.isEmpty ? '' : '?${Uri(queryParameters: q).query}';
+      return web.getJson('/v1/shops/$shopId/reports/$path$query');
+    }
+
+    double d(Object? v) => double.parse(v.toString());
+    Matcher near(num v) => closeTo(v.toDouble(), 0.005);
+    // The phone shows some sums unrounded; the server rounds to the paisa.
+    void sameMoney(
+      Map<Object?, double> got,
+      Map<Object?, double> want,
+      String why,
+    ) {
+      expect(got.keys.toSet(), want.keys.toSet(), reason: why);
+      for (final key in want.keys) {
+        expect(got[key], closeTo(want[key]!, 0.0051), reason: '$why $key');
+      }
+    }
+
+    List<Map<String, dynamic>> rows(Object? v) =>
+        (v as List).cast<Map<String, dynamic>>();
+
+    await on('a', () async {
+      final ranges = [
+        (day(ago(60)), day(now)),
+        (day(ago(10)), day(now)),
+        (day(ago(3)), day(ago(1))),
+      ];
+      for (final (from, to) in ranges) {
+        final k = await report('kpis', {'from': from, 'to': to});
+        final label = 'kpis $from..$to';
+        expect(
+          d(k['revenue']),
+          near(await db.kpiTotalRevenue(from: from, to: to)),
+          reason: '$label revenue',
+        );
+        expect(
+          d(k['collected']),
+          near(await db.kpiCollected(from: from, to: to)),
+          reason: '$label collected',
+        );
+        expect(
+          d(k['average_order_value']),
+          near(await db.kpiAverageOrderValue(from: from, to: to)),
+          reason: '$label aov',
+        );
+        expect(
+          d(k['discount_rate_percent']),
+          near(await db.kpiDiscountRate(from: from, to: to)),
+          reason: '$label discount',
+        );
+        expect(
+          d(k['gross_profit']),
+          near(await db.kpiGrossProfit(from: from, to: to)),
+          reason: '$label profit',
+        );
+        expect(
+          d(k['gross_margin_percent']),
+          near(await db.kpiGrossMarginPercent(from: from, to: to)),
+          reason: '$label margin',
+        );
+        expect(
+          d(k['gst_collected']),
+          near(await db.kpiGstCollected(from: from, to: to)),
+          reason: '$label gst',
+        );
+        final unpaid = await db.kpiUnpaidBillsValue();
+        expect(
+          k['unpaid_count'],
+          unpaid['count'],
+          reason: '$label unpaid count',
+        );
+        expect(
+          d(k['unpaid_total']),
+          near(unpaid['total'] as double),
+          reason: '$label unpaid total',
+        );
+        expect(
+          d(k['inventory_value']),
+          near(await db.kpiTotalInventoryValue()),
+          reason: '$label inventory',
+        );
+        expect(
+          k['out_of_stock_count'],
+          await db.kpiOutOfStockCount(),
+          reason: '$label out of stock',
+        );
+        expect(
+          k['low_stock_count'],
+          (await db.kpiLowStockProducts()).length,
+          reason: '$label low stock',
+        );
+        final expenses = (await db.getExpenses(
+          from: from,
+          to: to,
+        )).fold<double>(0, (s, e) => s + e.amount);
+        expect(d(k['expenses']), near(expenses), reason: '$label expenses');
+        final daily = await db.kpiDailyRevenueTrend(from: from, to: to);
+        expect(
+          rows(k['daily']).map((r) => r['day']).toList(),
+          daily.map((r) => r['day']).toList(),
+          reason: '$label days',
+        );
+        for (var i = 0; i < daily.length; i++) {
+          expect(
+            d(rows(k['daily'])[i]['revenue']),
+            near(daily[i]['revenue'] as num),
+            reason: '$label day ${daily[i]['day']}',
+          );
+        }
+        final methods = await db.kpiRevenueByPaymentMethod(from: from, to: to);
+        sameMoney(
+          {
+            for (final r in rows(k['by_payment_method']))
+              r['method']: d(r['total']),
+          },
+          {
+            for (final r in methods)
+              r['method']: (r['total'] as num).toDouble(),
+          },
+          '$label methods',
+        );
+        final cats = await db.kpiRevenueByCategory(from: from, to: to);
+        sameMoney(
+          {
+            for (final r in rows(k['by_category']))
+              r['category']: d(r['revenue']),
+          },
+          {
+            for (final r in cats)
+              r['category']: (r['revenue'] as num).toDouble(),
+          },
+          '$label categories',
+        );
+        final top = await db.kpiTop10ProductsByRevenue(from: from, to: to);
+        expect(
+          rows(
+            k['top_by_revenue'],
+          ).map((r) => [r['name'], d(r['revenue']), d(r['units'])]).toList(),
+          top
+              .map(
+                (r) => [
+                  r['name'],
+                  (r['revenue'] as num).toDouble(),
+                  (r['units'] as num).toDouble(),
+                ],
+              )
+              .toList(),
+          reason: '$label top by revenue',
+        );
+
+        final pl = await db.profitAndLoss(from: from, to: to);
+        final spl = await report('profit-loss', {'from': from, 'to': to});
+        expect(d(spl['sales']), near(pl.sales), reason: '$label P&L sales');
+        expect(
+          d(spl['cost_of_goods']),
+          near(pl.costOfGoods),
+          reason: '$label P&L cost',
+        );
+        expect(
+          d(spl['gross_profit']),
+          near(pl.grossProfit),
+          reason: '$label P&L gross',
+        );
+        expect(
+          d(spl['gst_collected']),
+          near(pl.gstCollected),
+          reason: '$label P&L gst',
+        );
+        expect(
+          d(spl['expenses']),
+          near(pl.expenses),
+          reason: '$label P&L expenses',
+        );
+        expect(
+          d(spl['net_profit']),
+          near(pl.netProfit),
+          reason: '$label P&L net',
+        );
+        expect(
+          {
+            for (final r in rows(spl['expenses_by_category']))
+              r['category']: d(r['amount']),
+          },
+          pl.expensesByCategory,
+          reason: '$label P&L categories',
+        );
+
+        final tax = await db.taxSummary(from: from, to: to);
+        final st = await report('tax-summary', {'from': from, 'to': to});
+        expect(
+          rows(st['rates']).length,
+          tax.length,
+          reason: '$label tax rate count',
+        );
+        for (var i = 0; i < tax.length; i++) {
+          final r = rows(st['rates'])[i];
+          expect(d(r['rate']), near(tax[i].rate), reason: '$label tax rate');
+          expect(
+            d(r['taxable']),
+            near(tax[i].taxable),
+            reason: '$label taxable @${tax[i].rate}',
+          );
+          expect(
+            d(r['cgst']),
+            near(tax[i].cgst),
+            reason: '$label cgst @${tax[i].rate}',
+          );
+          expect(
+            d(r['sgst']),
+            near(tax[i].sgst),
+            reason: '$label sgst @${tax[i].rate}',
+          );
+          expect(
+            d(r['igst']),
+            near(tax[i].igst),
+            reason: '$label igst @${tax[i].rate}',
+          );
+        }
+
+        final reg = await db.purchaseRegister(from: from, to: to);
+        final sr = await report('purchase-register', {'from': from, 'to': to});
+        expect(rows(sr['rows']).length, reg.length, reason: '$label purchases');
+        for (var i = 0; i < reg.length; i++) {
+          final r = rows(sr['rows'])[i];
+          expect(
+            r['product_name'],
+            reg[i].productName,
+            reason: '$label purchase $i',
+          );
+          expect(
+            d(r['quantity']),
+            near(reg[i].quantity),
+            reason: '$label purchase qty $i',
+          );
+          expect(
+            d(r['amount']),
+            near(reg[i].amount),
+            reason: '$label purchase amount $i',
+          );
+        }
+      }
+
+      for (final offset in [0, 1, 3]) {
+        final dayText = day(ago(offset));
+        final book = await db.dayBook(dayText);
+        final s = await report('day-book', {'day': dayText});
+        expect(
+          rows(s['bills']).map((b) => b['bill_number']).toList(),
+          book.bills.map((b) => b['bill_number']).toList(),
+          reason: 'day book $dayText bills',
+        );
+        expect(
+          d(s['sales']),
+          near(book.sales),
+          reason: 'day book $dayText sales',
+        );
+        expect(
+          d(s['collected']),
+          near(book.collected),
+          reason: 'day book $dayText collected',
+        );
+        expect(
+          d(s['cash_received']),
+          near(book.cashReceived),
+          reason: 'day book $dayText cash',
+        );
+        expect(
+          d(s['total_expenses']),
+          near(book.totalExpenses),
+          reason: 'day book $dayText expenses',
+        );
+        expect(
+          d(s['net_cash']),
+          near(book.netCash),
+          reason: 'day book $dayText net cash',
+        );
+      }
+
+      final age = await db.receivablesAgeing();
+      final sa = await report('receivables-ageing');
+      final names = rows(
+        sa['customers'],
+      ).map((c) => c['customer_name']).toList();
+      expect(
+        names,
+        age.map((c) => c.customerName).toList(),
+        reason: 'ageing customers',
+      );
+      for (var i = 0; i < age.length; i++) {
+        final buckets = (rows(sa['customers'])[i]['buckets'] as List)
+            .map(d)
+            .toList();
+        for (var b = 0; b < 4; b++) {
+          expect(
+            buckets[b],
+            near(age[i].buckets[b]),
+            reason: 'ageing ${age[i].customerName} bucket $b',
+          );
+        }
+      }
+
+      for (final days in [10, 30]) {
+        final exp = await db.expiringStock(days: days);
+        final se = await report('expiring-stock', {'days': '$days'});
+        expect(
+          rows(se['batches'])
+              .map((b) => [b['product_name'], b['batch_no'], d(b['quantity'])])
+              .toList(),
+          exp.map((b) => [b.productName, b.batchNo, b.quantity]).toList(),
+          reason: 'expiring within $days days',
+        );
+      }
+
+      final val = await db.stockValuation();
+      final sv = await report('stock-valuation');
+      expect(
+        rows(sv['items']).map((i) => i['name']).toList(),
+        val.map((v) => v.name).toList(),
+        reason: 'valuation order',
+      );
+      for (var i = 0; i < val.length; i++) {
+        expect(
+          d(rows(sv['items'])[i]['cost_value']),
+          near(val[i].costValue),
+          reason: 'valuation cost ${val[i].name}',
+        );
+        expect(
+          d(rows(sv['items'])[i]['sale_value']),
+          near(val[i].saleValue),
+          reason: 'valuation sale ${val[i].name}',
+        );
+      }
+    });
+  }, skip: skip);
 
   test('a cancelled bill stays cancelled on every device', () async {
     final owner = await newAccount();
