@@ -331,6 +331,65 @@ void main() {
     skip: skip,
   );
 
+  test(
+    'products made and changed on the web reach phones with stock rebuilt from the ledger',
+    () async {
+      final owner = await newAccount();
+      final staff = await newAccount();
+      late String shopId;
+      await on('a', () async {
+        await addProduct('Rice');
+        shopId = await ownerUploads('a', owner);
+        await invite('a', shopId, staff, 'staff');
+      });
+      await on('b', () => joins('b', staff));
+
+      // The owner works in the web app (same API, same account, no phone involved).
+      final web = await signIn('web', owner);
+      final made = await web.postJson('/v1/shops/$shopId/products', {
+        'name': 'Web Sugar',
+        'product_code': 'WS1',
+        'selling_price': '48.50',
+        'purchase_price': '40',
+        'opening_quantity': '12',
+      });
+      final sugar = (made['product'] as Map)['uuid'] as String;
+      await web.postJson(
+        '/v1/shops/$shopId/products/$sugar/stock-adjustments',
+        {'delta': '-2.5', 'reason': 'damage'},
+      );
+      await web.patchJson('/v1/shops/$shopId/products/$sugar', {
+        'selling_price': '51',
+      });
+      final rice = (await serverRows(
+        'web',
+        shopId,
+        'products',
+      )).firstWhere((r) => r['name'] == 'Rice')['uuid'];
+      await web.deleteJson('/v1/shops/$shopId/products/$rice');
+
+      for (final device in ['a', 'b']) {
+        await on(device, () async {
+          final result = await sync(device);
+          expect(result.conflicts, isEmpty, reason: device);
+          final product = await productNamed('Web Sugar');
+          expect(product.quantity, 9.5, reason: '$device: 12 in, 2.5 out');
+          expect(
+            product.sellingPrice,
+            51,
+            reason: '$device: the web price edit',
+          );
+          expect(
+            (await db.getAllProducts()).any((p) => p.name == 'Rice'),
+            isFalse,
+            reason: '$device: the web deletion',
+          );
+        });
+      }
+    },
+    skip: skip,
+  );
+
   test('a cancelled bill stays cancelled on every device', () async {
     final owner = await newAccount();
     final staff = await newAccount();

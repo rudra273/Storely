@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0-5 done; Phase 6 (web products) next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0-6 done; Phase 7 (reports) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -767,6 +767,46 @@ Collected so far; I cannot do these for you. Tick them off before launch.
 
 **Done when:** an owner can run the full product catalogue from a computer, staff
 can look products up, and changes appear on the phone after a sync.
+
+**Result (done 2026-10-25).**
+- API (`storelyapi`, contract in `docs/API_CONTRACT.md`): product list (search, category, low stock,
+  expiring, sort, paging) and detail with stock history; create (optional opening stock), edit,
+  delete, stock adjustment with a reason; categories, units, suppliers; CSV/Excel import and export.
+  Writes go through the phone's own sync tables and triggers, so web edits are ordinary synced edits
+  (latest edit wins, deletion wins). Stock is always derived from the ledger; removals are serialised
+  so two clicks cannot oversell the shelf.
+- Staff: purchase-side fields (`purchase_price`, `overhead_cost`, `profit_margin_percent`,
+  `supplier_uuid`) are absent from their responses, supplier lists and every write are refused (403),
+  and the screens hide those controls. Both layers are tested, in the unit tests and in a real browser.
+- Import follows the phone's rules (same columns, header spellings, Indian number formats, GST and HSN
+  checks), shows a dry run first, refuses the identical file twice in a day, and caps size, rows and
+  zip expansion. Export uses the phone's headers (round-trips) and neutralises spreadsheet formulas.
+  Deliberate differences from the phone: no "replace everything" import (destructive), matched products
+  keep their name, and suppliers are hidden from staff.
+- Web: searchable, sortable, paged table with filters and a detail panel; add/edit form; adjust stock;
+  categories and units manager; import dialog; export CSV/Excel; barcode label printing (Code 128 from
+  the product's barcode or code, printed by the browser).
+- Checks: API 140 integration + 30 unit tests (new: 24 product tests, 15 import-parser tests, matrix
+  entries for every new route), lint/mypy/bandit, dependency audit, image scan, mutation checks on the
+  staff filter, wildcard escaping, stock lock, cross-shop references, formula guard and duplicate-file
+  stop. Web 34 tests and a 41-step real-browser run (`make e2e`). Phone: a new live scenario runs the
+  app's real sync engine and confirms a product made on the web, a stock adjustment, a price edit and
+  a deletion all arrive on both an admin phone and a staff phone, with the quantity rebuilt from the
+  ledger (14 live scenarios pass, `make test-mobile`).
+- Not built: supplier screens, product images, bulk delete, category HSN/GST editing in the UI (the API
+  has it), price history. "Low stock" on the web includes out-of-stock items; the phone's list excludes
+  them.
+
+### Still to validate yourself after Phase 6
+- [ ] Import a real file from the customer's old software (CSV and Excel). Check the dry-run report reads
+      sensibly and the stock and costs match what they expect.
+- [ ] Print real labels: check the size, that the barcode scans with their scanner, and A4 sheet layout.
+      I only tested the on-screen preview, not a physical printer or label roll.
+- [ ] Create a product on the web and watch it appear on a real phone after a sync (the live test did this
+      with the app's sync engine, not with the installed app).
+- [ ] Try the table on the customer's actual computer and screen size (the detail panel pushes the Expiry
+      column off to the side below about 1300px wide; it scrolls).
+- [ ] Decide whether "low stock" should hide out-of-stock items like the phone does.
 
 ### Phase 7: Reports (L), priority 1
 - Server endpoints for: day book, profit and loss, receivables ageing,
