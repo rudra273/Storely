@@ -13,6 +13,7 @@ import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
 import 'api/api_client.dart';
 import 'api/token_store.dart';
+import 'cloud/account_actions.dart';
 import 'cloud/api_cloud_backend.dart';
 import 'cloud/cloud_backend.dart';
 import 'cloud/supabase_cloud_backend.dart';
@@ -161,7 +162,7 @@ class CloudState {
   }
 }
 
-class CloudService with WidgetsBindingObserver {
+class CloudService with WidgetsBindingObserver implements AccountActions {
   CloudService._();
 
   static final instance = CloudService._();
@@ -361,6 +362,7 @@ class CloudService with WidgetsBindingObserver {
     state.value = const CloudState(message: 'Cloud sync disabled');
   }
 
+  @override
   Future<void> signIn(
     String email,
     String password, {
@@ -371,6 +373,7 @@ class CloudService with WidgetsBindingObserver {
   }
 
   /// Second step of signing in, after [CloudMfaRequired].
+  @override
   Future<void> completeMfa(String code, {bool syncAfterAuth = true}) async {
     final user = await _requireBackend().completeMfa(code);
     _signedIn(user, 'Signed in', syncAfterAuth);
@@ -400,16 +403,20 @@ class CloudService with WidgetsBindingObserver {
   }
 
   /// Confirms a new account with the 6-digit code that was emailed.
+  @override
   Future<void> verifyEmail(String email, String code) =>
       _requireBackend().verifyEmail(email, code);
 
+  @override
   Future<void> resendVerificationCode(String email) =>
       _requireBackend().resendVerificationCode(email);
 
   /// Emails a code for resetting the password.
+  @override
   Future<void> forgotPassword(String email) =>
       _requireBackend().forgotPassword(email);
 
+  @override
   Future<void> resetPassword(String email, String code, String newPassword) =>
       _requireBackend().resetPassword(email, code, newPassword);
 

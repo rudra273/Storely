@@ -115,18 +115,70 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
     successMessage: 'Cloud settings saved',
   );
 
-  Future<void> _signIn() {
-    return _run(
-      () => CloudService.instance.signIn(_emailCtrl.text, _passwordCtrl.text),
-      successMessage: 'Signed in. Sync will run automatically.',
-    );
+  Future<void> _signIn() async {
+    var signedIn = false;
+    await _run(() async {
+      // Confirms the email address or asks for a second-factor code when the
+      // account needs it, before reporting success.
+      signedIn = await signInWithChallenges(
+        context,
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+      );
+    });
+    if (signedIn && mounted) {
+      setState(() => _sheetMessage = 'Signed in. Sync will run automatically.');
+    }
   }
 
-  Future<void> _signUp() {
-    return _run(
-      () => CloudService.instance.signUp(_emailCtrl.text, _passwordCtrl.text),
-      successMessage: 'Account created. Check email confirmation if required.',
+  Future<void> _signUp() async {
+    setState(() {
+      _isBusy = true;
+      _sheetError = null;
+      _sheetMessage = null;
+    });
+    try {
+      final outcome = await CloudService.instance.signUp(
+        _emailCtrl.text,
+        _passwordCtrl.text,
+      );
+      var confirmed = false;
+      if (outcome == SignUpOutcome.emailCodeSent && mounted) {
+        confirmed = await showEmailCodeDialog(
+          context,
+          email: _emailCtrl.text.trim(),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _isBusy = false;
+        _sheetMessage = switch (outcome) {
+          SignUpOutcome.emailCodeSent when confirmed =>
+            'Email confirmed. You can sign in now.',
+          SignUpOutcome.emailCodeSent =>
+            'Account created. Confirm your email with the code we sent, then sign in.',
+          _ => 'Account created. Check email confirmation if required.',
+        };
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isBusy = false;
+        _sheetError = _cleanCloudError(error);
+      });
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final changed = await showResetPasswordDialog(
+      context,
+      email: _emailCtrl.text.trim(),
     );
+    if (changed && mounted) {
+      setState(
+        () => _sheetMessage = 'Password changed. Sign in with your new one.',
+      );
+    }
   }
 
   Future<void> _signOut() =>
@@ -289,6 +341,9 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
             busy: _isBusy,
             onSignIn: _signIn,
             onSignUp: _signUp,
+            onForgotPassword: CloudService.instance.supportsEmailCodes
+                ? _forgotPassword
+                : null,
           ),
         ];
       case _CloudStage.needsRegistration:
@@ -691,12 +746,16 @@ class _AuthSection extends StatelessWidget {
   final Future<void> Function() onSignIn;
   final Future<void> Function() onSignUp;
 
+  /// Shown only when the cloud can reset a password from the app.
+  final VoidCallback? onForgotPassword;
+
   const _AuthSection({
     required this.emailCtrl,
     required this.passwordCtrl,
     required this.busy,
     required this.onSignIn,
     required this.onSignUp,
+    this.onForgotPassword,
   });
 
   @override
@@ -721,6 +780,15 @@ class _AuthSection extends StatelessWidget {
             prefixIcon: Icon(Icons.lock_outline_rounded),
           ),
         ),
+        if (onForgotPassword != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const Key('cloud-forgot-password'),
+              onPressed: busy ? null : onForgotPassword,
+              child: const Text('Forgot password?'),
+            ),
+          ),
         const SizedBox(height: 12),
         Row(
           children: [

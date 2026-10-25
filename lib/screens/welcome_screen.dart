@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
 import '../services/cloud_service.dart';
+import 'shared/cloud_account_dialogs.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../l10n/l10n.dart';
@@ -85,11 +86,17 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     });
     try {
       await _configureBackend();
-      await CloudService.instance.signIn(
-        _emailCtrl.text,
-        _passwordCtrl.text,
+      if (!mounted) return;
+      final signedIn = await signInWithChallenges(
+        context,
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
         syncAfterAuth: false,
       );
+      if (!signedIn) {
+        if (mounted) setState(() => _isSaving = false);
+        return;
+      }
       if (!await CloudService.instance.currentUserHasShopMembership()) {
         throw StateError(
           'This account is not added to a shop yet. Ask the owner/admin to add this email, then sign in again.',
@@ -115,16 +122,54 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     });
     try {
       await _configureBackend();
-      await CloudService.instance.signUp(
+      final outcome = await CloudService.instance.signUp(
         _emailCtrl.text,
         _passwordCtrl.text,
         syncAfterAuth: false,
       );
+      var confirmed = false;
+      if (outcome == SignUpOutcome.emailCodeSent && mounted) {
+        confirmed = await showEmailCodeDialog(
+          context,
+          email: _emailCtrl.text.trim(),
+        );
+      }
       if (!mounted) return;
       setState(() {
         _isSaving = false;
-        _message =
-            'Account created. Ask the shop owner/admin to add this email as staff, then sign in.';
+        _message = switch (outcome) {
+          SignUpOutcome.emailCodeSent when !confirmed =>
+            'Account created. Confirm your email with the code we sent, then ask the shop owner/admin to add this email as staff.',
+          _ =>
+            'Account created. Ask the shop owner/admin to add this email as staff, then sign in.',
+        };
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _error = _cleanError(e);
+      });
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    setState(() {
+      _isSaving = true;
+      _message = null;
+      _error = null;
+    });
+    try {
+      await _configureBackend();
+      if (!mounted) return;
+      final changed = await showResetPasswordDialog(
+        context,
+        email: _emailCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        if (changed) _message = 'Password changed. Sign in with your new one.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -341,6 +386,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             prefixIcon: Icon(Icons.lock_outline_rounded),
           ),
         ),
+        if (CloudDefaults.apiAvailable && !_showAdvanced)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const Key('welcome-forgot-password'),
+              onPressed: _isSaving ? null : _forgotPassword,
+              child: const Text('Forgot password?'),
+            ),
+          ),
         if (_error != null) ...[
           const SizedBox(height: AppSpacing.md),
           _WelcomeMessage(text: _error!, isError: true),
