@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0, 1 and 2 done; Phase 3 (sync API) next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0-3 done; Phase 4 (Flutter app on the new backend) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -579,6 +579,47 @@ Decisions and caveats:
 
 **Done when:** the multi-device scenarios (two devices, offline edits, deletes,
 cancelled bills) pass against the local stack.
+
+**Status: DONE 2026-10-25.** `storelyapi` commits 439b70a (sync API, migration 0005) and
+9923b45 (docs, smoke test).
+
+What was built and verified:
+- `POST /v1/shops/{shop}/sync/pull` and `.../sync/push`, matching the phone's `SyncBackend`
+  (see `storelyapi/docs/API_CONTRACT.md` for how each `SyncBackend` method maps onto the API).
+  Pull reuses the existing `sync_pull` function under the caller's identity and pages by
+  `(server_updated_at, key)`. Push applies each row in its own savepoint and returns the
+  refused rows by id, so one bad row never blocks the rest; resending is harmless.
+- Conflict rules, tested at the API: latest edit wins whatever order uploads arrive in;
+  an older deletion still applies; deleted bills, items, payments and stock movements stay
+  deleted; staff cannot edit the catalogue or settings, cancel or change bills, issue
+  credit notes or record non-sale stock movements; the audit log cannot be rewritten;
+  the shop record is admin-managed.
+- Safety beyond the old Supabase setup: every row must carry the URL's shop id; column names
+  are checked against the table's real columns and validated as identifiers; values are
+  bound parameters; refusal messages are fixed sentences (no database text); rows dated
+  more than 24 h ahead are refused so a phone with a wrong clock cannot win every conflict;
+  request bodies over 8 MiB get 413 (declared or chunked); sync is rate limited.
+- A weakness found by a new test and fixed in migration 0005: a cancelled bill's status
+  could be flipped back by an upload that simply left `deleted_at` out.
+- Checks: 14 unit, 114 integration (26 for sync, including 2500-row paging past the old
+  1000-row cap, ties on one timestamp, cross-shop attacks, two-phone convergence), 4 SQL
+  test files, strict typing, bandit, audit, secret scan, image scan, `make smoke` and
+  `make verify`; all pass, also from a fresh clone. Mutation-tested: the shop check, the
+  clock guard and per-row isolation (one mutation first did not apply because the code
+  was formatted differently; I redid it and confirmed the test fails).
+- Timing (rough, in-process, local database, not a load test): pushing 2500 products in
+  five requests and paging them back takes about 1.5 s.
+
+Caveats and decisions:
+- The plan said to run the Dart engine's scenarios against the real API. The Dart engine
+  can only talk to a `SyncBackend`, which is the Phase 4 work, so for now the same
+  scenarios are re-created as API tests. The real cross-check (the actual Dart
+  `CloudSyncEngine` and `test/sync_engine_test.dart` against this server) is part of the
+  Phase 4 gate.
+- Staff can still pull `purchase_price` for products, as today. Hiding cost prices from staff
+  is a web/API concern in Phase 6; the phone's staff view is unchanged.
+- Soft-deleted rows are returned by pull on purpose, because the phone needs the deletion.
+- Not done: a real load test (Phase 9) and any payload compression.
 
 ### Phase 4: Flutter app on the new backend (M)
 Work on a branch off `st2.0`; do not touch bottom navigation or app flows.
