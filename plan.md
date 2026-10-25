@@ -789,7 +789,7 @@ can look products up, and changes appear on the phone after a sync.
 - Checks: API 140 integration + 30 unit tests (new: 24 product tests, 15 import-parser tests, matrix
   entries for every new route), lint/mypy/bandit, dependency audit, image scan, mutation checks on the
   staff filter, wildcard escaping, stock lock, cross-shop references, formula guard and duplicate-file
-  stop. Web 34 tests and a 41-step real-browser run (`make e2e`). Phone: a new live scenario runs the
+  stop. Web 34 tests and a 35-step real-browser run (`make e2e`). Phone: a new live scenario runs the
   app's real sync engine and confirms a product made on the web, a stock adjustment, a price edit and
   a deletion all arrive on both an admin phone and a staff phone, with the quantity rebuilt from the
   ledger (14 live scenarios pass, `make test-mobile`).
