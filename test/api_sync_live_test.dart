@@ -25,6 +25,7 @@ import 'package:storely/models/invoice_numbering.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/product_purchase.dart';
 import 'package:storely/models/shop_profile.dart';
+import 'package:storely/services/gstr1_export.dart';
 import 'package:storely/services/api/api_client.dart';
 import 'package:storely/services/api/api_sync_backend.dart';
 import 'package:storely/services/api/token_store.dart';
@@ -413,6 +414,13 @@ void main() {
           gstRegistered: true,
         ),
       );
+      await db.saveShopProfile(
+        ShopProfile(
+          name: 'Parity Traders',
+          gstin: '27ABCDE1234F1Z5',
+          gstRegistered: true,
+        ),
+      );
       await db.insertProduct(
         Product(
           name: 'Rice',
@@ -487,6 +495,7 @@ void main() {
         String customer = 'Asha',
         String? phone = '9876543210',
         String method = 'cash',
+        String? gstin,
       }) async {
         final product = (await db.getAllProducts()).firstWhere(
           (p) => p.name == name,
@@ -504,6 +513,9 @@ void main() {
           Bill(
             customerName: customer,
             customerPhone: phone,
+            billType: gstin == null ? Bill.typeB2c : Bill.typeB2b,
+            customerGstin: gstin,
+            placeOfSupplyStateCode: inter ? '29' : null,
             subtotalAmount: t.subtotal,
             discountAmount: t.discountAmount,
             discountPercent: discount,
@@ -567,6 +579,21 @@ void main() {
         paid: false,
         customer: 'Old Debt',
         phone: null,
+      );
+      await sale(
+        'Oil',
+        qty: 4,
+        daysAgo: 5,
+        inter: true,
+        gstin: '29ABCDE1234F1Z9',
+        customer: 'Acme Pvt',
+      );
+      await sale(
+        'Rice',
+        qty: 6,
+        daysAgo: 6,
+        gstin: '27ABCDE1234F1Z7',
+        customer: 'Local Wholesaler',
       );
       final cancelled = await sale('Soap', qty: 1, daysAgo: 2);
       await db.recordBillPayment(
@@ -917,6 +944,74 @@ void main() {
           reason: 'expiring within $days days',
         );
       }
+
+      final first = day(ago(60));
+      final last = day(now);
+      final shopProfile = (await db.getShopProfile())!;
+      final phoneBills = await db.getBillsBetween(
+        first,
+        last,
+        includeCancelled: true,
+      );
+      final phoneBook = Gstr1Export(shop: shopProfile, bills: phoneBills);
+      final webBook = await report('gstr1', {'from': first, 'to': last});
+      final phoneTotals = phoneBook.totals();
+      final webTotals = webBook['totals'] as Map;
+      expect(
+        d(webTotals['taxable']),
+        near(phoneTotals.taxable),
+        reason: 'gstr1 taxable',
+      );
+      expect(
+        d(webTotals['igst']),
+        near(phoneTotals.igst),
+        reason: 'gstr1 igst',
+      );
+      expect(
+        d(webTotals['cgst']),
+        near(phoneTotals.cgst),
+        reason: 'gstr1 cgst',
+      );
+      expect(
+        d(webTotals['sgst']),
+        near(phoneTotals.sgst),
+        reason: 'gstr1 sgst',
+      );
+      final webSheets = webBook['sheets'] as Map<String, dynamic>;
+      final phoneSheets = phoneBook.sheets();
+      expect(
+        webSheets.keys.toList(),
+        phoneSheets.keys.toList(),
+        reason: 'gstr1 sheets',
+      );
+      for (final name in phoneSheets.keys) {
+        final want = phoneSheets[name]!;
+        final got = (webSheets[name] as List).cast<List<dynamic>>();
+        expect(got.length, want.length, reason: 'gstr1 $name row count');
+        for (var r = 0; r < want.length; r++) {
+          expect(
+            got[r].length,
+            want[r].length,
+            reason: 'gstr1 $name row $r width',
+          );
+          for (var c = 0; c < want[r].length; c++) {
+            final a = got[r][c];
+            final b = want[r][c];
+            if (b is num) {
+              expect(a, isA<num>(), reason: 'gstr1 $name[$r][$c]');
+              expect(a as num, near(b), reason: 'gstr1 $name[$r][$c]');
+            } else {
+              expect(a, b, reason: 'gstr1 $name[$r][$c]');
+            }
+          }
+        }
+      }
+      expect(
+        (webSheets['b2b'] as List).length,
+        greaterThan(1),
+        reason: 'the data really has B2B rows',
+      );
+      expect((webSheets['hsn(b2b)'] as List).length, greaterThan(1));
 
       final val = await db.stockValuation();
       final sv = await report('stock-valuation');
