@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0-4 done; Phase 5 (web foundation) next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0-5 done; Phase 6 (web products) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -702,6 +702,60 @@ Can start once Phase 3 works locally, in parallel with Phase 4.
 
 **Done when:** all three roles can log in on the web and only see what their
 role allows.
+
+**Result (done 2026-10-25).**
+- Web served at `https://app.storely.localhost` by Caddy in the `web` compose service, TLS on every
+  hop. It shares one origin with the API (`/v1/*` goes to the API), so no CORS is needed and the
+  refresh cookie is only ever sent to our own pages. The plan's "add a CORS origin" was dropped for
+  that reason. CSP allows only our own scripts and styles, no `unsafe-*`.
+- Client types are generated from the API schema (`make openapi` in storelyapi, `make api-types` in
+  storelyweb; `make check` fails when they drift). Access token lives in memory only; refresh is the
+  httpOnly cookie, single-flight, and a dropped connection never signs anyone out.
+- Screens: sign up, email code, sign in with two-step, forgot/reset, shop create/accept invite, role-aware
+  menu (owner, admin, staff), team (invite, role, remove), shop activity, profile (name, change email),
+  security (password, two-step on/off with recovery codes, sessions, sign out everywhere, own activity),
+  public `/delete-account` page.
+- Checks: 23 unit/component tests (role matrix, route guards, client refresh rules) with mutation
+  checks; `make e2e` drives a real Chromium through the full stack: 21 steps, including all three roles,
+  two-step, cookie flags, nothing token-like in browser storage, server also refusing staff, no console or
+  CSP errors. Fresh clone passes `make lint typecheck test build api-types-check`. `make verify` now also
+  checks the web origin.
+- Not built: QR code for two-step setup (the key is shown for manual entry), Products/Reports/Billing
+  screens (placeholders), shop settings page, ownership transfer, shop deletion on the web.
+- The built-in browser pane could not open the https dev site (the dev CA is not trusted there), so
+  screens were checked with headless Chromium in Docker instead.
+
+## Things you still need to validate yourself
+Collected so far; I cannot do these for you. Tick them off before launch.
+
+**Phone app (Phase 4 leftovers)**
+- [ ] Hand-drive the welcome screen, sign-up (email code), sign-in, forgot password and first sync on a
+      real phone. Unlock or recreate the `storely_pixel` emulator first.
+- [ ] Try the build on an older real Android phone (also check the low-end performance rules in CLAUDE.md).
+- [ ] Bump the version (still 1.0.4+5) and build a release APK/AAB for Play.
+- [ ] Privacy-policy text still mentions Supabase; update before cutover.
+- [ ] Two-step on/off screens are not in the app yet (server and web have them).
+
+**Web (Phase 5)**
+- [ ] Open `https://app.storely.localhost` in your own browser (trust `storelyapi/certs/ca.crt` first, or accept
+      the warning), then click through sign-up, mail code (Mailpit at http://127.0.0.1:8025), shop, invite, roles.
+- [ ] Set up two-step with a real authenticator app (Google/Microsoft Authenticator). I only tested with codes
+      computed in my own test; there is no QR yet.
+- [ ] Try Safari, Firefox and Edge. I tested Chromium only (Secure cookies on `*.localhost` differ by browser).
+- [ ] Look at every screen for wording, spacing and what the customer expects; I only reviewed desktop and phone width.
+- [ ] Ask the customer whether the staff matrix (section 4.5) matches how their staff work.
+
+**Decisions you still owe**
+- [ ] Staff permission matrix (section 4.5): confirm or change.
+- [ ] Require two-step for owners and admins? (switch `require_mfa_for_admins`, off by default.)
+
+**Before real users (Phase 9)**
+- [ ] Hosting, domain, real TLS certificates, and the proxy addresses for `STORELY_TRUSTED_PROXIES`.
+- [ ] Real email provider (STARTTLS, SPF/DKIM/DMARC) and a test that codes arrive in an inbox, not spam.
+- [ ] Database backups and one practised restore. Decide on Postgres 17 or 18 for hosting.
+- [ ] Independent penetration test; decide on certificate pinning in the phone app.
+- [ ] Play Store: data-safety form, the public delete-account page URL, privacy policy.
+- [ ] Remove Supabase code and the "own Supabase" option after cutover.
 
 ### Phase 6: Web Products (L), priority 1
 - Searchable, sortable, paged product table; filters (category, low stock,
