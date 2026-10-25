@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0-3 done; Phase 4 (Flutter app on the new backend) next (awaiting go-ahead).**
+> Last updated 2026-10-25. Status: **Phases 0-4 done; Phase 5 (web foundation) next (awaiting go-ahead).**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -636,6 +636,59 @@ Work on a branch off `st2.0`; do not touch bottom navigation or app flows.
 
 **Done when:** a phone can sign up, verify, join a shop and sync against the
 local stack with no Supabase involved, and offline use is unchanged.
+
+**Status: DONE 2026-10-25** (with the caveats below). Branch `st2.0` commits 1af72ce (API client and
+`ApiSyncBackend`), c5cca40 (real sync engine against the live API), 6ce0d38 (`CloudBackend`
+interface), c2466a3 (sign-in UI steps), 9180ecf (Android network rules, on-device test);
+`storelyapi` 2ec5f5c, ab5c940, e161b1b.
+
+What was built and verified:
+- **`ApiClient`** (HTTPS only, refuses `http://`): access token in memory, rotating refresh token
+  in the Android Keystore (`flutter_secure_storage`), one refresh however many requests wait, signs
+  out only when the server ends the session (a network failure never does), offline launch keeps the
+  last known person signed in. **`ApiSyncBackend`** implements the app's existing `SyncBackend`.
+- **`CloudBackend` interface** between `CloudService` and the provider. Supabase is the original code
+  moved unchanged; `ApiCloudBackend` talks to the Storely API. Screens still call the same methods.
+  New mode `storelyApi`, used by "Use Storely Cloud" when the build has `STORELY_API_URL`, otherwise
+  the hosted Supabase project as before. Local-only mode and the bottom navigation are untouched.
+- **UI additions**, in the house style and only where the new server needs them: confirm the email
+  with the 6-digit code, authenticator/recovery code at sign-in, and "Forgot password?" (shown only
+  when the cloud can reset from the app).
+- **The gate you asked for:** the app's real `CloudSyncEngine` run against the real server
+  (`make test-mobile`, 13 scenarios: joining device, late offline bills, edits not reverted, cancelled
+  bills stay cancelled, two admins cancel once, distinct bill numbers, second admin does not overwrite
+  the shop, paging, expenses, staff catalog edit becomes a conflict, nothing left waiting, stranger gets
+  404, untrusted server refused). Mutation-tested on both sides.
+- **On a real Android emulator** (`make test-device`): the real `CloudService` signs up with an
+  emailed code, is refused when unconfirmed or given a wrong code, rejects a wrong password, registers a
+  shop and completes a first sync with the real on-device SQLite, and signs out; the refresh token
+  survives in the Keystore; a plain client refuses the local CA; the app refuses a plain-http address.
+- **Counts:** `flutter analyze` clean; 229 Dart tests pass (+13 live skipped without a server, 4 on-device
+  tests); API side 116 integration tests, 15 unit tests, SQL tests, lint, scans, `make verify` all pass.
+
+Things I got wrong along the way, and fixed: I first assumed Android's `network_security_config` governs
+the app's HTTP calls. It does not: Flutter's `dart:io` bypasses it. Release builds still carry the strict
+config (covers Java-stack traffic and plugins), but the app's own guarantees are `ApiClient` refusing
+non-https addresses and Dart checking certificates against the phone's authorities. A debug build may trust
+the local development CA through `STORELY_DEV_CA_B64`, honoured only when `kDebugMode` is true; I built a
+release APK with that define supplied by mistake and confirmed no trace of the CA is in it.
+
+Caveats and not done:
+- **The screens themselves were not driven by hand on the emulator.** The dialogs are widget-tested
+  against a fake and `CloudService` runs end to end on the device, but I did not tap through the welcome
+  screen or the settings sheet with a finger. Do that once before a release.
+- **Not done on purpose (Phase 9):** removing Supabase and the "own Supabase" option, the privacy-policy
+  text (it still talks about Supabase), certificate pinning, a version bump and a Play Store build, and a
+  test on an older real phone. The app version is still 1.0.4+5.
+- **New dependencies:** `flutter_secure_storage` and `http` (already transitive) in the app, and the
+  SDK-bundled `integration_test` as a dev dependency.
+- Two-factor can be used at sign-in, but turning it on and off is not in the app yet (the server and
+  web can do it; app screens come with a later phase).
+- The existing emulator `storely_pixel` has its user storage locked behind a lock screen from an earlier
+  session, so the first device run failed with a misleading "activity does not exist" error. I did not
+  touch it; I made a throwaway emulator for the run and deleted it after. Unlock or recreate
+  `storely_pixel` before using it for manual checks.
+- Sign-up in the app creates an account only; the owner still adds staff by invite, as before.
 
 ### Phase 5: Web foundation (M)
 Can start once Phase 3 works locally, in parallel with Phase 4.
