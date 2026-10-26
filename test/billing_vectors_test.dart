@@ -52,20 +52,22 @@ List<Map<String, dynamic>> _totalsVectors() {
   const qtys = [1.0, 2.0, 3.0, 0.5, 1.5, 2.25, 7.0, 12.0, 0.125];
   const discounts = [0.0, 0.0, 5.0, 10.0, 12.5, 33.0, 100.0];
   final out = <Map<String, dynamic>>[];
-  for (var n = 0; n < 90; n++) {
+  for (var n = 0; n < 91; n++) {
     final count = 1 + rng.nextInt(5);
-    final lines = [
-      for (var i = 0; i < count; i++)
-        (
-          price: prices[rng.nextInt(prices.length)],
-          qty: qtys[rng.nextInt(qtys.length)],
-          rate: rates[rng.nextInt(rates.length)],
-        ),
-    ];
-    final discount = discounts[rng.nextInt(discounts.length)];
-    final registered = rng.nextBool() || n % 3 == 0;
-    final inter = rng.nextBool();
-    final roundOff = rng.nextBool();
+    final lines = n == 90
+        ? [(price: 105.0, qty: -0.125, rate: 5.0)]
+        : [
+            for (var i = 0; i < count; i++)
+              (
+                price: prices[rng.nextInt(prices.length)],
+                qty: qtys[rng.nextInt(qtys.length)],
+                rate: rates[rng.nextInt(rates.length)],
+              ),
+          ];
+    final discount = n == 90 ? 12.5 : discounts[rng.nextInt(discounts.length)];
+    final registered = n == 90 || rng.nextBool() || n % 3 == 0;
+    final inter = n == 90 || rng.nextBool();
+    final roundOff = n == 90 || rng.nextBool();
     final items = [
       for (final l in lines)
         BillItem(
@@ -300,7 +302,7 @@ void main() {
       'numbering': _numberingVectors(),
       'rounding': _roundingVectors(),
     };
-    expect((data['totals'] as List).length, 90);
+    expect((data['totals'] as List).length, 91);
     final out = Platform.environment['STORELY_VECTORS_OUT'];
     if (out == null) return;
     File(

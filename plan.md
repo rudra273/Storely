@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-25. Status: **Phases 0-7 done; Phase 8 (web billing) next (awaiting go-ahead).**
+> Last updated 2026-10-27. Status: **Phases 0-7 done; Phase 8 web billing, Decimal arithmetic and safe retries verified locally; customer review remains.**
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -500,7 +500,8 @@ What was built and verified:
 Decisions and caveats:
 - Sync tables keep `double precision` money columns, exactly as the phone stores
   them, so rows round-trip unchanged. Reports will cast to `NUMERIC` and round to
-  paise (Phase 7).
+  paise (Phase 7). **Superseded in Phase 8:** migration 0007 widens these
+  columns to NUMERIC, retaining decimal values and sync compatibility.
 - A refresh retried within 10 s is accepted (a lost response must not log a
   shopkeeper out on a weak connection); replaying an older token revokes the
   session. This is a deliberate trade-off.
@@ -863,6 +864,68 @@ opens cleanly in Excel.
 
 **Done when:** a bill made on the web and the same bill made on the phone give
 identical totals, and neither side sees a sync conflict.
+
+**Implementation update 2026-10-26 (not yet signed off):**
+- Audit found the prior AI had already committed the billing API and phone-generated
+  billing vectors in `storelyapi` (`2518d31`, `501304a`, `bb3c3f5`), while React still
+  showed a placeholder. A new live phone parity scenario was present but unfinished.
+- React now has `/billing`, `/billing/new`, `/billing/:id`: searchable/paged invoices
+  and credit notes; customer lookup and entry; products/barcodes, fractional quantities,
+  discounts and GST/place of supply; server-priced preview; cash/UPI/card/bank/online
+  payments; bill details and history; owner/admin cancellation and selected-item returns.
+- Bill creation retains the exact request and idempotency key on uncertain failures,
+  including token refresh. Validation rejections allow corrections. Payment/return
+  automatic retries are disabled; unknown outcomes require checking the refreshed bill.
+- Invoice preview supports A4/A5 browser print and **Save as PDF**, with external
+  stylesheets that respect the existing CSP. A dedicated API PDF download route is
+  not implemented; the API contract now states that explicitly.
+- API detail adds `amount`, `line_taxable_value`, `line_gst`: whole-line totals after
+  discount. Existing per-unit snapshot fields keep their meaning. React displays server
+  totals; a discounted two-unit regression prevents mixing snapshots and line totals.
+- Real phone testing found a customer identity collision: when a web customer replaced
+  a local customer's UUID, queued bills retained the old foreign key. Bill export now
+  resolves the current customer UUID from its local ID; same-phone imports adopt the
+  cloud identity while preserving newer local edits. No schema change was required.
+- Verified so far: API 205 unit + 182 integration tests; SQL authorization/sync tests;
+  web 57 tests, TypeScript, lint, production build and API type generation; shared
+  phone billing vectors; 42 focused Flutter customer/sync tests and all 16 live API
+  sync scenarios (including phone/web billing parity, returns and cancellations);
+  `flutter analyze`; full real-browser suite including billing/returns/cancellation,
+  A4/A5 PDF generation and CSP checks. API and web dependency/secret scans and
+  `make verify` (TLS/security headers/exposure) pass.
+
+**Follow-up implementation 2026-10-27:**
+- Billing calculations, price inputs and payment/return validation now use Decimal,
+  with explicit half-up rounding at line/total boundaries. Migration 0007 widens
+  45 monetary/rate/quantity columns to NUMERIC without dropping or rounding records.
+  A populated 0006 upgrade/reapplication test runs in CI for Postgres 17 and 18.
+  The legacy Supabase schema/migration mirrors the numeric widening (not deployed).
+- Payment and credit-note endpoints accept shop-scoped idempotency keys binding the
+  operation, source bill and payload. The web always sends them, freezes uncertain
+  requests and retries the exact body/key. Legacy callers may omit the new headers.
+  Concurrent duplicates, changed payload/bill/operation, rollback and role checks on
+  replay are covered. State is in memory; after navigation/reload inspect the bill.
+- Found and fixed interstate credit notes being classified as CGST/SGST when the
+  quantity was negative. Dart and Python now preserve IGST; a phone-generated
+  negative fractional return vector joins the unchanged positive-cart vectors.
+  Remaining return quantities retain three decimal places instead of rounding to paise.
+- Backend: 209 unit + 186 integration tests pass. Web: 58 tests, lint/type checks pass.
+  All 16 live phone sync/parity scenarios pass with NUMERIC storage. Dependency,
+  secret and API production image checks pass. Browser tests prove recovery from
+  committed payment/return responses deliberately dropped before the UI receives them.
+- Caddy web/proxy images now share a rebuild of upstream 2.11.7 with Go 1.26.10,
+  locked x/net 0.60.0 and patched Alpine packages. Eight fixable high findings in
+  the official image are removed; both rebuilt images have zero fixable high/critical
+  findings and pass TLS/header/exposure checks. Production web image scans run in CI.
+- Invoice QA uses print media (not screen emulation), checks A4/A5 page sizes,
+  and checks that a short invoice has one page. Fixed the shell's `100vh` minimum
+  causing an extra blank printed page. All four intra/inter-state A4/A5 samples
+  render as one page with the correct tax split, total and due, without app controls.
+  The complete browser suite passes on the patched Caddy web/proxy stack.
+
+**Remaining before calling Phase 8 done:**
+- Customer review of invoice layout, real printing and customer billing workflows;
+  the existing section 6 gate still applies. PDF saving currently uses the browser.
 
 ### Phase 9: Production readiness and cutover (L)
 - **Choose hosting, domains and the production email provider now**, not before.

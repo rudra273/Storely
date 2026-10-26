@@ -63,6 +63,20 @@ void main() {
       expect(t.taxableAmount, 200);
     });
 
+    test('inter-state fractional returns reverse IGST, not CGST/SGST', () {
+      final t = _totals(
+        [_item(105, -0.125, gst: 5)],
+        discount: 12.5,
+        interState: true,
+        roundOff: true,
+      );
+      expect(t.taxableAmount, -10.94);
+      expect(t.igstAmount, -0.54);
+      expect(t.cgstAmount, 0);
+      expect(t.sgstAmount, 0);
+      expect(t.grandTotal, -11);
+    });
+
     test('unregistered shop charges no GST', () {
       final t = _totals([_item(100, 2)], registered: false);
       expect(t.gstAmount, 0);
@@ -92,7 +106,9 @@ void main() {
           1 + rng.nextInt(6),
           (_) => _item(
             (rng.nextInt(500000) + 1) / 100,
-            rng.nextBool() ? 1 + rng.nextInt(50) : (rng.nextInt(5000) + 1) / 1000,
+            rng.nextBool()
+                ? 1 + rng.nextInt(50)
+                : (rng.nextInt(5000) + 1) / 1000,
             gst: rates[rng.nextInt(rates.length)].toDouble(),
           ),
         );

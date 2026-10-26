@@ -33,6 +33,19 @@ import 'package:storely/services/sync/cloud_sync_engine.dart';
 
 const _password = 'Correct-Horse-Battery-Staple-42';
 
+/// Adds headers (like an Idempotency-Key) to every request, for tests that act as the web.
+class _ExtraHeaders extends http.BaseClient {
+  _ExtraHeaders(this._inner);
+  final http.Client _inner;
+  final Map<String, String> extra = {};
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    request.headers.addAll(extra);
+    return _inner.send(request);
+  }
+}
+
 class _Account {
   final String email;
   _Account(this.email);
@@ -1033,6 +1046,315 @@ void main() {
         );
       }
     });
+  }, skip: skip);
+
+  test('a bill made on the web equals the same bill made on the phone', () async {
+    final owner = await newAccount();
+    final staff = await newAccount();
+    late String shopId;
+
+    // One cart, three ways: the phone's checkout code, and the web API.
+    const carts = [
+      (rice: 3.0, oil: 2.0, discount: 12.5, state: null as String?),
+      (rice: 0.5, oil: 0.0, discount: 0.0, state: null as String?),
+      (rice: 2.0, oil: 1.0, discount: 5.0, state: '29' as String?),
+      (rice: 7.0, oil: 3.0, discount: 100.0, state: null as String?),
+    ];
+
+    Future<Bill> phoneBill({
+      required double rice,
+      required double oil,
+      required double discount,
+      required String? state,
+    }) async {
+      final shop = await db.getShopProfile();
+      final settings = await db.getBillSettings();
+      final inter = state != null && state != shop!.gstin!.substring(0, 2);
+      final products = await db.getAllProducts();
+      final items = <BillItem>[];
+      for (final (name, qty) in [('Rice', rice), ('Oil', oil)]) {
+        if (qty <= 0) continue;
+        final cart = await db.buildBillItemForProduct(
+          products.firstWhere((p) => p.name == name),
+        );
+        cart.quantity = qty;
+        items.add(
+          BillTotals.taxedItem(
+            cart,
+            discountPercent: discount,
+            gstRegistered: shop!.gstRegistered,
+            interState: inter,
+          ),
+        );
+      }
+      final t = BillTotals.fromTaxedItems(
+        items,
+        roundOff: settings.roundOffTotal,
+      );
+      final id = await db.insertBill(
+        Bill(
+          customerName: 'Parity',
+          customerPhone: '9000011111',
+          placeOfSupplyStateCode: state,
+          subtotalAmount: t.subtotal,
+          discountAmount: t.discountAmount,
+          discountPercent: discount,
+          taxableAmount: t.taxableAmount,
+          cgstAmount: t.cgstAmount,
+          sgstAmount: t.sgstAmount,
+          igstAmount: t.igstAmount,
+          roundOffAmount: t.roundOffAmount,
+          totalAmount: t.grandTotal,
+          itemCount: (rice + oil).round(),
+          isPaid: false,
+          paidAmount: 0,
+        ),
+        items,
+      );
+      return (await db.getBillById(id))!;
+    }
+
+    await on('a', () async {
+      await db.saveGlobalPricingSettings(
+        const GlobalPricingSettings(
+          defaultGstPercent: 18,
+          defaultOverheadCost: 0,
+          defaultProfitMarginPercent: 0,
+          gstRegistered: true,
+        ),
+      );
+      await db.saveShopProfile(
+        ShopProfile(
+          name: 'Parity Traders',
+          gstin: '27ABCDE1234F1Z5',
+          gstRegistered: true,
+        ),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Rice',
+          mrp: 105,
+          purchasePrice: 60,
+          quantity: 100,
+          gstPercent: 5,
+          directPriceToggle: true,
+          manualPrice: 105,
+        ),
+      );
+      await db.insertProduct(
+        Product(
+          name: 'Oil',
+          mrp: 118,
+          purchasePrice: 80,
+          quantity: 50,
+          gstPercent: 18,
+          directPriceToggle: true,
+          manualPrice: 118,
+        ),
+      );
+      shopId = await ownerUploads('a', owner);
+      await invite('a', shopId, staff, 'staff');
+    });
+    await on('b', () => joins('b', staff));
+
+    final keyed = _ExtraHeaders(IOClient(HttpClient(context: trustedContext)));
+    final web = apis['web'] = ApiClient(
+      baseUrl: Uri.parse(apiUrl!),
+      httpClient: keyed,
+      tokens: MemoryTokenStore(),
+      userAgent: 'StorelyLiveTest',
+    );
+    await web.login(owner.email, _password, deviceLabel: 'live web');
+    final phoneNumbers = <String>[];
+    final webNumbers = <String>[];
+    var rice = 0.0;
+    var oil = 0.0;
+    for (final (index, c) in carts.indexed) {
+      final made = await on('a', () async {
+        final bill = await phoneBill(
+          rice: c.rice,
+          oil: c.oil,
+          discount: c.discount,
+          state: c.state,
+        );
+        // the saved bill, as the phone computed it
+        return {
+          'number': bill.billNumber,
+          'totals': {
+            'subtotal_amount': bill.subtotalAmount,
+            'discount_amount': bill.discountAmount,
+            'taxable_amount': bill.taxableAmount,
+            'cgst_amount': bill.cgstAmount,
+            'sgst_amount': bill.sgstAmount,
+            'igst_amount': bill.igstAmount,
+            'round_off_amount': bill.roundOffAmount,
+            'total_amount': bill.totalAmount,
+          },
+          'items': [
+            for (final i in bill.items)
+              {
+                'name': i.productName,
+                'qty': i.quantity,
+                'taxable': i.totalTaxableValue,
+                'gst': i.totalGst,
+                'amount': i.lineAmount,
+              },
+          ],
+        };
+      });
+      phoneNumbers.add(made['number'] as String);
+      rice += c.rice;
+      oil += c.oil;
+
+      keyed.extra['Idempotency-Key'] = 'parity-cart-$index-0000';
+      final response = await web.postJson('/v1/shops/$shopId/bills', {
+        'items': [
+          if (c.rice > 0)
+            {
+              'product_uuid': await on(
+                'a',
+                () async => (await db.getAllProducts())
+                    .firstWhere((p) => p.name == 'Rice')
+                    .uuid,
+              ),
+              'quantity': c.rice,
+            },
+          if (c.oil > 0)
+            {
+              'product_uuid': await on(
+                'a',
+                () async => (await db.getAllProducts())
+                    .firstWhere((p) => p.name == 'Oil')
+                    .uuid,
+              ),
+              'quantity': c.oil,
+            },
+        ],
+        'discount_percent': c.discount,
+        'customer_name': 'Parity',
+        'customer_phone': '9000011111',
+        if (c.state != null) 'place_of_supply_state_code': c.state,
+      });
+      final webBill = response['bill'] as Map<String, dynamic>;
+      webNumbers.add(webBill['bill_number'] as String);
+      final phoneTotals = made['totals'] as Map<String, double>;
+      for (final key in phoneTotals.keys) {
+        expect(
+          double.parse(webBill[key].toString()),
+          phoneTotals[key],
+          reason:
+              'cart $index $key: web ${webBill[key]} vs phone ${phoneTotals[key]}',
+        );
+      }
+      final webItems = (response['items'] as List).cast<Map<String, dynamic>>();
+      final phoneItems = (made['items'] as List).cast<Map<String, dynamic>>();
+      expect(webItems.length, phoneItems.length, reason: 'cart $index lines');
+      for (var i = 0; i < phoneItems.length; i++) {
+        expect(webItems[i]['product_name'], phoneItems[i]['name']);
+        expect(
+          double.parse(webItems[i]['taxable_value'].toString()) *
+              double.parse(webItems[i]['quantity'].toString()),
+          closeTo(phoneItems[i]['taxable'] as double, 0.005),
+          reason: 'cart $index line $i taxable',
+        );
+        expect(double.parse(webItems[i]['subtotal'].toString()), isNonNegative);
+      }
+    }
+
+    // The owner phone and joining staff phone already registered; web gets C.
+    // The owner phone's and web's number sequences must never overlap.
+    expect({...phoneNumbers, ...webNumbers}.length, carts.length * 2);
+    expect(
+      webNumbers.every((n) => RegExp(r'^INV/\d{4}/C\d{4}$').hasMatch(n)),
+      isTrue,
+      reason: '$webNumbers',
+    );
+    expect(
+      phoneNumbers.every((n) => RegExp(r'^INV/\d{4}/\d{4}$').hasMatch(n)),
+      isTrue,
+      reason: '$phoneNumbers',
+    );
+
+    // everything reaches both phones with no conflict, and the stock agrees everywhere
+    for (final device in ['a', 'b']) {
+      await on(device, () async {
+        final result = await sync(device);
+        expect(result.conflicts, isEmpty, reason: device);
+        final all = await db.getAllBills();
+        expect(all.length, carts.length * 2, reason: '$device sees every bill');
+        expect(all.map((b) => b.billNumber).toSet(), {
+          ...phoneNumbers,
+          ...webNumbers,
+        });
+        final products = await db.getAllProducts();
+        expect(
+          products.firstWhere((p) => p.name == 'Rice').quantity,
+          closeTo(100 - 2 * rice, 1e-9),
+          reason: '$device rice stock',
+        );
+        expect(
+          products.firstWhere((p) => p.name == 'Oil').quantity,
+          closeTo(50 - 2 * oil, 1e-9),
+          reason: '$device oil stock',
+        );
+      });
+    }
+
+    // the web cancels one and returns goods on another: the phones follow
+    final listed =
+        (await web.getJson('/v1/shops/$shopId/bills?limit=50'))['items']
+            as List;
+    final firstWeb = listed.cast<Map<String, dynamic>>().firstWhere(
+      (b) => b['bill_number'] == webNumbers[0],
+    );
+    final secondWeb = listed.cast<Map<String, dynamic>>().firstWhere(
+      (b) => b['bill_number'] == webNumbers[1],
+    );
+    await web.postJson('/v1/shops/$shopId/bills/${firstWeb['uuid']}/cancel', {
+      'reason': 'parity',
+    });
+    final secondDetail = await web.getJson(
+      '/v1/shops/$shopId/bills/${secondWeb['uuid']}',
+    );
+    keyed.extra['Idempotency-Key'] = 'parity-return-0000';
+    final line = (secondDetail['items'] as List).first as Map<String, dynamic>;
+    await web.postJson(
+      '/v1/shops/$shopId/bills/${secondWeb['uuid']}/credit-note',
+      {
+        'quantities': {line['uuid']: 0.25},
+        'settlement': 'refund',
+      },
+    );
+    for (final device in ['a', 'b']) {
+      await on(device, () async {
+        final result = await sync(device);
+        expect(
+          result.conflicts,
+          isEmpty,
+          reason: '$device after cancel and return',
+        );
+        final bills = await db.getAllBills();
+        expect(
+          bills.any((b) => b.billNumber == webNumbers[0]),
+          isFalse,
+          reason: '$device: the cancelled bill is gone',
+        );
+        expect(
+          bills.where((b) => b.isCreditNote).length,
+          1,
+          reason: '$device: the credit note arrived',
+        );
+        final rice2 = (await db.getAllProducts())
+            .firstWhere((p) => p.name == 'Rice')
+            .quantity;
+        // cart 0 cancelled (3 rice back), cart 1 sold 0.5 rice and 0.25 came back
+        expect(
+          rice2,
+          closeTo(100 - 2 * rice + 3.0 + 0.25, 1e-9),
+          reason: '$device rice after cancel and return',
+        );
+      });
+    }
   }, skip: skip);
 
   test('a cancelled bill stays cancelled on every device', () async {

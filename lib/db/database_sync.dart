@@ -395,7 +395,15 @@ mixin DatabaseSync {
           );
         break;
       case 'bills':
-        map.remove('customer_id');
+        map
+          ..remove('customer_id')
+          ..['customer_uuid'] =
+              await _uuidForId(
+                executor,
+                'customers',
+                row['customer_id'] as int?,
+              ) ??
+              row['customer_uuid'];
         break;
       case 'bill_items':
         map
@@ -648,7 +656,8 @@ mixin DatabaseSync {
 
   /// Update the single live local row identified by [where]/[whereArgs] to adopt
   /// the cloud row's UUID and data — but only if it is the only match and the
-  /// cloud copy is newer than the local one.
+  /// cloud copy is newer than the local one. Customers always adopt the cloud
+  /// identity for the same phone, retaining newer local fields for upload.
   Future<void> _mergeMatchingRow(
     DatabaseExecutor executor,
     String table,
@@ -667,7 +676,19 @@ mixin DatabaseSync {
     if (matches.length != 1) return;
     final localUpdatedAt = matches.single['updated_at']?.toString();
     final cloudUpdatedAt = map['updated_at']?.toString();
-    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
+    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) {
+      if (table == 'customers') {
+        // The cloud owns the UUID for an existing phone number. Keep newer
+        // local details dirty, but upload them against that canonical identity.
+        await executor.update(
+          table,
+          {'uuid': map['uuid']},
+          where: 'id = ?',
+          whereArgs: [matches.single['id']],
+        );
+      }
+      return;
+    }
     await executor.update(
       table,
       map..remove('id'),

@@ -59,7 +59,7 @@ class BillTotals {
       subtotal += item.subtotal;
       net += item.lineAmount;
       taxable += item.totalTaxableValue;
-      if (item.totalIgst > 0) {
+      if (item.igstAmountSnapshot > 0) {
         igst += item.totalIgst;
       } else {
         intraGst += item.totalGst;
