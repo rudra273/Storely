@@ -454,7 +454,7 @@ class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
               decoration: const InputDecoration(
                 labelText: 'New password',
                 prefixIcon: Icon(Icons.lock_outline_rounded),
-                helperText: 'At least 10 characters.',
+                helperText: 'At least 8 characters.',
               ),
             ),
           ],

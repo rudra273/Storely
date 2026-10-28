@@ -923,8 +923,10 @@ void main() {
         );
       }
 
-      final age = await db.receivablesAgeing();
-      final sa = await report('receivables-ageing');
+      // Use the same calendar date even when the server is still on yesterday
+      // in UTC and the phone has crossed local midnight.
+      final age = await db.receivablesAgeing(asOf: now);
+      final sa = await report('receivables-ageing', {'as_of': day(now)});
       final names = rows(
         sa['customers'],
       ).map((c) => c['customer_name']).toList();
@@ -948,7 +950,10 @@ void main() {
 
       for (final days in [10, 30]) {
         final exp = await db.expiringStock(days: days);
-        final se = await report('expiring-stock', {'days': '$days'});
+        final se = await report('expiring-stock', {
+          'days': '$days',
+          'as_of': day(now),
+        });
         expect(
           rows(se['batches'])
               .map((b) => [b['product_name'], b['batch_no'], d(b['quantity'])])

@@ -183,7 +183,7 @@ security gate (section 6) passes.
 - **Signup:** email + password. Email must be verified (6-digit code, hashed,
   10-minute expiry, limited attempts) before the account can create or join a
   shop or sync.
-- **Password rules:** minimum 10 characters, no silly composition rules, blocked
+- **Password rules:** minimum 8 characters, no silly composition rules, blocked
   if common or in a bundled breached/common-password list, Unicode-normalised,
   maximum 128 characters. Hashed with argon2id and per-user salt.
 - **Login protection:** rate limits per IP and per account, progressive delay
