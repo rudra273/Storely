@@ -2,9 +2,11 @@ import '../sync/sync_backend.dart';
 import 'api_client.dart';
 
 /// [SyncBackend] for the Storely API. Same contract the sync engine had with
-/// Supabase: server-clock cursors, per-row rejections, idempotent uploads.
+/// the sync engine: server-clock cursors, per-row rejections, idempotent uploads.
 class ApiSyncBackend implements SyncBackend {
-  ApiSyncBackend(this.api);
+  ApiSyncBackend(this.api, {this.preferredShopId});
+
+  final Future<String> Function()? preferredShopId;
 
   final ApiClient api;
 
@@ -15,6 +17,10 @@ class ApiSyncBackend implements SyncBackend {
     final shops = await api.getJson('/v1/shops');
     final mine = shops['value'];
     if (mine is List && mine.isNotEmpty) {
+      final preferred = await preferredShopId?.call();
+      for (final row in mine) {
+        if ((row as Map)['shop_id'] == preferred) return preferred;
+      }
       return (mine.first as Map)['shop_id'].toString();
     }
 

@@ -1,7 +1,7 @@
 import 'package:storely/services/sync/sync_backend.dart';
 
-/// In-memory stand-in for the Supabase backend, applying the same write
-/// rules as supabase/migrations/20261024_sync_v2.sql (server clock, latest
+/// In-memory stand-in for the API backend, applying the same write
+/// rules as the server sync migrations (server clock, latest
 /// edit wins, deletion wins, sticky billing deletions) so the sync engine can
 /// be tested across several simulated devices.
 class FakeSyncBackend implements SyncBackend {
@@ -21,6 +21,7 @@ class FakeSyncBackend implements SyncBackend {
     'bill_items',
     'bill_payments',
     'stock_movements',
+    'held_bills',
   };
 
   DateTime _tick() => _clock = _clock.add(const Duration(milliseconds: 1));

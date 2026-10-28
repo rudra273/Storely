@@ -51,10 +51,10 @@ void main() {
     final service = CloudService.instance;
     await service.initialize();
 
-    // Storely Cloud resolves to the API (the build defines STORELY_API_URL).
+    // Storely Cloud resolves to the API (the debug build defines STORELY_API_URL and STORELY_CLOUD_PREVIEW=true).
     await service.useStorelyCloud();
     expect(service.state.value.mode, CloudBackendMode.storelyApi);
-    expect(service.state.value.config!.isApi, isTrue);
+    expect(service.state.value.config!.isValid, isTrue);
     expect(service.supportsEmailCodes, isTrue);
 
     // A shop that already has stock on the phone before it ever goes online.

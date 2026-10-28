@@ -1,6 +1,7 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-27. Status: **Phases 0-7 done; Phase 8 web billing, Decimal arithmetic and safe retries verified locally; customer review remains.**
+> Last updated 2026-10-28. Status: **Architecture audit complete; only partially aligned. Phases 0–8 are historical migration work (Phase 8 customer review remains). Phases 9–13 are implemented with local verification recorded below; premium activation/restore passed on a fresh emulator, and developer operations passed in a real browser. Phases 14–15 are planned.**
+> Current specification: [architecture audit and premium delivery specification](docs/ARCHITECTURE_AUDIT_2026-10-28.md). The 2026-10-28 decisions supersede historical Supabase coexistence and subscription/admin deferrals.
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
 
@@ -16,7 +17,10 @@ app for shop owners **and their staff**.
 3. **Flutter app stays.** It keeps working fully offline (local SQLite, no
    account needed, "Start Fresh"). Cloud sync becomes optional and points at
    our API instead of Supabase.
-4. **Everything runs locally in Docker first.** Hosting is decided later.
+4. **Free = Android local-only. Premium = cloud sync + web access**, enforced by the API per shop. Premium retains a local Android copy for offline use.
+5. **No Supabase in Android**: remove the SDK, implementation, fallback, saved configuration paths and setup UI.
+6. **Premium requests and developer console**: required contact phone, pending queue, shop metadata, manual subscription management and platform KPIs.
+7. **Everything runs locally in Docker first.** Production readiness follows the new delivery phases.
 
 ## 2. Locations
 
@@ -41,7 +45,9 @@ points back here.
 - **Security first.** All data is encrypted in transit, and the full set of
   security and auth features in section 5 is in scope, not a later add-on.
 - **Login is email + password only for now** (no phone OTP).
-- **No real data exists in Supabase.** No data migration; we start clean.
+- **Historical assumption:** no Supabase data migration was originally planned. This conflicts with newer repository notes claiming real cloud data. Verify actual legacy usage before shutdown; preserve local data and do not delete remote data as part of SDK removal.
+- **Confirmed 2026-10-28:** free local Android, paid cloud + web, complete premium business-data coverage, no Supabase UI/code in Android, phone-based premium request and a separate developer administration console.
+- **Proposed implementation defaults:** subscription belongs to a shop; manual approval/activation initially; developer console lives in a separately authorized `/platform` area in the web repo. Details and unresolved commercial choices are in the linked audit.
 - **Start with local development in Docker**, so it runs the same anywhere.
   Hosting, domains and the production email provider are deferred.
 
@@ -78,7 +84,11 @@ points back here.
                   PostgreSQL 18 (+ encrypted backups)
 ```
 
-### 4.1 What Supabase does today and what replaces it
+Free Android does not require the API. Premium Android uses the above sync path;
+web business access requires an active shop entitlement. A developer console uses
+separate platform API routes for contact/shop/subscription metadata only.
+
+### 4.1 Historical Supabase replacement mapping
 
 | Today (Supabase) | Replacement in `storelyapi` |
 |---|---|
@@ -256,7 +266,7 @@ security gate (section 6) passes.
   `no-new-privileges`, and small pinned base images.
 - Dependencies are pinned with lockfiles. CI runs `pip-audit`, `npm audit`,
   an image scan (Trivy) and secret scanning (gitleaks, also as a pre-commit hook).
-- Static analysis: `bandit` for Python (`semgrep` in Phase 9), oxlint security rules for
+- Static analysis: `bandit` for Python (`semgrep` in Phase 15), oxlint security rules for
   the web.
 
 ### 5.7 Mobile and web clients
@@ -396,7 +406,7 @@ level security, PL/pgSQL, `jsonb`, `SECURITY DEFINER` functions, triggers,
 Aurora, Azure, Google Cloud SQL, Neon, DigitalOcean, or a plain VPS. PostgreSQL
 18 is generally available on AWS RDS (since November 2025) and Azure (December
 2025). I could not confirm 18 on Google Cloud SQL, Neon or DigitalOcean, so
-check the host's supported versions when we pick one in Phase 9. Running on 17
+check the host's supported versions when we pick one in Phase 15. Running on 17
 is the safe fallback.
 
 **Other database engines (MySQL, SQL Server, SQLite).** Not compatible without
@@ -620,9 +630,11 @@ Caveats and decisions:
 - Staff can still pull `purchase_price` for products, as today. Hiding cost prices from staff
   is a web/API concern in Phase 6; the phone's staff view is unchanged.
 - Soft-deleted rows are returned by pull on purpose, because the phone needs the deletion.
-- Not done: a real load test (Phase 9) and any payload compression.
+- Not done: a real load test (Phase 15) and any payload compression.
 
 ### Phase 4: Flutter app on the new backend (M)
+**Historical scope:** added an API alongside Supabase; it did not remove Supabase
+or introduce paid entitlements. Phase 9 below replaces this coexistence design.
 Work on a branch off `st2.0`; do not touch bottom navigation or app flows.
 - Add `ApiSyncBackend implements SyncBackend` using the HTTP API.
 - Split auth out of `cloud_service.dart` behind a small interface; add an API
@@ -733,7 +745,7 @@ Collected so far; I cannot do these for you. Tick them off before launch.
 - [ ] Hand-drive the welcome screen, sign-up (email code), sign-in, forgot password and first sync on a
       real phone. Unlock or recreate the `storely_pixel` emulator first.
 - [ ] Try the build on an older real Android phone (also check the low-end performance rules in CLAUDE.md).
-- [ ] Bump the version (still 1.0.4+5) and build a release APK/AAB for Play.
+- [ ] Bump the version (1.0.5+6 at the 2026-10-28 audit) and build a release APK/AAB for Play.
 - [ ] Privacy-policy text still mentions Supabase; update before cutover.
 - [ ] Two-step on/off screens are not in the app yet (server and web have them).
 
@@ -750,13 +762,13 @@ Collected so far; I cannot do these for you. Tick them off before launch.
 - [ ] Staff permission matrix (section 4.5): confirm or change.
 - [ ] Require two-step for owners and admins? (switch `require_mfa_for_admins`, off by default.)
 
-**Before real users (Phase 9)**
+**Before real users (Phase 15; updated phase numbering)**
 - [ ] Hosting, domain, real TLS certificates, and the proxy addresses for `STORELY_TRUSTED_PROXIES`.
 - [ ] Real email provider (STARTTLS, SPF/DKIM/DMARC) and a test that codes arrive in an inbox, not spam.
 - [ ] Database backups and one practised restore. Decide on Postgres 17 or 18 for hosting.
 - [ ] Independent penetration test; decide on certificate pinning in the phone app.
 - [ ] Play Store: data-safety form, the public delete-account page URL, privacy policy.
-- [ ] Remove Supabase code and the "own Supabase" option after cutover.
+- [ ] Remove Supabase code and the "own Supabase" option in Phase 9, before production cutover.
 
 ### Phase 6: Web Products (L), priority 1
 - Searchable, sortable, paged product table; filters (category, low stock,
@@ -927,27 +939,216 @@ identical totals, and neither side sees a sync conflict.
 - Customer review of invoice layout, real printing and customer billing workflows;
   the existing section 6 gate still applies. PDF saving currently uses the browser.
 
-### Phase 9: Production readiness and cutover (L)
-- **Choose hosting, domains and the production email provider now**, not before.
-- Real TLS certificates, certificate pinning decision, database disk
-  encryption, encrypted backups with a **tested restore**.
-- Monitoring and alerts (error tracking, uptime), log retention.
-- Independent security review or penetration test; fix findings.
-- Load test with a large shop.
-- Update the privacy policy and in-app text that mention Supabase; publish the
-  account-deletion page.
-- Cutover: staged Play Store rollout of the new build. Because there is no real
-  data, installed 1.x apps can simply be pointed at the new flow; keep Supabase
-  running only until the rollout completes, then switch it off.
-- Remove Supabase code and the "own Supabase" option in a later release.
+### Phase 9: Remove Supabase from Android (M)
+**Implemented 2026-10-28; device/review gate remains.** Supabase SDK/backends,
+setup UI, fallback and legacy credentials removed. API is the only cloud path.
+A debug-only `STORELY_CLOUD_PREVIEW=true` opt-in permits API development; release
+activation is disabled until server-side entitlements land. SQLite is untouched.
+Privacy/help/setup guidance and plugin registrations were updated.
 
-**Done when:** production runs on our server, a restore drill has passed, the
-security review has no open high findings, and Supabase is no longer needed.
+Validation: analyzer clean; existing full suite 231 passed/16 skipped; new offline
+onboarding and credential-retirement tests plus API tests pass. Release APK build
+verified. Live integration tests (among the skipped cases) and physical older-device
+upgrade/offline verification were not run. No remote database was changed.
 
-### Phase 10: Later (not scheduled)
-Phone-number OTP login, subscriptions and payment webhooks, WhatsApp/SMS dues
-reminders, GST e-invoice and e-way bill, super-admin panel, optional
-SQLCipher encryption of the phone database, passkeys.
+Preserve free/offline business behavior.
+- Remove own-Supabase/hosted-Supabase modes, SDK, backend implementations,
+  configuration fields, fallback, build defines and credentials from runtime.
+- Keep the backend-neutral sync interface and Storely API implementation only.
+- Replace welcome/cloud setup with free local use and Storely API onboarding;
+  premium entry must not unlock unrestricted cloud while Phase 10 is unfinished.
+- Safely retire old cloud preferences/tokens without clearing SQLite or invoking
+  a legacy backend. Missing API configuration never exposes alternative backend UI.
+- Update tests, lockfile, Android build configuration, privacy/help and README;
+  archive legacy SQL references outside executable app paths as appropriate.
+- Reconcile CLAUDE.md migration guidance: Alembic for API, additive SQLite
+  migrations for mobile; no new Supabase schema maintenance in this architecture.
+
+**Done when:** release source/dependencies contain no Supabase integration,
+legacy preferences cannot reconnect, existing local data survives upgrade, and
+setup/billing/restart work without an account or API. Run analyzer, relevant tests
+and release/device checks. This is not authorization to shut down remote data.
+
+### Phase 10: Subscription model and API enforcement (L)
+**Implemented 2026-10-28; integration/review gates remain.** Migration 0008 adds
+shop subscriptions, immutable change history, explicit platform developers and
+MFA-verified session timestamps. All business REST/sync paths enforce premium;
+account/security/revocation/deletion exceptions stay accessible. New/existing
+registrations default to inactive free metadata shells. No business data is
+removed on expiry. Manual operator provisioning plus platform subscription APIs
+support grant/renew/suspend; the developer UI follows in Phase 13.
+
+Validation: 241 API unit tests and 198 PostgreSQL integration tests passed;
+ruff/mypy/Bandit clean, dependency/secret/production-image scans passed; web types
+regenerated and web typecheck plus 89 tests passed. TLS proxy smoke verifies free
+registration cannot sync. Migration reapplication, MFA, stale/concurrent changes,
+in-flight serialization, renewal/data retention and expired membership revocation
+are covered. [Verification details](docs/PHASE10_VERIFICATION.md).
+
+The existing `storely_pixel` AVD is identified. Complete emulator validation is
+scheduled after request/activation, data parity and web lifecycle integration.
+Android entitlement UI/offline staff lifecycle arrives in Phases 11/14; this phase
+does not grant paid client access. The business export/recovery retention window
+remains a release decision; existing cloud records have no automatic expiry purge.
+
+- Add additive subscription/history and platform-role/audit migrations.
+- Define shop-level entitlements, free/active/expired/suspended states, dates and
+  server-authoritative capability responses. Price/device limits remain decisions.
+- Enforce entitlement on all business REST and sync paths, in addition to roles
+  and tenant isolation. Audit create-shop, device registration and invite flows
+  for bypasses. Keep explicit auth/request/recovery exceptions.
+- Implement expiry/renewal semantics without data deletion; distinguish owner
+  fallback from staff revocation. Define retained-cloud export/recovery access.
+- Add narrow platform authorization primitives, controlled admin bootstrap and MFA.
+
+**Done when:** direct API tests prove that free/expired/suspended shops cannot
+access paid business routes, role/tenant checks still apply, and subscription
+updates/revocations are transactional and audited. UI flags cannot grant access.
+
+### Phase 11: Premium requests and Android activation (L)
+**Implemented and emulator-verified 2026-10-28; customer review remains.** Android now has
+Request Premium / View Request under Store → Cloud Backup & Sync. It collects
+contact name, international phone and consent, persists an idempotent secure draft,
+and distinguishes not-sent, pending, contacted, approved, rejected and activated.
+Verified account signup/sign-in and explicit backup/upload consent are in the same
+flow. The API supplies a private receipt status endpoint, bounded developer queue,
+MFA-protected review and UUID-bound owner claim. Approval alone cannot upload data.
+
+Activation creates a persistent local backup, preserves the local shop UUID/profile,
+rejects existing cloud registrations for reviewed recovery, and resumes dirty-row
+uploads. Repeated claims cannot renew or re-enable premium. Multi-shop sync selects
+the matching local shop. Server entitlements now permit release activation when a
+Storely API URL is bundled; no unrestricted preview flag is needed.
+
+Validation: 238 Flutter tests passed (16 live tests skipped), plus focused receipt
+origin/retry/UI tests; 241 API unit and 204 PostgreSQL integration tests passed;
+89 web tests and generated contract/typecheck passed. Analyzer, ruff/mypy/Bandit,
+dependency, secret and production-image gates passed. Release APK builds.
+At the user's request, the locked AVD was deleted and replaced with a fresh
+`storely_pixel` (Pixel 6, Android 15/API 35, arm64). The native
+`make test-device-premium` flow passed: request UI → email verification → approved
+account → pre-upload consent gate → backup/activation → upload → profile/product
+preservation → idempotent retry. Developer approval uses a temporary operator test
+fixture; the actual developer panel remains Phase 13. Screenshot and full evidence
+are in [verification details](docs/PHASE11_VERIFICATION.md).
+
+- Add minimal phone/contact request submission, private receipt-based status,
+  idempotency, rate limits, consent and pending/contacted/approved/rejected states.
+- Add Android Request Premium form/status and retry behavior. Offline means not
+  sent; show pending only after acceptance. Business data remains local.
+- Add request review/activation APIs, verified owner claim and subscription dates.
+  Reuse email/password auth; contact phone is not OTP login or proof of ownership.
+- Build safe local-to-cloud activation with stable shop identity, explicit upload
+  consent, backup/merge safeguards and resumable first upload.
+
+**Done when:** request → pending → authorized review → verified activation works;
+retries do not duplicate requests/shops, another user cannot claim the request,
+and no business data uploads before activation. Admin UI follows in Phase 13.
+
+### Phase 12: Complete business-data parity and restore (L)
+**Implemented and emulator-verified 2026-10-28; customer review remains.**
+SQLite v22 and API migration 0010 extend sync to 17 business tables, adding
+account-owned held/draft carts and nine portable preferences. The checked mapping
+manifest covers all 346 SQLite columns and 31 nested cart fields. UUIDs rebuild
+local relationships on restore; credentials, printer pairing, app lock and runtime
+state remain device-local. Private-row RLS and nested product/tenant validation
+prevent cross-account or cross-shop access.
+
+Held/draft snapshots from another device restore read-only, without automatic
+resume or checkout. Only their original device can consume them atomically;
+remote transfer is a future feature. Portable preferences restore per account.
+
+Verification: 245 Flutter tests passed (16 live tests skipped), 251 API unit and
+207 PostgreSQL integration tests passed, and 89 web tests/typecheck passed.
+The final migration's targeted PostgreSQL tests, analyzer, release build and
+security gates pass. A real emulator against the local TLS API verified populated
+17-table upload, clean SQLite restore with different row IDs/device identity,
+stock/payment/customer summaries, invoice numbering, protected cart snapshots,
+preferences and mobile/API round trips. The web side uses a REST client; browser
+UI lifecycle acceptance remains Phase 14. See
+[Phase 12 evidence](docs/PHASE12_VERIFICATION.md) and
+[data model mapping](docs/DATA_MODEL_PARITY.md).
+
+- Produce a field-level SQLite/domain/API/PostgreSQL mapping manifest for every
+  persisted business model, including all 15 existing sync tables.
+- Add held/draft bill cloud models, UUIDs and ownership/checkout conflict rules;
+  audit purchase/source references, settings, logos, returns and payment history.
+- Inventory SharedPreferences; separate portable preferences from local printer,
+  security/token and sync-runtime state. Document every derived/local-only field.
+- Extend shared contract/billing fixtures and additive migrations; preserve money,
+  GST, cancellations, relationships and device-safe invoice numbering.
+
+**Done when:** a populated local shop can upload and restore onto a clean phone
+without losing any business field; Android → API → web and web → API → Android
+round trips pass, including interrupted uploads and conflicts. A table existing
+on the server alone is not proof of parity.
+
+### Phase 13: Developer admin panel (L)
+**Implemented and real-browser-verified 2026-10-28; customer review remains.**
+The separate `/platform` console has KPI overview, phone/contact request review,
+searchable/paged shop metadata, grant/renew/extend/suspend/resume/expire controls,
+mandatory reasons/confirmation and append-only audit history. Account security and
+MFA enrollment work without shop membership. Sign-in preserves the platform URL.
+
+Migration 0011 adds narrow metadata/history/KPI functions and last-successful-sync
+activity. Developer grant plus fresh MFA sign-in after provisioning is required;
+shop owner/admin/staff cannot use platform endpoints, and developer access grants
+no tenant business access. Only approved metadata is exposed, including safe audit
+state projections. Offline-only installs, revenue and uptime are not invented KPIs.
+
+Validation: 251 API unit and 209 PostgreSQL integration tests passed; 97 web tests,
+typecheck, lint and production build passed. API and web security gates passed.
+A real Chromium/local TLS API run verified password-only denial, MFA enrollment
+and developer login without a shop, request approval, verified owner claim,
+suspension denying business access, resume restoring access, and audit history.
+Temporary exact-run developer/owner accounts were removed and cleanup verified.
+The normal Android app remains running; this phase changes only API/web.
+See [verification and access instructions](docs/PHASE13_VERIFICATION.md).
+
+- Separate `/platform` layout/routes and platform-only API schemas in existing
+  web/API repos; no inheritance from shop owner/admin roles.
+- Pending request queue with phone/contact details and review/activation actions.
+- Searchable/paged shop metadata list, subscription grant/extend/suspend/resume/
+  expire controls, mandatory reasons and append-only audit history.
+- KPIs: registered shops, active premium, request backlog/age, expiring/expired/
+  suspended shops, recent cloud activity; instrument sync/API health as needed.
+- No product details, customer/bill inspection or impersonation. No revenue/MRR
+  unless actual commercial records exist. Offline unregistered shops are unknown.
+
+**Done when:** developers can review requests and manage subscriptions end to end;
+owner/admin/staff are denied every platform endpoint and responses expose only
+approved metadata. KPI definitions and authorization tests are documented.
+
+### Phase 14: Paid web access and lifecycle integration (M-L)
+- Add entitlement loading/guards, pending/expired screens and renewal/request
+  status to shop web flows; preserve account/security/recovery access.
+- Ensure web onboarding cannot create an unrestricted free cloud shop.
+- Refresh entitlements/cache on shop switches, expiry and server rejection.
+- Validate phone + web + second phone workflows, first activation, downgrade,
+  renewal, revoked staff, partial sync, duplicate billing and restore.
+- Finish the outstanding Phase 8 customer invoice/printing workflow review.
+
+**Done when:** free remains independently usable on Android, premium alone gets
+normal cloud/web business access, and expiry/renewal never loses local records.
+All relevant cross-repo acceptance and security tests pass.
+
+### Phase 15: Production readiness and cutover (L)
+- Reconcile current deployment scaffolding with hosting/domains/email decisions.
+- Real TLS, encryption/backups and tested restore, monitoring/alerts, retention,
+  load tests and independent security review under the existing security gate.
+- Verify legacy Supabase users/data before shutdown; no remote deletion assumed.
+- Validate privacy/help against actual free/request/premium flows and publish
+  account-deletion/recovery documentation.
+- Staged Android release only after Phases 9–14 pass. Supabase removal is required
+  before this release, not deferred to another release.
+
+**Done when:** production restore/security/device gates pass and premium requests,
+platform administration and complete paid sync work together without Supabase.
+
+### Phase 16: Later (not scheduled)
+Automatic subscription payments/webhooks, phone OTP login, WhatsApp/SMS reminders,
+GST e-invoice/e-way bill, optional SQLCipher and passkeys. Manual subscriptions
+and the developer panel are now core scope in Phases 10–14, not deferred features.
 
 ## 9. Open questions
 
@@ -955,7 +1156,9 @@ SQLCipher encryption of the phone database, passkeys.
    should staff be blocked from cost prices and all reports?
 2. **2FA enforcement:** make two-factor *required* for owners and admins on the
    web, or optional for everyone?
-3. **Deferred until Phase 9:** hosting, domain names, production email provider.
+3. **Before Phase 15:** reconcile hosting/domain/email choices with existing deployment work.
+4. **Before subscription release:** pricing/duration/device limits, expiry retention and export/recovery window, staff offline revocation behavior.
+5. **Before platform activation:** initial developer accounts; contact fields beyond required phone; portable UI preference scope. See the audit for proposed defaults.
 
 ## 10. Risks
 
@@ -965,10 +1168,10 @@ SQLCipher encryption of the phone database, passkeys.
 | We own the security of billing data | Security gate on every phase, threat model, authorization matrix tests, independent review before launch. |
 | Auth mistakes | Standard libraries, no custom crypto, token and brute-force tests, rate limiting from day one. |
 | Sync regressions when changing the backend | Same protocol and triggers, contract tests against the fake, staged rollout. |
-| Old 1.x installs still call Supabase | Keep Supabase alive until the new build has rolled out. |
+| Legacy installations/data are uncertain | Verify actual usage before shutdown; remove Supabase from the new Android build without deleting local or remote records. |
 | Report numbers differ between phone and web | Parity tests on a shared fixture dataset. |
 | Local TLS setup friction on the Android emulator | Debug-only CA trust documented and tested in Phase 0/4. |
-| Scope creep from "many things" on the backend | Only Phase 0-9 items; everything else waits in Phase 10. |
+| Premium silently misses data or access checks | Field-level parity manifest, complete restore test and endpoint entitlement matrix before release. |
 
 ## 11. Working rules for all three repos
 
@@ -976,7 +1179,7 @@ SQLCipher encryption of the phone database, passkeys.
 - Server schema changes go in Alembic migrations that are additive and safe to
   re-run. Never drop populated tables without a backfill plan. Flutter's local
   SQLite keeps its own additive migration pattern in `lib/db/database_schema.dart`.
-  Until cutover, keep `supabase/migrations/` in sync for the legacy backend.
+  New work targets Alembic and SQLite only; legacy Supabase artifacts are historical references. Reconcile older CLAUDE.md instructions during Phase 9.
 - Money is `Decimal` / `NUMERIC` on the server; round only at display.
 - Keep `flutter analyze` clean; keep `ruff`, `mypy`, `bandit` and `pytest` green
   in `storelyapi`; keep `tsc`, oxlint and tests green in `storelyweb`.

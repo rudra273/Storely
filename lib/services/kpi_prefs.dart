@@ -1,3 +1,4 @@
+import 'portable_preference_keys.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -317,6 +318,7 @@ class KpiPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_enabledKey, _enabled.toList());
+    await PortablePreferenceChanges.record(_enabledKey, _enabled.toList());
   }
 
   Future<void> resetToDefaults() async {
@@ -324,5 +326,11 @@ class KpiPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_enabledKey, _enabled.toList());
+    await PortablePreferenceChanges.record(_enabledKey, _enabled.toList());
+  }
+
+  Future<void> reload() async {
+    await load();
+    notifyListeners();
   }
 }

@@ -135,67 +135,167 @@ mixin DatabaseBills {
     ];
   }
 
-  // ── Held bills and the auto-saved cart (device-local) ──
+  // ── Device-owned held/draft backups ──
 
   Future<int> holdBill(String label, List<BillItem> items) async {
     final db = await database;
-    final now = _localIso();
-    return db.insert('held_bills', {
+    final now = _nowIso();
+    final id = await db.insert('held_bills', {
+      'uuid': _newUuid(),
       'shop_id': await _activeShopId(db),
+      'owner_user_id': await DatabaseHelper.instance.getCloudSyncState(
+        'preference_owner',
+      ),
+      'origin_device_id': await DatabaseHelper.instance.localDeviceId(),
       'kind': 'held',
       'label': label,
       'items_json': HeldBill.encodeItems(items),
       'created_at': now,
       'updated_at': now,
     });
+    notifyDatabaseChanged();
+    return id;
   }
 
   Future<List<HeldBill>> getHeldBills() async {
     final db = await database;
+    final deviceId = await DatabaseHelper.instance.localDeviceId();
     final rows = await db.query(
       'held_bills',
-      where: "kind = 'held' AND shop_id = ?",
-      whereArgs: [await _activeShopId(db)],
+      where:
+          "shop_id = ? AND deleted_at IS NULL AND (kind = 'held' OR origin_device_id <> ?) AND (owner_user_id IS NULL OR owner_user_id = ?)",
+      whereArgs: [
+        await _activeShopId(db),
+        deviceId,
+        await DatabaseHelper.instance.getCloudSyncState('preference_owner') ??
+            'local',
+      ],
       orderBy: 'created_at DESC',
     );
-    return rows.map(HeldBill.fromMap).toList();
+    return [
+      for (final row in rows)
+        HeldBill.fromMap({
+          ...row,
+          'read_only': row['origin_device_id'] == deviceId ? 0 : 1,
+        }),
+    ];
+  }
+
+  /// Atomic local consume: another open sheet cannot resume the same cart twice.
+  Future<HeldBill> takeHeldBill(int id) async {
+    final db = await database;
+    final deviceId = await DatabaseHelper.instance.localDeviceId();
+    final shopId = await _activeShopId(db);
+    final owner = await DatabaseHelper.instance.getCloudSyncState(
+      'preference_owner',
+    );
+    final result = await db.transaction((txn) async {
+      final rows = await txn.query(
+        'held_bills',
+        where: 'id = ? AND shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, shopId],
+      );
+      if (rows.isEmpty) {
+        throw StateError('This cart was already resumed or deleted.');
+      }
+      if (rows.single['origin_device_id'] != deviceId ||
+          (rows.single['owner_user_id'] != null &&
+              rows.single['owner_user_id'] != owner)) {
+        throw StateError('This is a read-only backup from another device.');
+      }
+      final now = _nowIso();
+      await txn.update(
+        'held_bills',
+        {'deleted_at': now, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return HeldBill.fromMap(rows.single);
+    });
+    notifyDatabaseChanged();
+    return result;
   }
 
   Future<void> deleteHeldBill(int id) async {
     final db = await database;
-    await db.delete('held_bills', where: 'id = ?', whereArgs: [id]);
+    final now = _nowIso();
+    await db.update(
+      'held_bills',
+      {'deleted_at': now, 'updated_at': now},
+      where:
+          'id = ? AND shop_id = ? AND origin_device_id = ? AND deleted_at IS NULL AND (owner_user_id IS NULL OR owner_user_id = ?)',
+      whereArgs: [
+        id,
+        await _activeShopId(db),
+        await DatabaseHelper.instance.localDeviceId(),
+        await DatabaseHelper.instance.getCloudSyncState('preference_owner') ??
+            'local',
+      ],
+    );
+    notifyDatabaseChanged();
   }
 
-  /// Saves the cart being billed so it survives the app being closed.
-  /// An empty cart clears the draft.
   Future<void> saveCartDraft(List<BillItem> items) async {
     final db = await database;
     final shopId = await _activeShopId(db);
+    final device = await DatabaseHelper.instance.localDeviceId();
+    final owner = await DatabaseHelper.instance.getCloudSyncState(
+      'preference_owner',
+    );
     await db.transaction((txn) async {
-      await txn.delete(
+      final rows = await txn.query(
         'held_bills',
-        where: "kind = 'draft' AND shop_id = ?",
-        whereArgs: [shopId],
+        where:
+            "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND deleted_at IS NULL AND (owner_user_id IS NULL OR owner_user_id = ?)",
+        whereArgs: [shopId, device, owner ?? 'local'],
+        limit: 1,
       );
-      if (items.isEmpty) return;
-      final now = _localIso();
-      await txn.insert('held_bills', {
-        'shop_id': shopId,
-        'kind': 'draft',
-        'label': 'Unsaved bill',
-        'items_json': HeldBill.encodeItems(items),
-        'created_at': now,
-        'updated_at': now,
-      });
+      final now = _nowIso();
+      if (items.isEmpty) {
+        if (rows.isNotEmpty) {
+          await txn.update(
+            'held_bills',
+            {'deleted_at': now, 'updated_at': now},
+            where: 'id = ?',
+            whereArgs: [rows.single['id']],
+          );
+        }
+      } else if (rows.isNotEmpty) {
+        await txn.update(
+          'held_bills',
+          {'items_json': HeldBill.encodeItems(items), 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [rows.single['id']],
+        );
+      } else {
+        await txn.insert('held_bills', {
+          'uuid': _newUuid(),
+          'shop_id': shopId,
+          'owner_user_id': owner,
+          'origin_device_id': device,
+          'kind': 'draft',
+          'label': 'Unsaved bill',
+          'items_json': HeldBill.encodeItems(items),
+          'created_at': now,
+          'updated_at': now,
+        });
+      }
     });
+    notifyDatabaseChanged();
   }
 
   Future<List<BillItem>> loadCartDraft() async {
     final db = await database;
     final rows = await db.query(
       'held_bills',
-      where: "kind = 'draft' AND shop_id = ?",
-      whereArgs: [await _activeShopId(db)],
+      where:
+          "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND deleted_at IS NULL AND (owner_user_id IS NULL OR owner_user_id = ?)",
+      whereArgs: [
+        await _activeShopId(db),
+        await DatabaseHelper.instance.localDeviceId(),
+        await DatabaseHelper.instance.getCloudSyncState('preference_owner') ??
+            'local',
+      ],
       limit: 1,
     );
     return rows.isEmpty

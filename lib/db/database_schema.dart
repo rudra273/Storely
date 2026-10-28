@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 21,
+      version: 22,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -37,6 +37,7 @@ mixin DatabaseSchema {
     await _ensureV16Columns(db);
     await _ensureV20Columns(db);
     await _ensureInventoryColumns(db);
+    await _ensureV22Columns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -52,6 +53,7 @@ mixin DatabaseSchema {
     await _ensureV16Columns(db);
     await _ensureV20Columns(db);
     await _ensureInventoryColumns(db);
+    await _ensureV22Columns(db);
     await _runOneShotMigrations(db);
     await _ensureSyncTracking(db);
   }
@@ -196,24 +198,81 @@ mixin DatabaseSchema {
     await _createStockMovementTables(executor);
     await _createCloudSyncTables(executor);
     await _createHeldBillTables(executor);
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS user_preferences(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE, shop_id TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+        UNIQUE(shop_id, owner_user_id, key)
+      )
+    ''');
     await _createExpenseTables(executor);
     await _createAuditTables(executor);
   }
 
-  /// Carts parked with "Hold" (kind 'held') and the auto-saved cart being
-  /// billed (kind 'draft'). Device-local: never synced.
+  /// Device-owned cart backups. Restored carts from another device are read-only.
   Future<void> _createHeldBillTables(DatabaseExecutor executor) async {
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS held_bills(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        shop_id TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'held',
-        label TEXT NOT NULL,
-        items_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT,
+        shop_id TEXT NOT NULL, owner_user_id TEXT, origin_device_id TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'held', label TEXT NOT NULL, items_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
       )
     ''');
+  }
+
+  Future<void> _ensureV22Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'held_bills', {
+      'uuid': 'TEXT',
+      'owner_user_id': 'TEXT',
+      'origin_device_id': "TEXT NOT NULL DEFAULT ''",
+      'deleted_at': 'TEXT',
+    });
+    final device = await executor.query(
+      'cloud_sync_state',
+      where: 'key = ?',
+      whereArgs: ['device_id'],
+    );
+    final deviceId = device.isEmpty
+        ? _newUuid()
+        : device.single['value'] as String;
+    if (device.isEmpty) {
+      await executor.insert('cloud_sync_state', {
+        'key': 'device_id',
+        'value': deviceId,
+        'updated_at': _nowIso(),
+      });
+    }
+    final legacy = await executor.query(
+      'held_bills',
+      where: "uuid IS NULL OR uuid = '' OR origin_device_id = ''",
+    );
+    for (final row in legacy) {
+      await executor.update(
+        'held_bills',
+        {
+          'uuid': (row['uuid'] as String?)?.isNotEmpty == true
+              ? row['uuid']
+              : _newUuid(),
+          'origin_device_id': deviceId,
+          'created_at': DateTime.parse(
+            row['created_at'] as String,
+          ).toUtc().toIso8601String(),
+          'updated_at': DateTime.parse(
+            row['updated_at'] as String,
+          ).toUtc().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
+    await executor.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_held_uuid ON held_bills(uuid)',
+    );
+    await executor.execute(
+      'CREATE INDEX IF NOT EXISTS idx_held_device ON held_bills(shop_id, origin_device_id, kind)',
+    );
   }
 
   /// Seed the local shop and preset reference data. Guarded so it is safe to

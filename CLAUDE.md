@@ -29,9 +29,9 @@ before touching anything cloud-related.
   account and no server. Cloud sync goes through `SyncBackend`
   (`lib/services/sync/sync_backend.dart`); new backend = new implementation.
 - The web app is cloud-only and talks only to `storelyapi`, never to Supabase.
-- Until cutover (plan.md phase 9), Supabase stays live for installed 1.x apps;
-  keep `supabase/` in sync as before. The server schema of record for the new
-  backend will be Alembic migrations in `storelyapi`.
+- Android uses only the Storely API. No alternate backend SDK, keys or setup UI.
+- API schema changes use Alembic; local SQLite changes use additive migrations.
+  Legacy `supabase/` files are historical references, not an active migration target.
 - Security first: everything is encrypted in transit, and every phase passes the
   security gate in plan.md section 6. Develop locally in Docker.
 - The verify-before-you-build rule below applies in all three projects.
@@ -108,19 +108,9 @@ do not introduce a state-management package or rearchitect unless I ask.
   `_balanceDue` / `_paymentStatus`); follow that pattern.
 - Treat the SQLite schema as migration-sensitive — schema changes need a proper
   migration path; don't break existing users' local data.
-- **Migrations from now on (REQUIRED).** The cloud schema now has real data, so
-  **never** drop-and-recreate it. For **every** DB schema change — cloud Postgres
-  *or* local SQLite — create a new timestamped migration file in
-  `supabase/migrations/` (e.g. `YYYYMMDD_short_description.sql`) containing only
-  the additive delta, written to be idempotent and safe to re-run:
-  `create table if not exists`, `alter table ... add column if not exists`,
-  `create or replace function`, `drop policy if exists` then `create policy`.
-  Never `drop table` / `drop column` on populated tables without a backfill plan.
-  `supabase/storely_cloud_schema.sql` is the fresh-install snapshot only — also
-  update it to match, but the migration file is the source of truth for applying
-  changes to existing projects. For local SQLite, keep mirroring the change in
-  the additive `_ensureV16Columns`/one-shot-migration pattern in
-  `lib/db/database_schema.dart` as well.
+- **Migrations:** use additive Alembic migrations for cloud PostgreSQL and the
+  existing additive migration pattern in `lib/db/database_schema.dart` for SQLite.
+  Never drop populated tables/columns without a data-preserving migration plan.
 - Before release work, verify on a real/older Android device, bump the version
   appropriately, and keep the build reproducible (`flutter build apk --release`).
 

@@ -220,15 +220,66 @@ class _HeldBillsSheetState extends State<_HeldBillsSheet> {
                       '${bill.items.length} item${bill.items.length == 1 ? '' : 's'}'
                       ' · ${rupees(bill.total)}',
                     ),
-                    onTap: () => Navigator.pop(context, bill),
-                    trailing: IconButton(
-                      tooltip: 'Delete held bill',
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      onPressed: () async {
-                        await widget.onDelete(bill);
-                        if (mounted) setState(() => _held.removeAt(index));
-                      },
-                    ),
+                    onTap: bill.readOnly
+                        ? () => showDialog<void>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text(bill.label),
+                              content: SingleChildScrollView(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Read-only backup from another device. Resume the original cart on that device to avoid duplicate billing.',
+                                    ),
+                                    const SizedBox(height: AppSpacing.md),
+                                    for (final item in bill.items)
+                                      Text(
+                                        '${item.productName} × ${item.quantity} · ${rupees(item.subtotal)}',
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('Close'),
+                                ),
+                              ],
+                            ),
+                          )
+                        : () => Navigator.pop(context, bill),
+                    leading: bill.readOnly
+                        ? const Icon(Icons.lock_outline)
+                        : null,
+                    trailing: bill.readOnly
+                        ? null
+                        : IconButton(
+                            tooltip: 'Delete held bill',
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            onPressed: () async {
+                              try {
+                                await widget.onDelete(bill);
+                                if (mounted) {
+                                  setState(
+                                    () => _held.removeWhere(
+                                      (row) => row.id == bill.id,
+                                    ),
+                                  );
+                                }
+                              } catch (error) {
+                                if (!mounted || !context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Could not delete this cart: $error',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
                   );
                 },
               ),

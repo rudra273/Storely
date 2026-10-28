@@ -1,3 +1,4 @@
+import 'portable_preference_keys.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -61,6 +62,7 @@ class HomeSectionPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_unpaidCountKey, value);
+    await PortablePreferenceChanges.record(_unpaidCountKey, value);
   }
 
   Future<void> setUnpaidSort(UnpaidBillsSort value) async {
@@ -69,6 +71,7 @@ class HomeSectionPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_unpaidSortKey, value.storageValue);
+    await PortablePreferenceChanges.record(_unpaidSortKey, value.storageValue);
   }
 
   Future<void> setUnpaidHidden(bool value) async {
@@ -77,6 +80,7 @@ class HomeSectionPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_unpaidHiddenKey, value);
+    await PortablePreferenceChanges.record(_unpaidHiddenKey, value);
   }
 
   Future<void> setAttentionCount(int value) async {
@@ -85,6 +89,7 @@ class HomeSectionPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_attentionCountKey, value);
+    await PortablePreferenceChanges.record(_attentionCountKey, value);
   }
 
   Future<void> setAttentionHidden(bool value) async {
@@ -93,5 +98,11 @@ class HomeSectionPrefs extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_attentionHiddenKey, value);
+    await PortablePreferenceChanges.record(_attentionHiddenKey, value);
+  }
+
+  Future<void> reload() async {
+    await load();
+    notifyListeners();
   }
 }

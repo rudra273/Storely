@@ -7,8 +7,11 @@ import 'cloud_backend.dart';
 
 /// [CloudBackend] for the Storely API.
 class ApiCloudBackend implements CloudBackend {
-  ApiCloudBackend(this.api, {this.deviceLabel = 'Storely app'})
-    : sync = ApiSyncBackend(api);
+  ApiCloudBackend(
+    this.api, {
+    this.deviceLabel = 'Storely app',
+    Future<String> Function()? preferredShopId,
+  }) : sync = ApiSyncBackend(api, preferredShopId: preferredShopId);
 
   final ApiClient api;
   final String deviceLabel;

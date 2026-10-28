@@ -24,17 +24,6 @@ class ShopMember {
 
   bool get isOwner => role == 'owner';
 
-  /// Supabase shape: the email arrives joined from `profiles`.
-  factory ShopMember.fromMap(Map<String, dynamic> map) {
-    final profile = map['profiles'];
-    return ShopMember(
-      userId: map['user_id']?.toString() ?? '',
-      role: map['role']?.toString() ?? 'staff',
-      email: profile is Map ? profile['email']?.toString() : null,
-      joinedAt: DateTime.tryParse(map['created_at']?.toString() ?? ''),
-    );
-  }
-
   /// Storely API shape: the email is a plain field.
   factory ShopMember.fromApi(Map<String, dynamic> map) => ShopMember(
     userId: map['user_id']?.toString() ?? '',
@@ -96,15 +85,12 @@ enum SignUpOutcome {
   /// Signed in straight away.
   signedIn,
 
-  /// The service emailed a link to confirm (Supabase).
-  confirmByEmailLink,
-
   /// The service emailed a 6-digit code to type into the app (Storely API).
   emailCodeSent,
 }
 
 /// The result of creating an account. [user] is set when the service already
-/// knows who they are (Supabase does, even before the address is confirmed).
+/// knows who they are.
 class SignUpResult {
   final SignUpOutcome outcome;
   final CloudUser? user;
@@ -131,7 +117,7 @@ class CloudEmailNotVerified implements Exception {
 }
 
 /// A cloud provider, as the rest of the app sees it. [CloudService] holds exactly
-/// one of these, so screens never learn whether it is Supabase or the Storely API.
+/// one of these, so screens never learn the transport details.
 abstract class CloudBackend {
   CloudUser? get currentUser;
   Stream<CloudUser?> get userChanges;
@@ -140,7 +126,7 @@ abstract class CloudBackend {
   SyncBackend get sync;
 
   /// True when sign-up is confirmed with a code typed into the app, and passwords
-  /// can be reset from the app (the Storely API). Supabase does these by email link.
+  /// can be reset from the app (the Storely API).
   bool get supportsEmailCodes;
 
   Future<CloudUser> signIn(String email, String password);

@@ -56,12 +56,16 @@ class CloudSyncEngine {
 
   /// Rows per pull page (smaller in tests to exercise paging).
   final int pageSize;
+  final Future<void> Function(bool restoring)? prepareUserData;
+  final Future<void> Function()? applyUserData;
 
   CloudSyncEngine({
     required this.backend,
     required this.database,
     this.knownIsAdmin,
     this.pageSize = defaultPageSize,
+    this.prepareUserData,
+    this.applyUserData,
   });
 
   static const lastSyncStateKey = 'last_successful_cloud_sync_at';
@@ -112,6 +116,7 @@ class CloudSyncEngine {
 
   Future<CloudSyncResult> sync({FirstSyncMode? firstSyncMode}) async {
     var shopId = await database.currentShopId();
+    final hadLocalData = await database.hasLocalBusinessDataForCloud();
 
     // Resolve which shop (if any) this user belongs to. Joining a shop the
     // user was invited to also happens here.
@@ -156,6 +161,7 @@ class CloudSyncEngine {
       return const CloudSyncResult.needsFirstSyncChoice();
     }
 
+    await prepareUserData?.call(firstSync && !hadLocalData);
     final conflicts = <SyncConflict>[];
     for (final table in syncedTables) {
       conflicts.addAll(await _pull(table, shopId));
@@ -172,6 +178,7 @@ class CloudSyncEngine {
       conflicts.addAll(await _push(table));
     }
 
+    await applyUserData?.call();
     final syncedAt = DateTime.now().toUtc();
     await database.setCloudSyncState(
       lastSyncStateKey,

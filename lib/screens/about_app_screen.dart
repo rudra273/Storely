@@ -88,7 +88,7 @@ class AboutAppScreen extends StatelessWidget {
                 Text('How Data Works', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Storely works offline by default and stores business data on your device. Optional cloud sync can be connected to your own Supabase project for owner and staff access across devices.',
+                  'Storely works offline by default and stores business data on your device. Storely Cloud connects through the Storely API. Request Premium from Cloud Backup & Sync for cloud and web access.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],

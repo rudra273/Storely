@@ -1,37 +1,15 @@
-/// Compile-time defaults for the Storely-hosted Supabase backend (Option A).
-///
-/// These are injected at build time so the real project values never live in
-/// source control:
-///
-///   flutter run \
-///     --dart-define=STORELY_CLOUD_URL=https://xxxx.supabase.co \
-///     --dart-define=STORELY_CLOUD_ANON_KEY=eyJhbGci...
-///
-/// The anon key is safe to ship in the APK — it only grants access *through*
-/// Row Level Security. The service-role key must NEVER be defined here.
+/// Storely API configuration. There are no user-entered backend credentials.
 class CloudDefaults {
   const CloudDefaults._();
-
-  static const url = String.fromEnvironment('STORELY_CLOUD_URL');
-  static const anonKey = String.fromEnvironment('STORELY_CLOUD_ANON_KEY');
-
-  /// The Storely API (replaces the Supabase project above after cutover):
-  ///   --dart-define=STORELY_API_URL=https://api.example.com
-  /// It must be https; anything else is ignored.
   static const apiUrl = String.fromEnvironment('STORELY_API_URL');
+  static bool get apiAvailable {
+    final uri = Uri.tryParse(apiUrl);
+    return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty;
+  }
 
-  static bool get apiAvailable => apiUrl.startsWith('https://');
-
-  /// A development certificate authority (base64 of its PEM), for pointing a
-  /// DEBUG build at a local server:
-  ///   --dart-define=STORELY_DEV_CA_B64=...
-  /// Ignored in profile and release builds (see createApiHttpClient).
   static const devCaBase64 = String.fromEnvironment('STORELY_DEV_CA_B64');
 
-  /// True when the app was built with Storely-hosted Supabase credentials.
-  static bool get supabaseAvailable => url.isNotEmpty && anonKey.isNotEmpty;
-
-  /// True when the "Use Storely Cloud" option can be offered to the user: the
-  /// Storely API when this build has one, otherwise the hosted Supabase project.
-  static bool get isAvailable => apiAvailable || supabaseAvailable;
+  // The server enforces subscriptions; accounts can submit/claim requests before
+  // gaining business access. Without a bundled API, free offline use still works.
+  static bool get isAvailable => apiAvailable;
 }

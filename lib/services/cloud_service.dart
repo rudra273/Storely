@@ -2,6 +2,9 @@ import 'sync_status.dart';
 import 'app_log.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
@@ -16,7 +19,10 @@ import 'api/token_store.dart';
 import 'cloud/account_actions.dart';
 import 'cloud/api_cloud_backend.dart';
 import 'cloud/cloud_backend.dart';
-import 'cloud/supabase_cloud_backend.dart';
+import 'cloud/retired_cloud_settings.dart';
+import 'cloud/premium_request_service.dart';
+import 'backup_service.dart';
+import 'portable_preferences_service.dart';
 import 'sync/cloud_sync_engine.dart';
 
 export 'cloud/cloud_backend.dart'
@@ -29,36 +35,16 @@ export 'cloud/cloud_backend.dart'
         SignUpOutcome;
 export 'sync/cloud_sync_engine.dart' show FirstSyncMode, CloudSyncResult;
 
-/// Which cloud the app talks to.
-///
-/// [storelyApi] is Storely's own server (the default for new cloud users when
-/// the build knows its address). [storelyHosted] uses the bundled [CloudDefaults]
-/// Supabase credentials and [ownSupabase] a URL + anon key the user pastes in;
-/// both are the original setup, kept until everyone has moved to the API.
-enum CloudBackendMode { storelyHosted, ownSupabase, storelyApi }
-
-extension CloudBackendModeX on CloudBackendMode {
-  /// True for the options a user sees as "Storely Cloud" (not their own Supabase).
-  bool get isStorelyCloud => this != CloudBackendMode.ownSupabase;
-}
+/// Storely's API is the only supported cloud backend.
+enum CloudBackendMode { storelyApi }
 
 class CloudConfig {
   final String url;
-  final String anonKey;
-
-  /// True for the Storely API, which has no anon key and must be https.
-  final bool isApi;
-
-  const CloudConfig({required this.url, required this.anonKey}) : isApi = false;
-
-  const CloudConfig.api(this.url) : anonKey = '', isApi = true;
+  const CloudConfig.api(this.url);
 
   bool get isValid {
     final uri = Uri.tryParse(url);
-    if (uri == null || uri.host.isEmpty) return false;
-    if (isApi) return uri.scheme == 'https';
-    return (uri.scheme == 'https' || uri.scheme == 'http') &&
-        anonKey.trim().isNotEmpty;
+    return uri != null && uri.host.isNotEmpty && uri.scheme == 'https';
   }
 }
 
@@ -98,7 +84,7 @@ class CloudState {
 
   const CloudState({
     this.config,
-    this.mode = CloudBackendMode.storelyHosted,
+    this.mode = CloudBackendMode.storelyApi,
     this.user,
     this.phase = CloudSyncPhase.idle,
     this.membership = CloudMembership.unknown,
@@ -181,12 +167,14 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
   Timer? _autoSyncTimer;
   Timer? _debounceTimer;
   Future<void>? _syncInFlight;
+  bool _activationInProgress = false;
 
   /// True when sign-up is confirmed with a code typed into the app and passwords
   /// can be reset from the app (the Storely API), not by emailed link.
   bool get supportsEmailCodes => _backend?.supportsEmailCodes ?? false;
 
   Future<void> initialize() async {
+    PortablePreferencesService.install();
     DatabaseHelper.instance.assertAdminMutation = () async {
       if (!state.value.isAdmin) {
         throw StateError(
@@ -197,6 +185,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     DatabaseHelper.instance.isAdminMutationAllowed = () => state.value.isAdmin;
     DatabaseHelper.instance.auditActor = () => state.value.user?.email;
     final prefs = await SharedPreferences.getInstance();
+    await retireLegacyCloudSettings(prefs);
     final mode = _readMode(prefs);
     final lastSync = await DatabaseHelper.instance.getCloudSyncState(
       _lastSyncStateKey,
@@ -245,98 +234,43 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     }
   }
 
-  /// Enable cloud sync against Storely Cloud.
-  ///
-  /// Uses the Storely API when this build knows its address, otherwise the
-  /// bundled [CloudDefaults] Supabase credentials. Either way the user never has
-  /// to enter a URL or key.
+  /// Enable Storely API access explicitly. Local-only use never enables it.
   Future<void> useStorelyCloud() async {
-    final CloudConfig config;
-    final CloudBackendMode mode;
-    if (CloudDefaults.apiAvailable) {
-      config = CloudConfig.api(
-        CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
-      );
-      mode = CloudBackendMode.storelyApi;
-    } else if (CloudDefaults.supabaseAvailable) {
-      config = CloudConfig(
-        url: CloudDefaults.url.replaceFirst(RegExp(r'/+$'), ''),
-        anonKey: CloudDefaults.anonKey,
-      );
-      mode = CloudBackendMode.storelyHosted;
-    } else {
+    if (!CloudDefaults.isAvailable) {
       throw StateError(
-        'Storely Cloud is not available in this build. Use your own Supabase project instead.',
+        'Cloud activation is not available in this build. Your data stays on this device.',
       );
     }
+    final config = CloudConfig.api(
+      CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
+    );
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_modeKey, mode.name);
-    // Stored creds aren't needed for hosted modes; clear any stale own-Supabase
-    // values so a later switch doesn't accidentally reuse them.
+    await prefs.setString(_modeKey, CloudBackendMode.storelyApi.name);
     await prefs.remove(_urlKey);
     await prefs.remove(_anonKeyKey);
-    await _startBackend(config, mode, reset: true);
+    await _startBackend(config, CloudBackendMode.storelyApi, reset: true);
     state.value = state.value.copyWith(
       config: config,
-      mode: mode,
+      mode: CloudBackendMode.storelyApi,
       user: _backend?.currentUser,
       message: 'Storely Cloud enabled',
       clearError: true,
     );
   }
 
-  /// Enable cloud sync against the user's own Supabase project (Option B).
-  Future<void> saveConfig(CloudConfig config) async {
-    final normalized = CloudConfig(
-      url: config.url.trim().replaceFirst(RegExp(r'/+$'), ''),
-      anonKey: config.anonKey.trim(),
-    );
-    if (!normalized.isValid) {
-      throw ArgumentError('Supabase URL and anon key are required');
-    }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_modeKey, CloudBackendMode.ownSupabase.name);
-    await prefs.setString(_urlKey, normalized.url);
-    await prefs.setString(_anonKeyKey, normalized.anonKey);
-    await _startBackend(normalized, CloudBackendMode.ownSupabase, reset: true);
-    state.value = state.value.copyWith(
-      config: normalized,
-      mode: CloudBackendMode.ownSupabase,
-      user: _backend?.currentUser,
-      message: 'Cloud settings saved',
-      clearError: true,
-    );
-  }
+  CloudBackendMode _readMode(SharedPreferences prefs) =>
+      CloudBackendMode.storelyApi;
 
-  CloudBackendMode _readMode(SharedPreferences prefs) {
-    final stored = prefs.getString(_modeKey);
-    return CloudBackendMode.values.firstWhere(
-      (m) => m.name == stored,
-      orElse: () => CloudBackendMode.ownSupabase,
-    );
-  }
-
-  /// Resolve the active [CloudConfig] for [mode], or null when not configured.
   CloudConfig? _resolveConfig(SharedPreferences prefs, CloudBackendMode mode) {
-    if (mode == CloudBackendMode.storelyApi) {
-      if (!CloudDefaults.apiAvailable) return null;
-      return CloudConfig.api(
-        CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
-      );
-    }
-    if (mode == CloudBackendMode.storelyHosted) {
-      if (!CloudDefaults.supabaseAvailable) return null;
-      return CloudConfig(
-        url: CloudDefaults.url.replaceFirst(RegExp(r'/+$'), ''),
-        anonKey: CloudDefaults.anonKey,
-      );
-    }
-    final url = prefs.getString(_urlKey)?.trim();
-    final anonKey = prefs.getString(_anonKeyKey)?.trim();
-    if (url == null || url.isEmpty || anonKey == null || anonKey.isEmpty) {
+    // Only an explicitly saved API mode can reconnect. Legacy preferences never
+    // migrate into an account or upload local records automatically.
+    if (prefs.getString(_modeKey) != CloudBackendMode.storelyApi.name ||
+        !CloudDefaults.isAvailable) {
       return null;
     }
-    return CloudConfig(url: url, anonKey: anonKey);
+    return CloudConfig.api(
+      CloudDefaults.apiUrl.replaceFirst(RegExp(r'/+$'), ''),
+    );
   }
 
   Future<void> clearConfig() async {
@@ -389,8 +323,6 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
       user: result.user,
       message: switch (result.outcome) {
         SignUpOutcome.signedIn => 'Account created',
-        SignUpOutcome.confirmByEmailLink =>
-          'Account created. Confirm email if Supabase requires it.',
         SignUpOutcome.emailCodeSent =>
           'Account created. Enter the code we emailed you.',
       },
@@ -554,6 +486,55 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     );
   }
 
+  /// Activate only after explicit upload consent, keeping a durable local backup.
+  Future<void> activatePremium() async {
+    if (_activationInProgress || _syncInFlight != null) {
+      throw StateError('Wait for the current sync to finish.');
+    }
+    final backend = _requireBackend() as ApiCloudBackend;
+    final user = backend.currentUser;
+    if (user == null) {
+      throw StateError('Sign in with the account approved by the developer.');
+    }
+    final requests = PremiumRequestService.instance;
+    final draft = await requests.load();
+    if (draft == null) throw StateError('Submit a premium request first.');
+    final body = draft['body'] as Map;
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    if (body['local_shop_id'] != shopId) {
+      throw StateError('This request belongs to a different local shop.');
+    }
+    if (_syncInFlight != null) {
+      throw StateError('Wait for the current sync to finish.');
+    }
+    _activationInProgress = true;
+    try {
+      final support = await getApplicationSupportDirectory();
+      final folder = await Directory(
+        '${support.path}/premium_backups/${DateTime.now().microsecondsSinceEpoch}',
+      ).create(recursive: true);
+      final backup = await BackupService.createBackupFile(workDir: folder);
+      final response = await backend.api.postJson(
+        '/v1/premium-requests/${body['id']}/claim',
+        {'receipt_secret': body['receipt_secret']},
+      );
+      await requests.authorizeUpload(response, user.id, backup.path);
+      state.value = state.value.copyWith(
+        membership: CloudMembership.member,
+        shopRole: 'owner',
+        message: 'Premium activated. Uploading existing data…',
+        clearError: true,
+      );
+    } finally {
+      _activationInProgress = false;
+    }
+    await syncNow(
+      reason: 'Premium activated',
+      firstSyncMode: FirstSyncMode.uploadExisting,
+    );
+    if (state.value.error != null) throw StateError(state.value.error!);
+  }
+
   Future<void> syncNow({String? reason, FirstSyncMode? firstSyncMode}) {
     if (_syncInFlight != null) return _syncInFlight!;
     _syncInFlight = _sync(reason: reason, firstSyncMode: firstSyncMode)
@@ -566,7 +547,36 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
 
   Future<void> _sync({String? reason, FirstSyncMode? firstSyncMode}) async {
     final backend = _backend;
-    if (backend == null || backend.currentUser == null) return;
+    if (backend == null ||
+        backend.currentUser == null ||
+        _activationInProgress) {
+      return;
+    }
+    // A request never authorizes upload. Even auth-restoration/background events
+    // must wait for the approved account, local backup and explicit consent.
+    if (CloudDefaults.apiAvailable) {
+      Map<String, dynamic>? draft;
+      try {
+        draft = await PremiumRequestService.instance.load();
+      } catch (error) {
+        state.value = state.value.copyWith(
+          error: 'Cannot read premium request safely: $error',
+        );
+        return;
+      }
+      if (draft != null &&
+          (draft['body'] as Map)['local_shop_id'] ==
+              await DatabaseHelper.instance.currentShopId()) {
+        if (draft['upload_user'] != backend.currentUser!.id) {
+          state.value = state.value.copyWith(
+            membership: CloudMembership.needsRegistration,
+            message: 'Open your premium request to activate cloud upload.',
+          );
+          return;
+        }
+        firstSyncMode ??= FirstSyncMode.uploadExisting;
+      }
+    }
     final connected = await _connectivity.checkConnectivity();
     if (connected.contains(ConnectivityResult.none)) return;
 
@@ -587,6 +597,11 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         backend: backend.sync,
         database: DatabaseHelper.instance,
         knownIsAdmin: knownIsAdmin,
+        prepareUserData: (restoring) => PortablePreferencesService.prepare(
+          backend.currentUser!.id,
+          restoring: restoring,
+        ),
+        applyUserData: PortablePreferencesService.apply,
       ).sync(firstSyncMode: firstSyncMode);
 
       if (result.needsRegistration) {
@@ -657,9 +672,6 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     CloudConfig config,
     CloudBackendMode mode,
   ) async {
-    if (mode != CloudBackendMode.storelyApi) {
-      return SupabaseCloudBackend.start(config.url, config.anonKey);
-    }
     var agent = 'StorelyApp';
     try {
       final info = await PackageInfo.fromPlatform();
@@ -674,6 +686,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         tokens: SecureTokenStore(),
         userAgent: agent,
       ),
+      preferredShopId: DatabaseHelper.instance.currentShopId,
     );
   }
 

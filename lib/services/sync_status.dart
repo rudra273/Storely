@@ -41,6 +41,8 @@ class SyncStatus extends ChangeNotifier {
     'stock_movements' => 'Stock changes',
     'expenses' => 'Expenses',
     'audit_log' => 'History',
+    'held_bills' => 'Held carts and drafts',
+    'user_preferences' => 'Display preferences',
     _ => table,
   };
 }

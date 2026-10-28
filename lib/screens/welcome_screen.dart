@@ -6,7 +6,6 @@ import 'shared/cloud_account_dialogs.dart';
 import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../l10n/l10n.dart';
-import '../services/app_settings_service.dart';
 import '../services/sample_data.dart';
 
 enum _WelcomeMode { choice, createShop, joinCloud }
@@ -23,25 +22,18 @@ class WelcomeScreen extends StatefulWidget {
 class _WelcomeScreenState extends State<WelcomeScreen> {
   final _formKey = GlobalKey<FormState>();
   final _shopNameCtrl = TextEditingController();
-  final _cloudUrlCtrl = TextEditingController();
-  final _anonKeyCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   _WelcomeMode _mode = _WelcomeMode.choice;
   bool _isSaving = false;
   bool _addSampleData = false;
 
-  /// Reveals the "use your own Supabase" fields in the join flow. Forced open
-  /// when the bundled Storely Cloud credentials aren't compiled into the build.
-  bool _showAdvanced = !CloudDefaults.isAvailable;
   String? _message;
   String? _error;
 
   @override
   void dispose() {
     _shopNameCtrl.dispose();
-    _cloudUrlCtrl.dispose();
-    _anonKeyCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -66,17 +58,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
-  /// Configure the cloud backend before sign in/up: bundled Storely Cloud by
-  /// default, or the user-entered Supabase project when the advanced fields are
-  /// shown.
-  Future<void> _configureBackend() {
-    if (_showAdvanced) {
-      return CloudService.instance.saveConfig(
-        CloudConfig(url: _cloudUrlCtrl.text, anonKey: _anonKeyCtrl.text),
-      );
-    }
-    return CloudService.instance.useStorelyCloud();
-  }
+  Future<void> _configureBackend() => CloudService.instance.useStorelyCloud();
 
   Future<void> _joinCloudShop() async {
     setState(() {
@@ -205,10 +187,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                if (_mode == _WelcomeMode.choice) ...[
-                  const _LanguageChoice(),
-                  const SizedBox(height: AppSpacing.xl),
-                ],
                 Align(
                   child: Container(
                     width: 72,
@@ -346,29 +324,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Widget _joinCloudForm() {
-    final storelyCloudAvailable = CloudDefaults.isAvailable;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_showAdvanced) ...[
-          TextField(
-            controller: _cloudUrlCtrl,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'Supabase URL',
-              prefixIcon: Icon(Icons.link_rounded),
-            ),
+        if (!CloudDefaults.isAvailable)
+          const Text(
+            'Cloud activation is not available yet. You can use Storely offline.',
           ),
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _anonKeyCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Supabase anon key',
-              prefixIcon: Icon(Icons.key_outlined),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-        ],
         TextField(
           controller: _emailCtrl,
           keyboardType: TextInputType.emailAddress,
@@ -386,7 +348,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             prefixIcon: Icon(Icons.lock_outline_rounded),
           ),
         ),
-        if (CloudDefaults.apiAvailable && !_showAdvanced)
+        if (CloudDefaults.isAvailable)
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
@@ -404,7 +366,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         ],
         const SizedBox(height: AppSpacing.lg),
         FilledButton.icon(
-          onPressed: _isSaving ? null : _joinCloudShop,
+          onPressed: _isSaving || !CloudDefaults.isAvailable
+              ? null
+              : _joinCloudShop,
           icon: _busyIcon(Icons.login_rounded),
           label: const Text('Sign In and Join'),
           style: FilledButton.styleFrom(
@@ -413,25 +377,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         ),
         const SizedBox(height: AppSpacing.md),
         OutlinedButton.icon(
-          onPressed: _isSaving ? null : _createCloudAccount,
+          onPressed: _isSaving || !CloudDefaults.isAvailable
+              ? null
+              : _createCloudAccount,
           icon: const Icon(Icons.person_add_alt_1_outlined),
           label: const Text('Create Account'),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
           ),
         ),
-        if (storelyCloudAvailable)
-          TextButton.icon(
-            onPressed: _isSaving
-                ? null
-                : () => setState(() => _showAdvanced = !_showAdvanced),
-            icon: Icon(
-              _showAdvanced ? Icons.expand_less_rounded : Icons.tune_rounded,
-              size: 18,
-            ),
-            style: TextButton.styleFrom(foregroundColor: AppColors.inkMuted),
-            label: const Text('Advanced — use your own Supabase'),
-          ),
         TextButton(
           onPressed: _isSaving
               ? null
@@ -492,31 +446,4 @@ String _cleanError(Object error) {
       .replaceFirst('Bad state: ', '')
       .replaceFirst('AuthException(message: ', '')
       .replaceFirst(RegExp(r', statusCode:.*\)$'), '');
-}
-
-/// English / Hindi switch shown on the first screen.
-class _LanguageChoice extends StatelessWidget {
-  const _LanguageChoice();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = AppSettingsService.instance;
-    final current = settings.language == AppLanguage.system
-        ? (Localizations.localeOf(context).languageCode == 'hi'
-              ? AppLanguage.hindi
-              : AppLanguage.english)
-        : settings.language;
-    return Center(
-      child: SegmentedButton<AppLanguage>(
-        key: const ValueKey('welcome-language'),
-        segments: const [
-          ButtonSegment(value: AppLanguage.english, label: Text('English')),
-          ButtonSegment(value: AppLanguage.hindi, label: Text('हिन्दी')),
-        ],
-        selected: {current},
-        showSelectedIcon: false,
-        onSelectionChanged: (value) => settings.setLanguage(value.first),
-      ),
-    );
-  }
 }

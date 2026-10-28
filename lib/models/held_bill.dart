@@ -5,12 +5,16 @@ import 'bill.dart';
 /// A cart parked with "Hold" (or the auto-saved cart in progress).
 class HeldBill {
   final int id;
+  final String uuid;
+  final bool readOnly;
   final String label;
   final List<BillItem> items;
   final DateTime createdAt;
 
   const HeldBill({
     required this.id,
+    this.uuid = '',
+    this.readOnly = false,
     required this.label,
     required this.items,
     required this.createdAt,
@@ -28,6 +32,8 @@ class HeldBill {
 
   factory HeldBill.fromMap(Map<String, Object?> map) => HeldBill(
     id: map['id'] as int,
+    uuid: map['uuid'] as String? ?? '',
+    readOnly: map['read_only'] == 1,
     label: map['label'] as String,
     items: decodeItems(map['items_json'] as String),
     createdAt: DateTime.parse(map['created_at'] as String),

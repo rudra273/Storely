@@ -1,0 +1,2014 @@
+{
+  "version": 1,
+  "tables": {
+    "shops": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "phone": {
+          "wire": "phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "email": {
+          "wire": "email",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gstin": {
+          "wire": "gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "address": {
+          "wire": "address",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "app_settings": {
+      "fields": {
+        "key": {
+          "wire": "key",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "value": {
+          "wire": "value",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "bill_settings": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "invoice_title": {
+          "wire": "invoice_title",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "footer_text": {
+          "wire": "footer_text",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_invoice_title": {
+          "wire": "show_invoice_title",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_logo": {
+          "wire": "show_shop_logo",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_logo_base64": {
+          "wire": "shop_logo_base64",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_digital_signature": {
+          "wire": "show_digital_signature",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "digital_signature_base64": {
+          "wire": "digital_signature_base64",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_name": {
+          "wire": "show_shop_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_address": {
+          "wire": "show_shop_address",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_phone": {
+          "wire": "show_shop_phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_email": {
+          "wire": "show_shop_email",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_shop_gstin": {
+          "wire": "show_shop_gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_name": {
+          "wire": "show_customer_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_phone": {
+          "wire": "show_customer_phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_address": {
+          "wire": "show_customer_address",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_gstin": {
+          "wire": "show_customer_gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_legal_name": {
+          "wire": "show_customer_legal_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_trade_name": {
+          "wire": "show_customer_trade_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_customer_place_of_supply": {
+          "wire": "show_customer_place_of_supply",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_invoice_number": {
+          "wire": "show_invoice_number",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_invoice_date": {
+          "wire": "show_invoice_date",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_invoice_place_of_supply": {
+          "wire": "show_invoice_place_of_supply",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_invoice_supply_type": {
+          "wire": "show_invoice_supply_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_payment_details": {
+          "wire": "show_payment_details",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_gst_breakdown": {
+          "wire": "show_gst_breakdown",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_item_serial_column": {
+          "wire": "show_item_serial_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_item_name_column": {
+          "wire": "show_item_name_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_hsn_column": {
+          "wire": "show_hsn_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_quantity_column": {
+          "wire": "show_quantity_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_rate_column": {
+          "wire": "show_rate_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_gst_percent_column": {
+          "wire": "show_gst_percent_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_gst_amount_column": {
+          "wire": "show_gst_amount_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_amount_column": {
+          "wire": "show_amount_column",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_subtotal": {
+          "wire": "show_subtotal",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_discount": {
+          "wire": "show_discount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_taxable_amount": {
+          "wire": "show_taxable_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_cgst_sgst_igst": {
+          "wire": "show_cgst_sgst_igst",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_gst_total": {
+          "wire": "show_gst_total",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_grand_total": {
+          "wire": "show_grand_total",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_footer_text": {
+          "wire": "show_footer_text",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_total": {
+          "wire": "round_off_total",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "paper_size": {
+          "wire": "paper_size",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "upi_id": {
+          "wire": "upi_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_upi_qr": {
+          "wire": "show_upi_qr",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_amount_in_words": {
+          "wire": "show_amount_in_words",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "show_hsn_summary": {
+          "wire": "show_hsn_summary",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "terms_text": {
+          "wire": "terms_text",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "bank_details": {
+          "wire": "bank_details",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "categories": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_code": {
+          "wire": "hsn_code",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_type": {
+          "wire": "hsn_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_description": {
+          "wire": "hsn_description",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_percent": {
+          "wire": "gst_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "overhead_cost": {
+          "wire": "overhead_cost",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "profit_margin_percent": {
+          "wire": "profit_margin_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "commission_percent": {
+          "wire": "commission_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "direct_price_toggle": {
+          "wire": "direct_price_toggle",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "manual_price": {
+          "wire": "manual_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "units": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "suppliers": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "phone": {
+          "wire": "phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "email": {
+          "wire": "email",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gstin": {
+          "wire": "gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "address": {
+          "wire": "address",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "customers": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "phone": {
+          "wire": "phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "email": {
+          "wire": "email",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "address": {
+          "wire": "address",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gstin": {
+          "wire": "gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_legal_name": {
+          "wire": "gst_legal_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_trade_name": {
+          "wire": "gst_trade_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_registration_status": {
+          "wire": "gst_registration_status",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_taxpayer_type": {
+          "wire": "gst_taxpayer_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_verified_at": {
+          "wire": "gst_verified_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_source": {
+          "wire": "gst_source",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "place_of_supply_state_code": {
+          "wire": "place_of_supply_state_code",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "total_purchase_amount": {
+          "wire": "total_purchase_amount",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "bill_count": {
+          "wire": "bill_count",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "last_purchase_at": {
+          "wire": "last_purchase_at",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "products": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "product_code": {
+          "wire": "product_code",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "barcode": {
+          "wire": "barcode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_code": {
+          "wire": "hsn_code",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_type": {
+          "wire": "hsn_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_description": {
+          "wire": "hsn_description",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "category_id": {
+          "wire": "category_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Map UUID back to this SQLite database row ID."
+        },
+        "supplier_id": {
+          "wire": "supplier_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Map UUID back to this SQLite database row ID."
+        },
+        "selling_price": {
+          "wire": "selling_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "purchase_price": {
+          "wire": "purchase_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_percent": {
+          "wire": "gst_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "overhead_cost": {
+          "wire": "overhead_cost",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "profit_margin_percent": {
+          "wire": "profit_margin_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "direct_price_toggle": {
+          "wire": "direct_price_toggle",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "manual_price": {
+          "wire": "manual_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "quantity_cache": {
+          "wire": "quantity_cache",
+          "kind": "derived_snapshot",
+          "restore": "Rebuild from stock movements; do not trust another device cache."
+        },
+        "unit_id": {
+          "wire": "unit_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Map UUID back to this SQLite database row ID."
+        },
+        "source": {
+          "wire": "source",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "track_stock": {
+          "wire": "track_stock",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "reorder_level": {
+          "wire": "reorder_level",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "mrp_price": {
+          "wire": "mrp_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "invoice_series": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "name": {
+          "wire": "name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "format_template": {
+          "wire": "format_template",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sequence_padding": {
+          "wire": "sequence_padding",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "reset_period": {
+          "wire": "reset_period",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "allocation_mode": {
+          "wire": "allocation_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "next_sequence": {
+          "wire": "next_sequence",
+          "kind": "device_sequence_snapshot",
+          "restore": "Keep this device counter; register a new device letter on clean restore."
+        },
+        "is_default": {
+          "wire": "is_default",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "is_active": {
+          "wire": "is_active",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_token_required": {
+          "wire": "device_token_required",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "last_sequence_key": {
+          "wire": "last_sequence_key",
+          "kind": "device_sequence_snapshot",
+          "restore": "Keep this device counter; register a new device letter on clean restore."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "bills": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "bill_number": {
+          "wire": "bill_number",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "invoice_series_uuid": {
+          "wire": "invoice_series_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "bill_type": {
+          "wire": "bill_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_id": {
+          "wire": "customer_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Map UUID back to this SQLite database row ID."
+        },
+        "customer_uuid": {
+          "wire": "customer_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_name": {
+          "wire": "customer_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_phone": {
+          "wire": "customer_phone",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_gstin": {
+          "wire": "customer_gstin",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_gst_legal_name": {
+          "wire": "customer_gst_legal_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_gst_trade_name": {
+          "wire": "customer_gst_trade_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "customer_address_snapshot": {
+          "wire": "customer_address_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "place_of_supply_state_code": {
+          "wire": "place_of_supply_state_code",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "subtotal_amount": {
+          "wire": "subtotal_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_percent": {
+          "wire": "discount_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_amount": {
+          "wire": "discount_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "profit_commission_percent": {
+          "wire": "profit_commission_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "taxable_amount": {
+          "wire": "taxable_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cgst_amount": {
+          "wire": "cgst_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sgst_amount": {
+          "wire": "sgst_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "igst_amount": {
+          "wire": "igst_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_amount": {
+          "wire": "round_off_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "document_type": {
+          "wire": "document_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "original_bill_uuid": {
+          "wire": "original_bill_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "original_bill_number": {
+          "wire": "original_bill_number",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "total_amount": {
+          "wire": "total_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "item_count": {
+          "wire": "item_count",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "is_paid": {
+          "wire": "is_paid",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "payment_method": {
+          "wire": "payment_method",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "paid_amount": {
+          "wire": "paid_amount",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "balance_due": {
+          "wire": "balance_due",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "payment_status": {
+          "wire": "payment_status",
+          "kind": "derived_snapshot",
+          "restore": "Reconcile from durable bills/payments on restore."
+        },
+        "lifecycle_status": {
+          "wire": "lifecycle_status",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cancelled_at": {
+          "wire": "cancelled_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cancel_reason": {
+          "wire": "cancel_reason",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "duplicated_from_bill_uuid": {
+          "wire": "duplicated_from_bill_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "bill_items": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "bill_id": {
+          "wire": "bill_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Resolve the already-stored UUID; allocate this device local ID."
+        },
+        "bill_uuid": {
+          "wire": "bill_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "product_id": {
+          "wire": "product_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Resolve the already-stored UUID; allocate this device local ID."
+        },
+        "product_uuid": {
+          "wire": "product_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "product_name": {
+          "wire": "product_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_code_snapshot": {
+          "wire": "hsn_code_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "hsn_type_snapshot": {
+          "wire": "hsn_type_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "unit_name": {
+          "wire": "unit_name",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "purchase_price_snapshot": {
+          "wire": "purchase_price_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "selling_price_snapshot": {
+          "wire": "selling_price_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cost_snapshot": {
+          "wire": "cost_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "profit_snapshot": {
+          "wire": "profit_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "commission_snapshot": {
+          "wire": "commission_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_snapshot": {
+          "wire": "gst_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "gst_percent_snapshot": {
+          "wire": "gst_percent_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "taxable_value_snapshot": {
+          "wire": "taxable_value_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cgst_amount_snapshot": {
+          "wire": "cgst_amount_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sgst_amount_snapshot": {
+          "wire": "sgst_amount_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "igst_amount_snapshot": {
+          "wire": "igst_amount_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "was_direct_price": {
+          "wire": "was_direct_price",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "quantity": {
+          "wire": "quantity",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "original_item_uuid": {
+          "wire": "original_item_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "subtotal": {
+          "wire": "subtotal",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "mrp_snapshot": {
+          "wire": "mrp_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "bill_payments": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "bill_uuid": {
+          "wire": "bill_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "amount": {
+          "wire": "amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "payment_method": {
+          "wire": "payment_method",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "payment_reference": {
+          "wire": "payment_reference",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "received_at": {
+          "wire": "received_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "stock_movements": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "product_id": {
+          "wire": "product_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Resolve UUID; source_document_id is rebuilt for bill documents."
+        },
+        "product_uuid": {
+          "wire": "product_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "movement_type": {
+          "wire": "movement_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "quantity_delta": {
+          "wire": "quantity_delta",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "unit_cost": {
+          "wire": "unit_cost",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "source_type": {
+          "wire": "source_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "supplier_id": {
+          "wire": "supplier_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Resolve UUID; source_document_id is rebuilt for bill documents."
+        },
+        "supplier_uuid": {
+          "wire": "supplier_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "source_document_type": {
+          "wire": "source_document_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "source_document_id": {
+          "wire": "source_document_uuid",
+          "kind": "uuid_relationship",
+          "restore": "Resolve UUID; source_document_id is rebuilt for bill documents."
+        },
+        "source_document_uuid": {
+          "wire": "source_document_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "import_batch_key": {
+          "wire": "import_batch_key",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "import_row_number": {
+          "wire": "import_row_number",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "reason": {
+          "wire": "reason",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "batch_no": {
+          "wire": "batch_no",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "expiry_date": {
+          "wire": "expiry_date",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "expenses": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "expense_date": {
+          "wire": "expense_date",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "amount": {
+          "wire": "amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "category": {
+          "wire": "category",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "payment_method": {
+          "wire": "payment_method",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "audit_log": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "entity_type": {
+          "wire": "entity_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "entity_uuid": {
+          "wire": "entity_uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "action": {
+          "wire": "action",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "details": {
+          "wire": "details",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "actor": {
+          "wire": "actor",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "device_id": {
+          "wire": "device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "held_bills": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "owner_user_id": {
+          "wire": "owner_user_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "origin_device_id": {
+          "wire": "origin_device_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "kind": {
+          "wire": "kind",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "label": {
+          "wire": "label",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "items_json": {
+          "wire": "items_json",
+          "kind": "cart_snapshot",
+          "restore": "Preserve every line snapshot; export portable UUIDs and rebuild local product IDs."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    },
+    "user_preferences": {
+      "fields": {
+        "id": {
+          "wire": null,
+          "kind": "local_identity",
+          "restore": "Allocate a new SQLite row ID; cloud UUID is the stable identity."
+        },
+        "uuid": {
+          "wire": "uuid",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "shop_id": {
+          "wire": "shop_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "owner_user_id": {
+          "wire": "owner_user_id",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "key": {
+          "wire": "key",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "value": {
+          "wire": "value",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "created_at": {
+          "wire": "created_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "updated_at": {
+          "wire": "updated_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "deleted_at": {
+          "wire": "deleted_at",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "sync_dirty": {
+          "wire": null,
+          "kind": "sync_runtime",
+          "restore": "Pulled rows start clean; never restore another device dirty state."
+        }
+      },
+      "server_only": [
+        "server_updated_at"
+      ]
+    }
+  },
+  "cart_item_fields": {
+    "id": {
+      "wire": null,
+      "kind": "local_identity"
+    },
+    "uuid": {
+      "wire": "uuid",
+      "kind": "mirrored"
+    },
+    "shop_id": {
+      "wire": "shop_id",
+      "kind": "mirrored"
+    },
+    "bill_id": {
+      "wire": null,
+      "kind": "local_identity"
+    },
+    "bill_uuid": {
+      "wire": "bill_uuid",
+      "kind": "mirrored"
+    },
+    "product_id": {
+      "wire": "product_uuid",
+      "kind": "uuid_relationship"
+    },
+    "product_uuid": {
+      "wire": "product_uuid",
+      "kind": "mirrored"
+    },
+    "product_name": {
+      "wire": "product_name",
+      "kind": "mirrored"
+    },
+    "hsn_code_snapshot": {
+      "wire": "hsn_code_snapshot",
+      "kind": "mirrored"
+    },
+    "hsn_type_snapshot": {
+      "wire": "hsn_type_snapshot",
+      "kind": "mirrored"
+    },
+    "unit_name": {
+      "wire": "unit_name",
+      "kind": "mirrored"
+    },
+    "purchase_price_snapshot": {
+      "wire": "purchase_price_snapshot",
+      "kind": "mirrored"
+    },
+    "selling_price_snapshot": {
+      "wire": "selling_price_snapshot",
+      "kind": "mirrored"
+    },
+    "cost_snapshot": {
+      "wire": "cost_snapshot",
+      "kind": "mirrored"
+    },
+    "profit_snapshot": {
+      "wire": "profit_snapshot",
+      "kind": "mirrored"
+    },
+    "commission_snapshot": {
+      "wire": "commission_snapshot",
+      "kind": "mirrored"
+    },
+    "gst_snapshot": {
+      "wire": "gst_snapshot",
+      "kind": "mirrored"
+    },
+    "gst_percent_snapshot": {
+      "wire": "gst_percent_snapshot",
+      "kind": "mirrored"
+    },
+    "taxable_value_snapshot": {
+      "wire": "taxable_value_snapshot",
+      "kind": "mirrored"
+    },
+    "cgst_amount_snapshot": {
+      "wire": "cgst_amount_snapshot",
+      "kind": "mirrored"
+    },
+    "sgst_amount_snapshot": {
+      "wire": "sgst_amount_snapshot",
+      "kind": "mirrored"
+    },
+    "igst_amount_snapshot": {
+      "wire": "igst_amount_snapshot",
+      "kind": "mirrored"
+    },
+    "was_direct_price": {
+      "wire": "was_direct_price",
+      "kind": "mirrored"
+    },
+    "quantity": {
+      "wire": "quantity",
+      "kind": "mirrored"
+    },
+    "original_item_uuid": {
+      "wire": "original_item_uuid",
+      "kind": "mirrored"
+    },
+    "mrp_snapshot": {
+      "wire": "mrp_snapshot",
+      "kind": "mirrored"
+    },
+    "subtotal": {
+      "wire": "subtotal",
+      "kind": "derived_snapshot"
+    },
+    "device_id": {
+      "wire": "device_id",
+      "kind": "mirrored"
+    },
+    "created_at": {
+      "wire": "created_at",
+      "kind": "mirrored"
+    },
+    "updated_at": {
+      "wire": "updated_at",
+      "kind": "mirrored"
+    },
+    "deleted_at": {
+      "wire": "deleted_at",
+      "kind": "mirrored"
+    }
+  },
+  "portable_preferences": [
+    "analytics_enabled_kpis",
+    "app_language",
+    "app_theme_preference",
+    "billing_search_first",
+    "home_attention_count",
+    "home_attention_hidden",
+    "home_unpaid_count",
+    "home_unpaid_hidden",
+    "home_unpaid_sort"
+  ],
+  "device_only_tables": [
+    "cloud_sync_state"
+  ],
+  "server_managed_public_tables": {
+    "shop_members": "Membership and roles via authenticated API",
+    "shop_invites": "Invitations via authenticated API",
+    "shop_devices": "Device registration and invoice letters via API",
+    "invoice_counters": "Atomic web invoice counters",
+    "idempotency_keys": "Durable web write retry keys",
+    "alembic_version": "Migration runtime state"
+  },
+  "device_only": [
+    "cloud_sync_state",
+    "app_lock_enabled",
+    "printer_mac",
+    "printer_name",
+    "printer_paper",
+    "last_backup_at",
+    "cloud backend selection",
+    "API refresh token",
+    "premium request receipt"
+  ],
+  "cart_restore_policy": "Origin device owns resumable carts. Other devices retain read-only snapshots. Tombstones prevent resurrection."
+}

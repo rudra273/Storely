@@ -301,26 +301,6 @@ void main() {
       expect(const CloudConfig.api('http://api.example.com').isValid, isFalse);
       expect(const CloudConfig.api('https://').isValid, isFalse);
     });
-
-    test('an own-Supabase setup still needs a key', () {
-      expect(
-        const CloudConfig(url: 'https://x.supabase.co', anonKey: 'k').isValid,
-        isTrue,
-      );
-      expect(
-        const CloudConfig(url: 'https://x.supabase.co', anonKey: ' ').isValid,
-        isFalse,
-      );
-    });
-
-    test(
-      'both Storely options count as "Storely Cloud", an own Supabase does not',
-      () {
-        expect(CloudBackendMode.storelyApi.isStorelyCloud, isTrue);
-        expect(CloudBackendMode.storelyHosted.isStorelyCloud, isTrue);
-        expect(CloudBackendMode.ownSupabase.isStorelyCloud, isFalse);
-      },
-    );
   });
 
   test(
