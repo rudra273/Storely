@@ -171,10 +171,18 @@ class ProductPurchaseCommit {
   final Product product;
   final double quantityAdded;
   final Product? restockTarget;
+  final String? importKey;
+  final int? importRowNumber;
+  final String? newProductKey;
+  final bool duplicateApproved;
 
   const ProductPurchaseCommit({
     required this.product,
     required this.quantityAdded,
     this.restockTarget,
+    this.importKey,
+    this.importRowNumber,
+    this.newProductKey,
+    this.duplicateApproved = false,
   });
 }

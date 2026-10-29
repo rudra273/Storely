@@ -395,3 +395,32 @@ Next: complete Android reviewed-import parity and shared new-product staging, th
 supplier history and the remaining accounting/correction work packages. Supplier
 payments, invoice taxes/charges, attachments, returns and reconciliation remain
 required before claiming the full end-to-end upgrade is complete.
+
+
+## Stage 7 checkpoint — Android import review
+
+Android now previews every source row, including invalid rows and ignored columns,
+with editable quantities/costs, exact line totals, lot/expiry and original row numbers.
+Users explicitly choose name-only matches, exclude or correct invalid rows, and
+approve a possible repeated file. Unique identifiers select existing items; conflicts
+and incompatible units block staging. Same-identity new-product lots share one
+staged product and confirm as separate movements in one transaction. Provenance and
+repeat approval survive draft recovery and ordinary line edits.
+
+Local fingerprints are stable across dates, file names, header aliases and row order;
+posting rechecks them locally. They use an Android-specific namespace and the source
+key/row travel on stock movements. API regression commit `24e233e` validates real
+PostgreSQL sync and native receipt adoption without duplicating stock. ReceiptOut
+still omits source metadata. See [Android import review](android-purchase-import-review.md).
+
+The full cross-platform duplicate requirement remains open: web and Android do not
+share fingerprints/registry, Android uploads movements before document adoption, and
+an unsynced second device can be missed. Shared canonical parsing, server-side
+cross-device checks and a safe posting protocol are needed before claiming parity.
+Supplier accounting, taxes/charges, attachments, returns/corrections and the other
+remaining work packages also remain open.
+
+Validation: 307 Flutter tests passed with 16 environment-dependent live tests skipped;
+analysis and debug APK build pass. The final review-screen changes were rechecked with
+focused widget tests. API purchase/native/product/sync/report integration: 85 passed.
+No server migration, remote deployment or device installation was performed.

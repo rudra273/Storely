@@ -50,20 +50,13 @@ Full SQLite backup includes drafts; they are not promised on another device.
 
 ## Import safety and remaining work
 
-Imported lines keep separate quantities/costs/lots instead of summing solely by name.
-Existing targets use consistent code/barcode matches first, with a unique name fallback
-when identifiers are absent. Ambiguous/conflicting identity and incompatible base units
-require file correction or manual product selection before any rows are staged. Exact
-whole-file duplicate assistance is retained. Editing/removing an imported line clears
-the original whole-file key rather than claiming an unchanged file. Original source
-rows stay available in the saved draft until then.
-
-Full Android row-by-row review, explicit approval of every name-only match, shared
-staged identities for multiple new-product lots, durable cross-date import fingerprints,
-and source-row provenance parity with web remain next. The current importer must not
-be described as full web parity. Unfinished editor-field recovery, dedicated supplier
-history/filtering, payments, invoice tax/charges, attachments and audited corrections/
-returns remain in the master plan. Opening-cost unknown semantics are unchanged.
+Stage 7 adds row-by-row review, explicit name-match choices, source-row provenance
+and shared new-product identities for multiple lots. Reviewed source details survive
+line edits and removal of other rows. See [Android import review](android-purchase-import-review.md).
+Local Android duplicate warnings do not yet guarantee web/cross-device detection.
+A shared fingerprint and posting protocol remain open, as do unfinished editor-field
+recovery, supplier history/filtering, payments, tax/charges, attachments, and audited
+corrections/returns. Opening-cost unknown semantics are unchanged.
 
 No API or web changes, remote deployment, data backfill or device installation are
 part of this stage. This build continues using the stage-5 API/migration 0016.

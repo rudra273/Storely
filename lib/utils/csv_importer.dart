@@ -18,12 +18,25 @@ class ImportRowError {
   String toString() => 'Row $row: $message';
 }
 
+class ImportProductRow {
+  final int number;
+  final Product product;
+  const ImportProductRow(this.number, this.product);
+}
+
 /// Parsed rows ready to import plus the rows that were skipped.
 class ImportParseResult {
   final List<Product> products;
   final List<ImportRowError> errors;
+  final List<ImportProductRow> rows;
+  final List<String> warnings;
 
-  const ImportParseResult(this.products, this.errors);
+  const ImportParseResult(
+    this.products,
+    this.errors, {
+    this.rows = const [],
+    this.warnings = const [],
+  });
 }
 
 class CsvImporter {
@@ -38,6 +51,8 @@ class CsvImporter {
     'gst_percent',
     'reorder_level',
     'mrp_price',
+    'batch_no',
+    'expiry_date',
   ];
 
   /// Other header spellings shop files use for each column (after
@@ -67,6 +82,8 @@ class CsvImporter {
     'hsn_code': ['hsn', 'hsn_sac', 'sac', 'hsn_sac_code'],
     'gst_percent': ['gst', 'gst_rate', 'tax', 'tax_rate', 'gst_percentage'],
     'reorder_level': ['reorder', 'min_stock', 'minimum_stock', 'low_stock'],
+    'batch_no': ['batch', 'lot_no'],
+    'expiry_date': ['expiry', 'expires'],
     // Only when the file also has a selling price column; a lone "MRP"
     // column is taken as the selling price (above).
     'mrp_price': ['mrp', 'printed_mrp', 'max_retail_price'],
@@ -121,6 +138,9 @@ class CsvImporter {
     final ext = (extension ?? fileName.split('.').last).toLowerCase();
 
     if (bytes.isEmpty) throw Exception('File is empty or could not be read');
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw Exception('Choose a file smaller than 5 MB.');
+    }
 
     List<List<dynamic>> rows;
 
@@ -146,6 +166,16 @@ class CsvImporter {
 
     final header = _readHeader(rows);
     final mapping = header.mapping;
+    final recognized = mapping.values.whereType<int>().toSet();
+    final ignored = [
+      for (var i = 0; i < header.row.length; i++)
+        if (!recognized.contains(i) &&
+            header.row[i].toString().trim().isNotEmpty)
+          header.row[i].toString().trim(),
+    ];
+    final warnings = ignored.isEmpty
+        ? <String>[]
+        : ['Ignored columns: ${ignored.join(', ')}'];
 
     final missing = requiredColumns
         .where((column) => mapping[column] == null)
@@ -160,6 +190,7 @@ class CsvImporter {
 
     final products = <Product>[];
     final errors = <ImportRowError>[];
+    final numbered = <ImportProductRow>[];
     for (int i = header.index + 1; i < rows.length; i++) {
       final row = rows[i];
       if (_isBlankRow(row)) continue;
@@ -219,6 +250,22 @@ class CsvImporter {
         rowErrors,
       );
       final hsn = _getString(row, mapping['hsn_code']);
+      final expiryText = _getString(row, mapping['expiry_date']);
+      DateTime? expiry;
+      if (expiryText != null) {
+        final match = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(expiryText);
+        expiry = match ? DateTime.tryParse(expiryText) : null;
+        if (expiry == null ||
+            expiry.toIso8601String().substring(0, 10) != expiryText) {
+          rowErrors.add(
+            'Row $rowNumber: Expiry must be a valid YYYY-MM-DD date',
+          );
+        }
+      }
+      final batch = _getString(row, mapping['batch_no']);
+      if (batch != null && batch.length > 100) {
+        rowErrors.add('Row $rowNumber: Batch is too long');
+      }
       if (hsn != null && !RegExp(r'^\d{4,8}$').hasMatch(hsn)) {
         rowErrors.add('Row $rowNumber: HSN/SAC code must be 4 to 8 digits');
       }
@@ -235,28 +282,35 @@ class CsvImporter {
         continue;
       }
 
-      products.add(
-        Product(
-          productCode: _getString(row, mapping['product_code']),
-          barcode: _getString(row, mapping['barcode']),
-          name: name,
-          category: _getString(row, mapping['category']),
-          hsnCode: hsn,
-          gstPercent: gstPercent,
-          sellingPrice: sellingPrice ?? 0,
-          purchasePrice: purchasePrice ?? 0,
-          directPriceToggle: sellingPrice != null,
-          manualPrice: sellingPrice,
-          quantity: quantity ?? 0,
-          reorderLevel: reorderLevel,
-          printedMrp: printedMrp,
-          unit: _getString(row, mapping['unit']),
-          source: ProductSource.imported,
-        ),
+      final product = Product(
+        productCode: _getString(row, mapping['product_code']),
+        barcode: _getString(row, mapping['barcode']),
+        name: name,
+        category: _getString(row, mapping['category']),
+        hsnCode: hsn,
+        gstPercent: gstPercent,
+        sellingPrice: sellingPrice ?? 0,
+        purchasePrice: purchasePrice ?? 0,
+        directPriceToggle: sellingPrice != null,
+        manualPrice: sellingPrice,
+        quantity: quantity ?? 0,
+        reorderLevel: reorderLevel,
+        printedMrp: printedMrp,
+        unit: _getString(row, mapping['unit']),
+        source: ProductSource.imported,
+        purchaseBatchNo: batch,
+        purchaseExpiry: expiry,
       );
+      products.add(product);
+      numbered.add(ImportProductRow(rowNumber, product));
     }
 
-    return ImportParseResult(products, errors);
+    return ImportParseResult(
+      products,
+      errors,
+      rows: numbered,
+      warnings: warnings,
+    );
   }
 
   static const _gstRates = [0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0];
@@ -325,7 +379,10 @@ class CsvImporter {
 
     for (final name in excel.tables.keys) {
       final s = excel.tables[name];
-      if (s != null && s.rows.isNotEmpty) {
+      if (s != null &&
+          s.rows.any(
+            (row) => row.any((cell) => _cellToString(cell).trim().isNotEmpty),
+          )) {
         sheet = s;
         foundSheetName = name;
         break;
@@ -338,14 +395,10 @@ class CsvImporter {
 
     final rows = <List<dynamic>>[];
     for (final row in sheet.rows) {
-      if (row.isEmpty) continue;
-
       final values = <String>[];
       for (final cell in row) {
         values.add(_cellToString(cell));
       }
-      // Skip completely empty rows
-      if (values.every((v) => v.trim().isEmpty)) continue;
       rows.add(values);
     }
 
@@ -370,7 +423,7 @@ class CsvImporter {
       if (sheetXml == null) continue;
 
       final rows = _readSheetRows(sheetXml, sharedStrings);
-      if (rows.isNotEmpty) return rows;
+      if (rows.any((row) => !_isBlankRow(row))) return rows;
     }
 
     throw Exception('All sheets in the Excel file are empty');
@@ -465,7 +518,13 @@ class CsvImporter {
         values[index] = _readCellValue(cell, sharedStrings);
       }
 
-      if (values.any((value) => value.trim().isNotEmpty)) rows.add(values);
+      final rowNumber =
+          int.tryParse(row.getAttribute('r') ?? '') ?? (rows.length + 1);
+      if (rowNumber > 2020) throw Exception('Worksheet has too many rows.');
+      while (rows.length < rowNumber - 1) {
+        rows.add(<String>[]);
+      }
+      rows.add(values);
     }
 
     return rows;
@@ -551,6 +610,12 @@ class CsvImporter {
 
       // Excel v4 uses CellValue sealed class
       // We use .toString() on the inner value to be safe
+      if (v is xl.DateCellValue) {
+        return v.asDateTimeUtc().toIso8601String().substring(0, 10);
+      }
+      if (v is xl.DateTimeCellValue) {
+        return v.asDateTimeUtc().toIso8601String().substring(0, 10);
+      }
       if (v is xl.TextCellValue) return v.value.toString();
       if (v is xl.IntCellValue) return v.value.toString();
       if (v is xl.DoubleCellValue) return v.value.toString();

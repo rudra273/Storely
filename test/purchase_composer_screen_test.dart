@@ -6,6 +6,7 @@ import 'package:storely/models/product.dart';
 import 'package:storely/models/purchase_composer_draft.dart';
 import 'package:storely/screens/products_screen.dart';
 import 'package:storely/services/cloud_service.dart';
+import 'package:storely/utils/csv_importer.dart';
 
 void main() {
   final db = DatabaseHelper.instance;
@@ -38,11 +39,33 @@ void main() {
     fail('Draft save did not finish');
   }
 
+  Future<void> waitForReview(WidgetTester tester) async {
+    for (var i = 0; i < 40; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pumpAndSettle();
+      if (find.text('Review purchase file').evaluate().isNotEmpty) return;
+    }
+    fail('Purchase import review did not open');
+  }
+
+  Future<void> chooseExisting(WidgetTester tester, int row, String name) async {
+    final field = find.byKey(ValueKey('choice-$row'));
+    await Scrollable.ensureVisible(tester.element(field), alignment: 0.25);
+    await tester.pumpAndSettle();
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Existing: $name').last);
+    await tester.pumpAndSettle();
+  }
+
   Widget screen(
     PurchaseComposerDraft draft, {
     List<Product> catalog = const [],
     List<Product>? imported,
     PurchaseDraftLine? newLine,
+    Future<PurchaseDraftLine?> Function(PurchaseDraftLine)? editLine,
     Future<int> Function(PurchaseComposerDraft)? commit,
   }) => MaterialApp(
     home: NewPurchaseScreen(
@@ -52,8 +75,18 @@ void main() {
       addSupplier: () async => 'Inline supplier',
       scanBarcode: (_) async => '222',
       addProduct: (_, _, _) async => newLine,
-      editProduct: (line, _, _, _) async => line,
-      pickAndParseImport: (_) async => imported,
+      editProduct: (line, _, _, _) async =>
+          editLine == null ? line : await editLine(line),
+      pickAndParseImport: (_) async => imported == null
+          ? null
+          : ImportParseResult(
+              imported,
+              const [],
+              rows: [
+                for (var i = 0; i < imported.length; i++)
+                  ImportProductRow(i + 2, imported[i]),
+              ],
+            ),
       commitBatch: commit ?? (_) async => 1,
     ),
   );
@@ -208,6 +241,10 @@ void main() {
         ),
       );
       await tester.tap(find.text('Import file'));
+      await waitForReview(tester);
+      await chooseExisting(tester, 2, 'Tea');
+      await chooseExisting(tester, 3, 'Tea');
+      await tester.tap(find.text('Add reviewed rows'));
       await tester.pumpAndSettle();
       await finishSave(tester);
       await tester.runAsync(() async {
@@ -215,7 +252,63 @@ void main() {
         expect(saved.lines.length, 2);
         expect(saved.lines.map((l) => l.product.purchasePrice), [4, 6]);
         expect(saved.lines.map((l) => l.product.sellingPrice), [99, 99]);
-        expect(saved.importedRows.length, 2);
+        expect(saved.lines.map((l) => l.importRowNumber), [2, 3]);
+        expect(saved.lines.every((l) => l.importKey != null), true);
+      });
+    },
+  );
+
+  testWidgets(
+    'editing a staged shared new product retains source rows and other lot costs',
+    (tester) async {
+      late PurchaseComposerDraft draft;
+      await tester.runAsync(() async {
+        draft = await db.openPurchaseDraft();
+      });
+      final first = Product(
+        name: 'Tea',
+        productCode: 'T1',
+        quantity: 2,
+        purchasePrice: 4,
+        purchaseBatchNo: 'A',
+        source: ProductSource.imported,
+      );
+      final second = first.copyWith(
+        quantity: 3,
+        purchasePrice: 6,
+        purchaseBatchNo: 'B',
+      );
+      await tester.pumpWidget(
+        screen(
+          draft,
+          imported: [first, second],
+          editLine: (line) async => PurchaseDraftLine(
+            product: line.product.copyWith(
+              name: 'Premium Tea',
+              purchasePrice: 8,
+            ),
+            quantityAdded: line.quantityAdded,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Import file'));
+      await waitForReview(tester);
+      await tester.tap(find.text('Add reviewed rows'));
+      await tester.pumpAndSettle();
+      await finishSave(tester);
+      await tester.tap(find.text('Tea').first);
+      await tester.pumpAndSettle();
+      await finishSave(tester);
+      await tester.runAsync(() async {
+        final saved = await db.openPurchaseDraft();
+        expect(saved.lines.map((l) => l.product.name), [
+          'Premium Tea',
+          'Premium Tea',
+        ]);
+        expect(saved.lines.map((l) => l.product.purchasePrice), [8, 6]);
+        expect(saved.lines.map((l) => l.product.purchaseBatchNo), ['A', 'B']);
+        expect(saved.lines.map((l) => l.importRowNumber), [2, 3]);
+        expect(saved.lines.first.importKey, saved.lines.last.importKey);
       });
     },
   );
@@ -238,8 +331,9 @@ void main() {
       ),
     );
     await tester.tap(find.text('Import file'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Convert "Rice" to kg'), findsOneWidget);
+    await waitForReview(tester);
+    await chooseExisting(tester, 3, 'Rice');
+    expect(find.textContaining('Convert quantity to kg'), findsOneWidget);
     await tester.runAsync(() async {
       expect((await db.openPurchaseDraft()).lines, isEmpty);
     });
@@ -276,8 +370,8 @@ void main() {
       ),
     );
     await tester.tap(find.text('Import file'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Code/barcode differs'), findsOneWidget);
+    await waitForReview(tester);
+    expect(find.textContaining('Code or barcode differs'), findsOneWidget);
     await tester.runAsync(() async {
       expect((await db.openPurchaseDraft()).lines, isEmpty);
     });

@@ -3,6 +3,19 @@ part of 'database_helper.dart';
 mixin DatabasePurchaseDrafts {
   Future<Database> get database;
 
+  Future<bool> hasPurchaseImportFingerprint(String fingerprint) async {
+    await _requirePurchaseDraftAccess();
+    final db = await database;
+    final rows = await db.query(
+      'stock_movements',
+      columns: ['uuid'],
+      where: 'shop_id = ? AND import_batch_key = ? AND deleted_at IS NULL',
+      whereArgs: [await _activeShopId(db), 'mobile-import-v1:$fingerprint'],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<PurchaseComposerDraft> openPurchaseDraft() async {
     await _requirePurchaseDraftAccess();
     final db = await database;

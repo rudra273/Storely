@@ -17,7 +17,7 @@ class NewPurchaseScreen extends StatefulWidget {
     String?,
   )
   editProduct;
-  final Future<List<Product>?> Function(BuildContext) pickAndParseImport;
+  final Future<ImportParseResult?> Function(BuildContext) pickAndParseImport;
   final Future<int> Function(PurchaseComposerDraft) commitBatch;
 
   const NewPurchaseScreen({
@@ -180,117 +180,94 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
           );
     if (!mounted || updated == null) return;
     if (!_validLine(updated)) return;
-    _lines[index] = updated;
-    _imports.clear();
+    final editedProduct = line.importKey == null
+        ? updated.product
+        : updated.product.copyWith(source: ProductSource.imported);
+    _lines[index] = line.withProduct(
+      editedProduct,
+      quantityAdded: updated.quantityAdded,
+      restockTarget: updated.restockTarget,
+    );
+    if (line.newProductKey != null) {
+      for (var i = 0; i < _lines.length; i++) {
+        if (i == index || _lines[i].newProductKey != line.newProductKey) {
+          continue;
+        }
+        final old = _lines[i];
+        final fields = PurchaseDraftLine.productJson(editedProduct)
+          ..['quantity_cache'] = old.product.quantity
+          ..['purchase_price'] = old.product.purchasePrice
+          ..['purchase_batch_no'] = old.product.purchaseBatchNo
+          ..['purchase_expiry'] = old.product.purchaseExpiry?.toIso8601String();
+        _lines[i] = old.withProduct(PurchaseDraftLine.productFromJson(fields));
+      }
+    }
+    _imports.clear(); // Legacy source batches had no per-row provenance.
     await _persist();
-  }
-
-  Product? _importTarget(Product row) {
-    final code = row.productCode?.trim().toLowerCase();
-    final barcode = row.barcode?.trim().toLowerCase();
-    final identified = widget.catalog
-        .where(
-          (p) =>
-              (code != null && p.productCode?.toLowerCase() == code) ||
-              (barcode != null && p.barcode?.toLowerCase() == barcode),
-        )
-        .toList();
-    final named = widget.catalog
-        .where((p) => p.name.toLowerCase() == row.name.trim().toLowerCase())
-        .toList();
-    if (identified.length > 1 || (identified.isEmpty && named.length > 1)) {
-      throw ArgumentError(
-        'Multiple products match "${row.name}". Correct the file code/barcode or choose the product manually.',
-      );
-    }
-    final match = identified.isNotEmpty
-        ? identified.single
-        : named.isEmpty
-        ? null
-        : named.single;
-    if (match != null) {
-      if ((code != null && code != match.productCode?.toLowerCase()) ||
-          (barcode != null && barcode != match.barcode?.toLowerCase())) {
-        throw ArgumentError(
-          'Code/barcode differs for "${row.name}". Correct the file or choose the product manually.',
-        );
-      }
-      if (!match.trackStock) {
-        throw ArgumentError(
-          '"${match.name}" does not track stock. Use Add product for catalog changes.',
-        );
-      }
-      if (row.unit != null &&
-          row.unit!.trim().toLowerCase() !=
-              (match.unit ?? 'pcs').trim().toLowerCase()) {
-        throw ArgumentError(
-          'Convert "${row.name}" to ${match.unit ?? 'pcs'} in the file before importing.',
-        );
-      }
-    }
-    return match;
   }
 
   Future<void> _import() async {
     try {
       final parsed = await widget.pickAndParseImport(context);
       if (!mounted || parsed == null) return;
-      if (_lines.length + parsed.length > 200) {
+      final count = parsed.products.length + parsed.errors.length;
+      if (count > 200) {
+        throw ArgumentError(
+          'Use up to 200 purchase rows. Split this file first.',
+        );
+      }
+      final fingerprint = purchaseImportFingerprint(parsed);
+      final duplicate =
+          _lines.any((line) => line.importKey == fingerprint) ||
+          await DatabaseHelper.instance.hasPurchaseImportFingerprint(
+            fingerprint,
+          ) ||
+          (parsed.products.isNotEmpty &&
+              await DatabaseHelper.instance.wouldImportDuplicate([
+                for (final p in parsed.products)
+                  p.copyWith(
+                    supplier: _supplier,
+                    clearSupplier: _supplier == null,
+                  ),
+              ], purchaseDate: _date));
+      if (!mounted) return;
+      final reviewed = await Navigator.of(context).push<ReviewedPurchaseImport>(
+        MaterialPageRoute(
+          builder: (_) => PurchaseImportReviewScreen(
+            parsed: parsed,
+            catalog: widget.catalog,
+            fingerprint: fingerprint,
+            possibleDuplicate: duplicate,
+          ),
+        ),
+      );
+      if (!mounted || reviewed == null) return;
+      if (_lines.length + reviewed.rows.length > 200) {
         throw ArgumentError('Use up to 200 purchase rows.');
       }
-      // Keep distinct rates and lots; never sum rows merely by product name.
-      final rows = [
-        for (final p in parsed)
-          p.copyWith(supplier: _supplier, clearSupplier: _supplier == null),
-      ];
-      for (final row in rows) {
-        purchaseDecimal(row.quantity);
-        purchaseDecimal(row.purchasePrice);
-        _importTarget(row);
-      }
-      if (await DatabaseHelper.instance.wouldImportDuplicate(
-            rows,
-            purchaseDate: _date,
-          ) &&
-          mounted) {
-        final again = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Already imported?'),
-            content: const Text(
-              'These items were imported before. Import again only for another real purchase.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Import again'),
-              ),
-            ],
-          ),
+      for (final row in reviewed.rows) {
+        final p = row.product.copyWith(
+          supplier: _supplier,
+          clearSupplier: _supplier == null,
         );
-        if (again != true) return;
-      }
-      if (!mounted) return;
-      for (final row in rows) {
-        final match = _importTarget(row);
-        _imports.add(row);
+        final match = row.existing;
         _lines.add(
           PurchaseDraftLine(
             product: match == null
-                ? row
+                ? p
                 : match.copyWith(
-                    quantity: row.quantity,
-                    purchasePrice: row.purchasePrice,
+                    quantity: p.quantity,
+                    purchasePrice: p.purchasePrice,
                     source: ProductSource.imported,
-                    purchaseBatchNo: row.purchaseBatchNo,
-                    purchaseExpiry: row.purchaseExpiry,
+                    purchaseBatchNo: p.purchaseBatchNo,
+                    purchaseExpiry: p.purchaseExpiry,
                   ),
-            quantityAdded: row.quantity,
+            quantityAdded: p.quantity,
             restockTarget: match,
+            importKey: reviewed.fingerprint,
+            importRowNumber: row.number,
+            newProductKey: row.newProductKey,
+            duplicateApproved: reviewed.duplicateApproved,
           ),
         );
       }
@@ -532,7 +509,7 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
         onTap: _busy ? null : () => _edit(index),
         title: Text(line.name),
         subtitle: Text(
-          '${line.isRestock ? 'Restock' : 'New product'} · ${purchaseDecimal(line.quantityAdded)} ${line.product.unit ?? ''} × ${purchaseMoney(purchaseDecimal(line.product.purchasePrice))}\n${purchaseMoney(amount)}',
+          '${line.isRestock ? 'Restock' : 'New product'}${line.importRowNumber == null ? '' : ' · File row ${line.importRowNumber}'} · ${purchaseDecimal(line.quantityAdded)} ${line.product.unit ?? ''} × ${purchaseMoney(purchaseDecimal(line.product.purchasePrice))}\n${purchaseMoney(amount)}',
         ),
         trailing: IconButton(
           tooltip: 'Remove ${line.name}',

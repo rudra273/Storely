@@ -6,11 +6,32 @@ class PurchaseDraftLine {
   final Product product;
   final double quantityAdded;
   final Product? restockTarget;
+  final String? importKey;
+  final int? importRowNumber;
+  final String? newProductKey;
+  final bool duplicateApproved;
   const PurchaseDraftLine({
     required this.product,
     required this.quantityAdded,
     this.restockTarget,
+    this.importKey,
+    this.importRowNumber,
+    this.newProductKey,
+    this.duplicateApproved = false,
   });
+  PurchaseDraftLine withProduct(
+    Product value, {
+    double? quantityAdded,
+    Product? restockTarget,
+  }) => PurchaseDraftLine(
+    product: value,
+    quantityAdded: quantityAdded ?? this.quantityAdded,
+    restockTarget: restockTarget ?? this.restockTarget,
+    importKey: importKey,
+    importRowNumber: importRowNumber,
+    newProductKey: newProductKey,
+    duplicateApproved: duplicateApproved,
+  );
   String get name => product.name;
   bool get isRestock => restockTarget != null;
 
@@ -32,6 +53,10 @@ class PurchaseDraftLine {
   Map<String, dynamic> toJson() => {
     'product': productJson(product),
     'quantity_added': purchaseDecimal(quantityAdded),
+    if (importKey != null) 'import_key': importKey,
+    if (importRowNumber != null) 'import_row_number': importRowNumber,
+    if (newProductKey != null) 'new_product_key': newProductKey,
+    if (duplicateApproved) 'duplicate_approved': true,
     'restock_target': restockTarget == null
         ? null
         : productJson(restockTarget!),
@@ -42,6 +67,10 @@ class PurchaseDraftLine {
           Map<String, dynamic>.from(json['product'] as Map),
         ),
         quantityAdded: double.parse(json['quantity_added'] as String),
+        importKey: json['import_key'] as String?,
+        importRowNumber: json['import_row_number'] as int?,
+        newProductKey: json['new_product_key'] as String?,
+        duplicateApproved: json['duplicate_approved'] == true,
         restockTarget: json['restock_target'] == null
             ? null
             : productFromJson(

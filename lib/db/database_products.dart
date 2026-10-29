@@ -185,6 +185,10 @@ mixin DatabaseProducts {
             product: line.product,
             quantityAdded: line.quantityAdded,
             restockTarget: line.restockTarget,
+            importKey: line.importKey,
+            importRowNumber: line.importRowNumber,
+            newProductKey: line.newProductKey,
+            duplicateApproved: line.duplicateApproved,
           ),
       ];
       purchaseDate = composerDraft.date;
@@ -221,6 +225,13 @@ mixin DatabaseProducts {
       }
       purchaseDecimal(commit.quantityAdded);
       purchaseDecimal(commit.product.purchasePrice);
+      if ((commit.importKey == null) != (commit.importRowNumber == null) ||
+          (commit.importKey != null &&
+              (!RegExp(r'^[a-f0-9]{64}$').hasMatch(commit.importKey!) ||
+                  commit.importRowNumber! < 1 ||
+                  commit.importRowNumber! > 2020))) {
+        throw ArgumentError('Invalid import source or row number.');
+      }
     }
     final receiptUuid = composerDraft?.uuid ?? _newUuid();
     final batchKey = importedRows.isEmpty
@@ -256,6 +267,28 @@ mixin DatabaseProducts {
           );
         }
       }
+      if (composerDraft != null) {
+        final shop = await _activeShopId(txn);
+        for (final commit in commits.where(
+          (c) => c.importKey != null && !c.duplicateApproved,
+        )) {
+          final previous = await txn.query(
+            'stock_movements',
+            columns: ['uuid'],
+            where:
+                'shop_id = ? AND import_batch_key = ? AND deleted_at IS NULL',
+            whereArgs: [shop, 'mobile-import-v1:${commit.importKey}'],
+            limit: 1,
+          );
+          if (previous.isNotEmpty) {
+            throw StateError(
+              'This file may already be recorded. Review it and confirm an intentional repeat.',
+            );
+          }
+        }
+      }
+      final createdProducts = <String, Product>{};
+      final newMetadata = <String, String>{};
       final headerSupplierId =
           usePurchaseSupplier && _normaliseName(purchaseSupplier) != null
           ? await _ensureSupplier(txn, purchaseSupplier!)
@@ -268,7 +301,37 @@ mixin DatabaseProducts {
             purchaseDecimal(commit.product.purchasePrice),
           ),
         );
-        final target = commit.restockTarget;
+        final key = commit.newProductKey;
+        if (key != null) {
+          if (commit.restockTarget != null) {
+            throw ArgumentError(
+              'A staged new item cannot also target an existing product.',
+            );
+          }
+          final metadata = PurchaseDraftLine.productJson(commit.product)
+            ..removeWhere(
+              (name, _) => {
+                'quantity_cache',
+                'purchase_price',
+                'purchase_batch_no',
+                'purchase_expiry',
+                'created_at',
+                'updated_at',
+              }.contains(name),
+            );
+          final signature = jsonEncode(metadata);
+          if (newMetadata.containsKey(key) && newMetadata[key] != signature) {
+            throw StateError(
+              'Rows linked to a new product have different product details. Review the draft.',
+            );
+          }
+          newMetadata[key] = signature;
+        }
+        final target =
+            commit.restockTarget ?? (key == null ? null : createdProducts[key]);
+        final sourceKey = commit.importKey == null
+            ? keyFor(commit.product)
+            : 'mobile-import-v1:${commit.importKey}';
         if (target != null) {
           if (target.id == null) {
             throw ArgumentError('Restock target id is required');
@@ -312,7 +375,8 @@ mixin DatabaseProducts {
             quantityAdded: normalized.quantity,
             purchaseDate: effectiveDate,
             source: commit.product.source,
-            importBatchKey: keyFor(commit.product),
+            importBatchKey: sourceKey,
+            importRowNumber: commit.importRowNumber,
             purchaseDocumentUuid:
                 normalized.trackStock && normalized.quantity > 0
                 ? receiptUuid
@@ -324,11 +388,12 @@ mixin DatabaseProducts {
             throw StateError('Product "${target.name}" no longer exists');
           }
         } else {
-          await _insertProductInTransaction(
+          final createdId = await _insertProductInTransaction(
             txn,
             normalized,
             purchaseDate: effectiveDate,
-            importBatchKey: keyFor(commit.product),
+            importBatchKey: sourceKey,
+            importRowNumber: commit.importRowNumber,
             purchaseDocumentUuid:
                 normalized.trackStock && normalized.quantity > 0
                 ? receiptUuid
@@ -336,6 +401,15 @@ mixin DatabaseProducts {
             usePurchaseSupplier: usePurchaseSupplier,
             purchaseSupplierId: headerSupplierId,
           );
+          if (key != null) {
+            final inserted = await _queryProducts(
+              txn,
+              where: 'p.id = ?',
+              whereArgs: [createdId],
+              limit: 1,
+            );
+            createdProducts[key] = Product.fromMap(inserted.single);
+          }
         }
         committed++;
       }
@@ -1061,6 +1135,7 @@ mixin DatabaseProducts {
     Product product, {
     DateTime? purchaseDate,
     String? importBatchKey,
+    int? importRowNumber,
     String? purchaseDocumentUuid,
     bool usePurchaseSupplier = false,
     int? purchaseSupplierId,
@@ -1087,6 +1162,7 @@ mixin DatabaseProducts {
             ? purchaseSupplierId
             : productToInsert.supplierId,
         importBatchKey: importBatchKey,
+        importRowNumber: importRowNumber,
         sourceDocumentType: purchaseDocumentUuid == null
             ? null
             : 'native_purchase',
@@ -1107,6 +1183,7 @@ mixin DatabaseProducts {
     required DateTime purchaseDate,
     String source = ProductSource.mobile,
     String? importBatchKey,
+    int? importRowNumber,
     String? purchaseDocumentUuid,
     bool usePurchaseSupplier = false,
     int? purchaseSupplierId,
@@ -1158,6 +1235,7 @@ mixin DatabaseProducts {
           ? purchaseSupplierId
           : updatedProduct.supplierId,
       importBatchKey: importBatchKey,
+      importRowNumber: importRowNumber,
       sourceDocumentType: purchaseDocumentUuid == null
           ? null
           : 'native_purchase',

@@ -1,5 +1,6 @@
 import '../l10n/l10n.dart';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/purchase_document.dart';
 import '../models/purchase_composer_draft.dart';
+import '../models/purchase_import_review.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import '../services/product_export.dart';
@@ -25,6 +27,7 @@ part 'products/product_formatters.dart';
 part 'products/product_filter_widgets.dart';
 part 'products/new_purchase_screen.dart';
 part 'products/purchase_restock_sheet.dart';
+part 'products/purchase_import_review.dart';
 part 'products/product_editor_widgets.dart';
 part 'products/product_bulk_actions.dart';
 part 'products/product_import_widgets.dart';
@@ -530,7 +533,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   /// Picks a file and parses it into products. Shows a loading spinner over
   /// [dialogContext] (defaults to the screen). Returns null on cancel/empty/
   /// error (an error is surfaced via snackbar/dialog).
-  Future<List<Product>?> _pickAndParseImport([
+  Future<ImportParseResult?> _pickAndParseImport([
     BuildContext? dialogContext,
   ]) async {
     final ctx = dialogContext ?? context;
@@ -573,14 +576,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         );
         return null;
       }
-      if (parsed.errors.isNotEmpty) {
-        final proceed = await showDialog<bool>(
-          context: ctx,
-          builder: (_) => _ImportErrorsDialog(result: parsed),
-        );
-        if (proceed != true) return null;
-      }
-      return parsed.products;
+      return parsed;
     } catch (e) {
       if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
       _showImportError(e);
