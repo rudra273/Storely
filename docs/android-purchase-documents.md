@@ -49,8 +49,9 @@ build. Existing API migrations through 0013 are separate pre-existing workspace 
 and must be included in the actual deployment chain. No remote deployment is part
 of this stage. Full SQLite backups include the document table.
 
-This does not yet add Android draft recovery, the simplified existing-product
-composer, full import review parity, supplier payments, tax/charges, attachments,
+Stage 6 adds Android draft recovery and the simplified existing-product composer;
+see [Android composer](android-purchase-composer.md). Full import review parity,
+supplier payments, tax/charges, attachments,
 returns or audited corrections. Standalone legacy insert/restock paths still use
 stock history. Existing posting-order cost policy is retained; historical COGS is
 not recalculated. These remain explicit work in the master implementation plan.

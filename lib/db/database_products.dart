@@ -174,8 +174,24 @@ mixin DatabaseProducts {
     List<Product> importedRows = const [],
     bool usePurchaseSupplier = false,
     String? purchaseSupplier,
+    PurchaseComposerDraft? composerDraft,
   }) async {
     await _requireAdminMutation();
+    if (composerDraft != null) {
+      await _requirePurchaseDraftAccess();
+      commits = [
+        for (final line in composerDraft.lines)
+          ProductPurchaseCommit(
+            product: line.product,
+            quantityAdded: line.quantityAdded,
+            restockTarget: line.restockTarget,
+          ),
+      ];
+      purchaseDate = composerDraft.date;
+      importedRows = composerDraft.importedRows;
+      purchaseSupplier = composerDraft.supplier;
+      usePurchaseSupplier = true;
+    }
     if (commits.isEmpty) return 0;
     if (commits.length > 200) {
       throw ArgumentError('Use up to 200 purchase rows.');
@@ -186,7 +202,11 @@ mixin DatabaseProducts {
       purchaseDate.day,
     );
     final hasTrackedStock = commits.any(
-      (c) => c.product.trackStock && c.quantityAdded > 0,
+      (c) =>
+          (composerDraft != null && c.restockTarget != null
+              ? c.restockTarget!.trackStock
+              : c.product.trackStock) &&
+          c.quantityAdded > 0,
     );
     final today = DateTime.now().toUtc().add(
       const Duration(hours: 5, minutes: 30),
@@ -202,7 +222,7 @@ mixin DatabaseProducts {
       purchaseDecimal(commit.quantityAdded);
       purchaseDecimal(commit.product.purchasePrice);
     }
-    final receiptUuid = _newUuid();
+    final receiptUuid = composerDraft?.uuid ?? _newUuid();
     final batchKey = importedRows.isEmpty
         ? null
         : _importBatchKey(
@@ -213,13 +233,36 @@ mixin DatabaseProducts {
         product.source == ProductSource.imported ? batchKey : null;
     final db = await database;
     return db.transaction((txn) async {
+      if (composerDraft != null) {
+        final shop = await _activeShopId(txn);
+        if (shop != composerDraft.shopId) {
+          throw StateError('The active shop changed. Your draft is preserved.');
+        }
+        final rows = await txn.query(
+          'purchase_drafts',
+          where: 'uuid = ? AND shop_id = ?',
+          whereArgs: [composerDraft.uuid, shop],
+        );
+        if (rows.isEmpty) {
+          throw StateError('This draft was discarded. Reopen Add purchase.');
+        }
+        if (rows.single['status'] == 'posted') {
+          return _composerFromRow(rows.single).lines.length;
+        }
+        if (rows.single['revision'] != composerDraft.revision ||
+            rows.single['payload'] != jsonEncode(composerDraft.toJson())) {
+          throw StateError(
+            'This draft changed. Reopen Add purchase before confirming.',
+          );
+        }
+      }
       final headerSupplierId =
           usePurchaseSupplier && _normaliseName(purchaseSupplier) != null
           ? await _ensureSupplier(txn, purchaseSupplier!)
           : null;
       var committed = 0;
       for (final commit in commits) {
-        final normalized = commit.product.copyWith(
+        var normalized = commit.product.copyWith(
           quantity: double.parse(purchaseDecimal(commit.quantityAdded)),
           purchasePrice: double.parse(
             purchaseDecimal(commit.product.purchasePrice),
@@ -230,11 +273,38 @@ mixin DatabaseProducts {
           if (target.id == null) {
             throw ArgumentError('Restock target id is required');
           }
+          if (composerDraft != null) {
+            final currentRows = await _queryProducts(
+              txn,
+              where: 'p.uuid = ? AND p.shop_id = ?',
+              whereArgs: [target.uuid, composerDraft.shopId],
+              limit: 1,
+            );
+            if (currentRows.isEmpty) {
+              throw StateError(
+                'Product "${target.name}" was removed. Remove this line and choose another product.',
+              );
+            }
+            final current = Product.fromMap(currentRows.single);
+            if (!current.trackStock || current.unit != target.unit) {
+              throw StateError(
+                'Stock tracking or unit changed for "${target.name}". Remove this line and select it again.',
+              );
+            }
+            normalized = current.copyWith(
+              quantity: normalized.quantity,
+              purchasePrice: normalized.purchasePrice,
+              purchaseBatchNo: normalized.purchaseBatchNo,
+              purchaseExpiry: normalized.purchaseExpiry,
+            );
+          }
           final restockProduct = normalized.copyWith(
-            id: target.id,
+            id: composerDraft == null ? target.id : normalized.id,
             uuid: target.uuid,
             shopId: target.shopId,
-            createdAt: target.createdAt,
+            createdAt: composerDraft == null
+                ? target.createdAt
+                : normalized.createdAt,
           );
           final count = await _restockProductInTransaction(
             txn,
@@ -271,6 +341,14 @@ mixin DatabaseProducts {
       }
       if (hasTrackedStock) {
         await _captureNativePurchase(txn, receiptUuid, effectiveDate);
+      }
+      if (composerDraft != null) {
+        await txn.update(
+          'purchase_drafts',
+          {'status': 'posted', 'updated_at': _nowIso()},
+          where: 'uuid = ? AND shop_id = ?',
+          whereArgs: [composerDraft.uuid, composerDraft.shopId],
+        );
       }
       notifyDatabaseChanged();
       return committed;

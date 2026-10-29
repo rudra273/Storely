@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 23,
+      version: 24,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -206,6 +206,14 @@ mixin DatabaseSchema {
     ''');
     await executor.execute(
       'CREATE INDEX IF NOT EXISTS idx_purchase_documents_shop ON purchase_documents(shop_id, purchase_date, uuid)',
+    );
+    await executor.execute('''CREATE TABLE IF NOT EXISTS purchase_drafts(
+      uuid TEXT PRIMARY KEY, shop_id TEXT NOT NULL, revision INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('editing','posted')), payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )''');
+    await executor.execute(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_draft_active ON purchase_drafts(shop_id) WHERE status = 'editing'",
     );
     await _createCloudSyncTables(executor);
     await _createHeldBillTables(executor);

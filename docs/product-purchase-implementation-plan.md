@@ -357,3 +357,41 @@ Next: Android recoverable purchase drafts, explicit product/purchase entry point
 simplified existing-product restock, and import-review parity. Supplier accounting,
 tax/charges, attachments, returns/corrections and remaining advanced work packages
 are still open; this checkpoint does not complete the end-to-end upgrade.
+
+
+## Stage 6 checkpoint — 29 October 2026
+
+Android adds explicit Add product/Add purchase actions and a single composer with
+editable date/optional supplier, inline supplier creation and locally saved drafts.
+Search/scan selects existing stock by UUID; quick restock collects quantity/cost and
+optional lot/expiry without editing catalog metadata. Exact line/subtotals and
+Not recorded payment status stay visible. Fixed prices and current pricing rules are
+preserved; existing automatic selling-price recalculation is disclosed in the editor.
+
+Schema 24 stores one local editing draft per shop, completed line/header snapshots,
+import rows and optimistic revisions. Confirmation checks the saved revision and
+marks the draft posted in the same transaction as stock/receipt creation. Its UUID
+is the receipt UUID, so lost acknowledgements cannot post it twice. Stale save,
+removed target, unit/tracking change and shop/role change preserve the draft and
+block unsafe confirmation. Discard has no ledger effect. Drafts recover across local
+navigation/restart; partial text in an unfinished line editor is not yet persisted.
+
+Imports retain different-rate/lot rows and preserve current existing-item catalog
+settings. Conflicting identifiers, ambiguous matches and base-unit mismatches require
+correction before staging. Full Android import review/fingerprint/source-row parity
+is still open; this step is not completion of that work package.
+See [composer behavior and limits](android-purchase-composer.md).
+
+Validation: 295 Flutter tests passed, with 16 environment-dependent live tests skipped;
+analysis clean and debug APK built. Focused cases cover restart, stale saves, atomic
+rollback, lost acknowledgements, separate-rate imports, unit/identity checks, shop
+isolation, tracking changes, supplier editing, scanner selection and staff privacy.
+
+No API/web change, remote deployment or device install in this stage. The existing
+stage-5 native adoption/feed protocol and API migration 0016 remain prerequisites.
+Unrelated workspace changes are excluded from the Android commit.
+
+Next: complete Android reviewed-import parity and shared new-product staging, then
+supplier history and the remaining accounting/correction work packages. Supplier
+payments, invoice taxes/charges, attachments, returns and reconciliation remain
+required before claiming the full end-to-end upgrade is complete.

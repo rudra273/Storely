@@ -15,6 +15,7 @@ import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
 import '../models/purchase_document.dart';
+import '../models/purchase_composer_draft.dart';
 import '../utils/money.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
@@ -24,6 +25,7 @@ part 'database_schema.dart';
 part 'database_settings.dart';
 part 'database_products.dart';
 part 'database_purchase_documents.dart';
+part 'database_purchase_drafts.dart';
 part 'database_bills.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
@@ -40,6 +42,7 @@ class DatabaseHelper
         DatabaseSettings,
         DatabaseProducts,
         DatabasePurchaseDocuments,
+        DatabasePurchaseDrafts,
         DatabaseBills,
         DatabaseSync,
         DatabaseKpi,

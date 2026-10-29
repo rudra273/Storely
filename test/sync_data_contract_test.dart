@@ -28,6 +28,7 @@ void main() {
         ...CloudSyncEngine.syncedTables,
         'cloud_sync_state',
         'purchase_documents',
+        'purchase_drafts',
       },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
@@ -133,8 +134,31 @@ void main() {
       reason:
           'Review new document fields and their whole-document restore policy.',
     );
+    final draftFields = {
+      'uuid':
+          'Stable local draft and eventual native receipt UUID; never reuse after discard.',
+      'shop_id':
+          'Only the active shop on this device may open or change the draft.',
+      'revision':
+          'Optimistic local revision prevents stale editors overwriting or posting a newer draft.',
+      'status':
+          'editing/posted; posted marker commits with stock and prevents duplicate confirmation.',
+      'payload':
+          'Device-local header, product snapshots, target UUIDs and import rows. Never row-sync; full SQLite backup only.',
+      'updated_at':
+          'Device-local save time, independent of effective purchase date.',
+    };
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(purchase_drafts)',
+      )).map((c) => c['name']).toSet(),
+      draftFields.keys.toSet(),
+    );
     final result = {
-      'version': 2,
+      'version': 3,
+      'local_draft_tables': {
+        'purchase_drafts': {'fields': draftFields},
+      },
       'document_tables': {
         'purchase_documents': {'fields': documentFields},
       },
@@ -161,7 +185,7 @@ void main() {
           },
       },
       'portable_preferences': (portablePreferenceKeys.toList()..sort()),
-      'device_only_tables': ['cloud_sync_state'],
+      'device_only_tables': ['cloud_sync_state', 'purchase_drafts'],
       'server_managed_public_tables': {
         'shop_members': 'Membership and roles via authenticated API',
         'shop_invites': 'Invitations via authenticated API',

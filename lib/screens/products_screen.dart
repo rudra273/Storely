@@ -10,9 +10,12 @@ import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/product.dart';
 import '../models/product_purchase.dart';
+import '../models/purchase_document.dart';
+import '../models/purchase_composer_draft.dart';
 import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import '../services/product_export.dart';
+import '../services/cloud_service.dart';
 import 'qr_sheet_screen.dart';
 import 'purchase_history_screen.dart';
 import '../utils/money.dart';
@@ -21,6 +24,7 @@ part 'products/product_models.dart';
 part 'products/product_formatters.dart';
 part 'products/product_filter_widgets.dart';
 part 'products/new_purchase_screen.dart';
+part 'products/purchase_restock_sheet.dart';
 part 'products/product_editor_widgets.dart';
 part 'products/product_bulk_actions.dart';
 part 'products/product_import_widgets.dart';
@@ -910,227 +914,75 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  // ── New Purchase (step 1: date + supplier) ──
+  // Purchase drafts are device-local and resume automatically on this shop.
   Future<void> _showNewPurchaseFlow() async {
-    var purchaseDate = DateTime.now();
-    String? selectedSupplier;
-
-    final action = await showModalBottomSheet<_PurchaseInitialAction>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          return SafeArea(
-            top: false,
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceOf(ctx),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-                border: AppColors.isDark(ctx)
-                    ? Border.all(color: AppColors.borderOf(ctx))
-                    : null,
-              ),
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ProductSheetHeader(
-                    title: 'New Purchase',
-                    onClose: () => Navigator.pop(ctx),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _EditorSection(
-                          title: 'Purchase Details',
-                          icon: Icons.receipt_long_outlined,
-                          child: Column(
-                            children: [
-                              InkWell(
-                                onTap: () async {
-                                  final picked = await showDatePicker(
-                                    context: ctx,
-                                    initialDate: purchaseDate,
-                                    firstDate: DateTime(2020),
-                                    lastDate: DateTime.now().add(
-                                      const Duration(days: 365),
-                                    ),
-                                  );
-                                  if (picked == null) return;
-                                  setSheet(() => purchaseDate = picked);
-                                },
-                                borderRadius: BorderRadius.circular(12),
-                                child: InputDecorator(
-                                  decoration: const InputDecoration(
-                                    labelText: 'Purchase Date',
-                                    prefixIcon: Icon(
-                                      Icons.event_outlined,
-                                      size: 18,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    _formatFullDate(purchaseDate),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              _OptionDropdown(
-                                label: 'Supplier',
-                                value: selectedSupplier,
-                                options: _suppliers,
-                                onChanged: (value) =>
-                                    setSheet(() => selectedSupplier = value),
-                                onAdd: () async {
-                                  final value = await _showAddOptionDialog(
-                                    'Supplier',
-                                  );
-                                  if (value == null ||
-                                      !mounted ||
-                                      !ctx.mounted) {
-                                    return;
-                                  }
-                                  await DatabaseHelper.instance
-                                      .addSupplierOption(value);
-                                  if (!mounted || !ctx.mounted) return;
-                                  setState(() {
-                                    if (!_suppliers.contains(value)) {
-                                      _suppliers.add(value);
-                                      _suppliers.sort();
-                                    }
-                                  });
-                                  setSheet(() => selectedSupplier = value);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () => Navigator.pop(
-                                  ctx,
-                                  _PurchaseInitialAction.import,
-                                ),
-                                icon: const Icon(
-                                  Icons.upload_file_rounded,
-                                  size: 18,
-                                ),
-                                label: const Text('Import file'),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(48),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () => Navigator.pop(
-                                  ctx,
-                                  _PurchaseInitialAction.manual,
-                                ),
-                                icon: const Icon(Icons.add_rounded, size: 18),
-                                label: Text(context.l10n.addProductLower),
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(48),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+    try {
+      final draft = await DatabaseHelper.instance.openPurchaseDraft();
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => NewPurchaseScreen(
+            initialDraft: draft,
+            catalog: List<Product>.from(_allProducts),
+            suppliers: List<String>.from(_suppliers),
+            scanBarcode: _scanBarcodeValue,
+            addSupplier: () async {
+              final value = await _showAddOptionDialog('Supplier');
+              if (value == null) return null;
+              await DatabaseHelper.instance.addSupplierOption(value);
+              if (mounted) {
+                setState(() {
+                  if (!_suppliers.contains(value)) _suppliers.add(value);
+                });
+              }
+              return value;
+            },
+            addProduct: (names, date, supplier) => _showAddEditSheet(
+              stageOnly: true,
+              initialPurchaseDate: date,
+              initialSupplier: supplier,
+              stagedNames: names,
             ),
-          );
-        },
-      ),
-    );
-
-    if (action == null || !mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _NewPurchaseScreen(
-          purchaseDate: purchaseDate,
-          supplier: selectedSupplier,
-          initialAction: action,
-          addProduct: (stagedNames) => _showAddEditSheet(
-            stageOnly: true,
-            initialPurchaseDate: purchaseDate,
-            initialSupplier: selectedSupplier,
-            stagedNames: stagedNames,
-          ),
-          editProduct: (draft, stagedNames) => _showAddEditSheet(
-            product: draft.product,
-            stageOnly: true,
-            initialPurchaseDate: purchaseDate,
-            initialSupplier: selectedSupplier,
-            stagedNames: stagedNames,
-            stagedRestockTarget: draft.restockTarget,
-          ),
-          pickAndParseImport: _pickAndParseImport,
-          matchExisting: _matchExistingByName,
-          commitBatch: (drafts, date, imported) => _commitPurchaseBatch(
-            drafts,
-            date,
-            imported,
-            purchaseSupplier: selectedSupplier,
+            editProduct: (line, names, date, supplier) => _showAddEditSheet(
+              product: line.product,
+              stageOnly: true,
+              initialPurchaseDate: date,
+              initialSupplier: supplier,
+              stagedNames: names,
+            ),
+            pickAndParseImport: _pickAndParseImport,
+            commitBatch: _commitPurchaseBatch,
           ),
         ),
-      ),
-    );
-    if (mounted) _loadProducts();
-  }
-
-  /// Finds an existing catalog product whose name matches [name]
-  /// (case-insensitive), or null. Used to mark imported/edited drafts as
-  /// restocks.
-  Product? _matchExistingByName(String name) {
-    final lower = name.trim().toLowerCase();
-    for (final p in _allProducts) {
-      if (p.name.toLowerCase() == lower) return p;
-    }
-    return null;
-  }
-
-  /// Commits a staged purchase batch in one database transaction: restock
-  /// matches, insert the rest. Returns the number of items committed.
-  Future<int> _commitPurchaseBatch(
-    List<_PurchaseDraft> drafts,
-    DateTime purchaseDate,
-    List<Product> importedRows, {
-    String? purchaseSupplier,
-  }) async {
-    final commits = drafts.map((draft) {
-      final target = draft.restockTarget ?? _matchExistingByName(draft.name);
-      return ProductPurchaseCommit(
-        product: draft.product,
-        quantityAdded: draft.quantityAdded,
-        restockTarget: target,
       );
-    }).toList();
-    return DatabaseHelper.instance.commitProductPurchaseBatch(
-      commits,
-      purchaseDate: purchaseDate,
-      importedRows: importedRows,
-      usePurchaseSupplier: true,
-      purchaseSupplier: purchaseSupplier,
-    );
+      if (mounted) await _loadProducts();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+      }
+    }
   }
+
+  /// Confirm the saved snapshot; draft revision and posting guard are checked
+  /// inside the same SQLite transaction as stock and receipt creation.
+  Future<int> _commitPurchaseBatch(PurchaseComposerDraft draft) =>
+      DatabaseHelper.instance.commitProductPurchaseBatch(
+        [
+          for (final line in draft.lines)
+            ProductPurchaseCommit(
+              product: line.product,
+              quantityAdded: line.quantityAdded,
+              restockTarget: line.restockTarget,
+            ),
+        ],
+        purchaseDate: draft.date,
+        importedRows: draft.importedRows,
+        usePurchaseSupplier: true,
+        purchaseSupplier: draft.supplier,
+        composerDraft: draft,
+      );
 
   // ── Add/Edit Sheet ──
   // When [stageOnly] is true, saving does NOT touch the DB; it returns a
@@ -1160,7 +1012,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final barcodeCtrl = TextEditingController(text: product?.barcode ?? '');
     final hsnCtrl = TextEditingController(text: product?.hsnCode ?? '');
     final purchaseCtrl = TextEditingController(
-      text: product != null ? product.purchasePrice.toStringAsFixed(2) : '',
+      text: product != null ? product.purchasePrice.toString() : '',
     );
     final manualPriceCtrl = TextEditingController(
       text: product?.manualPrice != null
@@ -2473,8 +2325,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   AppInfoSection(
                     title: 'Add stock',
                     points: [
-                      'Use New Purchase to select date and supplier, then add or import products.',
-                      'If a product name already exists, the purchase becomes a restock for that product.',
+                      'Add purchase keeps a local draft with date, optional supplier and staged items.',
+                      'Choose an existing product to restock using quantity and cost; product pricing stays unchanged.',
                       'Product import is inside New Purchase; it is not a separate catalog action.',
                     ],
                   ),
@@ -2502,12 +2354,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
           children: _selectionMode || !widget.isActiveMainTab
               ? []
               : [
+                  if (DatabaseHelper.instance.isAdminMutationAllowed?.call() ??
+                      true) ...[
+                    FloatingActionButton.extended(
+                      heroTag: 'purchase',
+                      onPressed: _showNewPurchaseFlow,
+                      icon: const Icon(Icons.add_shopping_cart_outlined),
+                      label: const Text('Add purchase'),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   TestKeys.tag(
                     TestKeys.addProductBtn,
-                    FloatingActionButton(
+                    FloatingActionButton.extended(
                       heroTag: 'add',
+                      tooltip: 'Add product',
                       onPressed: _showQuickAdd,
-                      child: const Icon(Icons.add_rounded),
+                      icon: const Icon(Icons.add_rounded),
+                      label: Text(context.l10n.addProductLower),
                     ),
                     label: context.l10n.addProductLower,
                     button: true,

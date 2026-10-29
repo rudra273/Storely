@@ -17,7 +17,9 @@ Schema 23 also has a separate purchase_documents snapshot table. Its nine column
 are classified under document_tables in the manifest. Whole purchase headers/lines
 use the native publication and sequence-feed APIs, outside generic row sync; see
 [Android purchase documents](android-purchase-documents.md). Downloading a document
-never inserts stock.
+never inserts stock. Schema 24 adds a six-column device-local purchase_drafts table,
+classified under local_draft_tables. Its posted marker commits with stock so draft
+recovery cannot post a purchase twice; see [Android composer](android-purchase-composer.md).
 
 Coverage includes shop profile/logo/signature/bank/footer, settings, products,
 categories, units, suppliers, customers, bills/items/payments, stock movements,

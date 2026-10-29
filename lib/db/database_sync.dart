@@ -385,7 +385,22 @@ mixin DatabaseSync {
       );
       if (rows.isNotEmpty) return true;
     }
-    return false;
+    // Older Android SQLite builds do not consistently include JSON functions.
+    final drafts = await db.query(
+      'purchase_drafts',
+      columns: ['payload'],
+      where: "shop_id = ? AND status = 'editing'",
+      whereArgs: [shopId],
+      limit: 1,
+    );
+    if (drafts.isEmpty) return false;
+    try {
+      return ((jsonDecode(drafts.single['payload'] as String) as Map)['lines']
+              as List)
+          .isNotEmpty;
+    } catch (_) {
+      return true; // Preserve an unreadable draft for backup/recovery.
+    }
   }
 
   /// Applies pulled cloud rows. A row that cannot be applied (e.g. a unique
