@@ -270,3 +270,27 @@ existing-product selection, inline supplier creation and purchase history. Andro
 native document sync/composer upgrade, payments, tax/charge totals, attachments,
 returns and wider concurrency/costing work remain open. Stage 2 is a foundation and
 does not satisfy the full end-to-end definition of done.
+
+## Stage 3 checkpoint — 29 October 2026
+
+Web commits `c3f9703` (native dialog lifecycle fix) and `0eed9d0` (purchase composer)
+add Add purchase, product-detail Restock, date/optional supplier and inline creation,
+existing-product selection, fractional quantities/costs, distinct lot rows,
+batch/expiry, invoice reference/notes, immutable receipt display and purchase history.
+
+Account/shop-scoped local drafts recover after close/reload. The exact request is
+persisted before posting and stays frozen after uncertain responses, including access
+loss on a later retry. Cross-tab changes, blocked storage, offline confirmation and
+double submissions have explicit handling. Decimal totals/display are exact.
+
+Validation: all 139 web tests, TypeScript, lint and production build pass. Real Chromium
+fixture tests pass at desktop/narrow widths and verify native nested supplier dialogs,
+item editing, reload recovery and identical retry payloads. Screenshots inspected.
+No remote deployment or migration in this stage. Browser checks use explicit API
+fixtures; stage-2 PostgreSQL tests remain the transaction validation evidence.
+
+Remaining web-composer work includes atomic new-product staging inside purchases,
+purchase import staging, payments, taxes/charges, attachments and returns. Android
+native document sync and composer parity remain open. These capabilities must be
+completed before declaring the whole core upgrade finished. See
+storelyweb/docs/purchase-composer.md for implemented behavior and scope.
