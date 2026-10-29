@@ -250,3 +250,23 @@ migration behavior changed in this stage.
 Next stage remains work package A/B: shared purchase contracts and persistence,
 including effective dates, exact decimal costing, atomic posting, idempotency,
 legacy compatibility and offline sync. The full upgrade remains in progress.
+
+## Stage 2 checkpoint — 29 October 2026
+
+API commit `79147fb` adds atomic/idempotent purchase receipt confirmation, list/detail,
+immutable line and supplier snapshots, decimal costs, batch/expiry, financial-year
+invoice duplicate protection and legacy movement sync compatibility. Migration 0014
+adds document tables without backfilling or reposting existing stock. Legacy sync
+cannot alter/forge posted receipt stock. Payment status remains explicitly unknown.
+
+Validation: 262 unit tests; 75 receipt/product/sync/report integration tests; Ruff,
+strict mypy for new modules and Bandit pass. Migration reapplication verified on
+populated scratch data. Local development schema was migrated/aligned during testing;
+remote environments were not deployed. See storelyapi/docs/PURCHASE_RECEIPTS.md for
+endpoint examples, scope, costing/backdating limitations and migration dependencies.
+
+Next: web purchase composer backed by these endpoints, recoverable shop-scoped drafts,
+existing-product selection, inline supplier creation and purchase history. Android
+native document sync/composer upgrade, payments, tax/charge totals, attachments,
+returns and wider concurrency/costing work remain open. Stage 2 is a foundation and
+does not satisfy the full end-to-end definition of done.
