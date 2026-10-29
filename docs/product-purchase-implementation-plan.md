@@ -294,3 +294,30 @@ purchase import staging, payments, taxes/charges, attachments and returns. Andro
 native document sync and composer parity remain open. These capabilities must be
 completed before declaring the whole core upgrade finished. See
 storelyweb/docs/purchase-composer.md for implemented behavior and scope.
+
+## Stage 4 checkpoint — 29 October 2026
+
+API `24ca2d0` and web `8ef790f` add atomic new-product staging and reviewed CSV/XLSX
+purchase imports. New products, unit/category lookups and stock commit together;
+preview/staging creates no catalog or stock records. Multiple lots share a staged
+identity without collapsing quantities/costs. New-product metadata recovers with the
+local draft and remains editable before confirmation.
+
+Import review retains original row numbers, requires explicit name/identifier choices,
+blocks incompatible base units and invalid rows unless corrected/excluded, and preserves
+existing selling prices/settings. Fingerprints survive renamed files, normalized numeric
+spellings and dates; each duplicate file needs its own approval. Confirmation rechecks
+fingerprints under the receipt lock. Saved stock retains source-file key and row number.
+Stage-2/3 request hashes and stage-3 drafts/retries remain backward compatible.
+
+Validation: 264 API unit tests and 80 purchase/product/sync/report integration tests;
+143 web tests; Ruff, strict mypy, Bandit, TypeScript, lint and production build pass.
+Real Chromium staging fixture checks pass for native dialogs, review/exclusion, narrow
+layout, reload recovery and identical retries; screenshots reviewed. Migration 0015
+was applied to the local development database (verified version/table). No remote
+deployment. Unrelated repository changes were excluded from commits.
+
+Next: Android native purchase-document persistence/sync and composer parity, preserving
+atomic offline commits and safe upgrade/legacy behavior. Payments, invoice tax/charges,
+attachments, returns/reconciliation and advanced capabilities remain open before full
+end-to-end completion.
