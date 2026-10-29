@@ -54,16 +54,17 @@ Future<(ApiSyncBackend, List<String>, Map<String, Object?>)> backendFor(
 void main() {
   group('resolveMembershipShopId', () {
     test(
-      'an existing member gets their first shop and nothing else is called',
+      'an existing member checks premium before syncing their first shop',
       () async {
         final (backend, calls, _) = await backendFor({
+          'GET /v1/shops/s-old/entitlement': (_) => json({'cloud_sync': true}),
           'GET /v1/shops': (_) => json([
             {'shop_id': 's-old', 'name': 'Old', 'role': 'owner'},
             {'shop_id': 's-new', 'name': 'New', 'role': 'staff'},
           ]),
         });
         expect(await backend.resolveMembershipShopId(), 's-old');
-        expect(calls, ['GET /v1/shops']);
+        expect(calls, ['GET /v1/shops', 'GET /v1/shops/s-old/entitlement']);
       },
     );
 
@@ -74,6 +75,8 @@ void main() {
           {'shop_id': 's-invited', 'role': 'staff'},
         ]),
         'POST /v1/invites/accept': (_) => json({'status': 'joined'}),
+        'GET /v1/shops/s-invited/entitlement': (_) =>
+            json({'cloud_sync': true}),
       });
       expect(await backend.resolveMembershipShopId(), 's-invited');
       expect(bodies['POST /v1/invites/accept'], {'shop_id': 's-invited'});
@@ -81,6 +84,7 @@ void main() {
         'GET /v1/shops',
         'GET /v1/invites/pending',
         'POST /v1/invites/accept',
+        'GET /v1/shops/s-invited/entitlement',
       ]);
     });
 
@@ -111,6 +115,30 @@ void main() {
       },
     );
   });
+
+  for (final status in ['free', 'expired', 'suspended', 'scheduled']) {
+    test(
+      '$status blocks transport before device registration or data changes',
+      () async {
+        final (backend, calls, _) = await backendFor({
+          'GET /v1/shops': (_) => json([
+            {'shop_id': 's1', 'role': 'owner'},
+          ]),
+          'GET /v1/shops/s1/entitlement': (_) =>
+              json({'cloud_sync': false, 'effective_status': status}),
+        });
+        await expectLater(
+          backend.resolveMembershipShopId(),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.code, 'code', 'premium_required')
+                .having((e) => e.message, 'message', contains(status)),
+          ),
+        );
+        expect(calls, ['GET /v1/shops', 'GET /v1/shops/s1/entitlement']);
+      },
+    );
+  }
 
   group('isShopAdmin', () {
     for (final entry in {

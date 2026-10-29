@@ -23,3 +23,9 @@ preferences. A clean restore rebuilds local IDs from UUIDs. Other-device carts
 are view-only backups; only their original device can resume them. Printer pairing
 and app lock stay local. See [data mapping](docs/DATA_MODEL_PARITY.md) and
 [restore verification](docs/PHASE12_VERIFICATION.md).
+
+Web premium requests support both existing Android shop codes and new web shops.
+Copy the code from Store → Cloud Backup & Sync → Request Premium; sign in on the
+API-enabled phone to find an approved web request and back up/activate. New empty
+web shops activate from the web after developer approval. See
+[request guide](docs/WEB_PREMIUM_REQUESTS.md).

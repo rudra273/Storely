@@ -192,6 +192,10 @@ void main() {
         'shop_devices': 'Device registration and invoice letters via API',
         'invoice_counters': 'Atomic web invoice counters',
         'idempotency_keys': 'Durable web write retry keys',
+        'purchase_document_items':
+            'Receipt lines via purchase-receipts API; the phone stores whole document snapshots',
+        'purchase_receipt_imports':
+            'Server-side purchase import fingerprints; never stored on the device',
         'alembic_version': 'Migration runtime state',
       },
       'device_only': [

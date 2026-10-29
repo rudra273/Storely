@@ -1,6 +1,6 @@
 # Storely: Own-Server Migration Plan
 
-> Last updated 2026-10-28. Status: **Architecture audit complete; only partially aligned. Phases 0–8 are historical migration work (Phase 8 customer review remains). Phases 9–13 are implemented with local verification recorded below; premium activation/restore passed on a fresh emulator, and developer operations passed in a real browser. Phases 14–15 are planned.**
+> Last updated 2026-10-29. Status: **Architecture audit complete; only partially aligned. Phases 0–8 are historical migration work (Phase 8 customer review remains). Phases 9–14 code is implemented and locally verified; customer invoice/printing and physical-device acceptance remain. Phase 15 local restore/load/container/observability checks pass; production deployment and operational gates remain deferred.**
 > Current specification: [architecture audit and premium delivery specification](docs/ARCHITECTURE_AUDIT_2026-10-28.md). The 2026-10-28 decisions supersede historical Supabase coexistence and subscription/admin deferrals.
 > Per CLAUDE.md, each phase starts only after the user confirms it.
 > Principle: **security first.** Every phase has a security gate (section 6).
@@ -733,7 +733,8 @@ role allows.
   two-step, cookie flags, nothing token-like in browser storage, server also refusing staff, no console or
   CSP errors. Fresh clone passes `make lint typecheck test build api-types-check`. `make verify` now also
   checks the web origin.
-- Not built: QR code for two-step setup (the key is shown for manual entry), Products/Reports/Billing
+- At Phase 5 completion, authenticator QR setup was not built (added 2026-10-29,
+  with manual-key fallback). Products/Reports/Billing
   screens (placeholders), shop settings page, ownership transfer, shop deletion on the web.
 - The built-in browser pane could not open the https dev site (the dev CA is not trusted there), so
   screens were checked with headless Chromium in Docker instead.
@@ -745,15 +746,18 @@ Collected so far; I cannot do these for you. Tick them off before launch.
 - [ ] Hand-drive the welcome screen, sign-up (email code), sign-in, forgot password and first sync on a
       real phone. Unlock or recreate the `storely_pixel` emulator first.
 - [ ] Try the build on an older real Android phone (also check the low-end performance rules in CLAUDE.md).
-- [ ] Bump the version (1.0.5+6 at the 2026-10-28 audit) and build a release APK/AAB for Play.
-- [ ] Privacy-policy text still mentions Supabase; update before cutover.
+- [x] Version bumped to 1.0.6+7; release AAB built. Confirm the upload signing identity
+      and a physical-device upgrade before publishing.
+- [x] In-app privacy/help wording updated for local use and optional Storely API;
+      review deployed privacy/support pages before cloud cutover.
 - [ ] Two-step on/off screens are not in the app yet (server and web have them).
 
 **Web (Phase 5)**
 - [ ] Open `https://app.storely.localhost` in your own browser (trust `storelyapi/certs/ca.crt` first, or accept
       the warning), then click through sign-up, mail code (Mailpit at http://127.0.0.1:8025), shop, invite, roles.
-- [ ] Set up two-step with a real authenticator app (Google/Microsoft Authenticator). I only tested with codes
-      computed in my own test; there is no QR yet.
+- [ ] Set up two-step with a real authenticator app. Web QR/manual-key setup is now
+      implemented; the browser test decodes the rendered QR and verifies the exact
+      provisioning URI before completing MFA. Physical-app scanning review remains.
 - [ ] Try Safari, Firefox and Edge. I tested Chromium only (Secure cookies on `*.localhost` differ by browser).
 - [ ] Look at every screen for wording, spacing and what the customer expects; I only reviewed desktop and phone width.
 - [ ] Ask the customer whether the staff matrix (section 4.5) matches how their staff work.
@@ -1120,6 +1124,22 @@ owner/admin/staff are denied every platform endpoint and responses expose only
 approved metadata. KPI definitions and authorization tests are documented.
 
 ### Phase 14: Paid web access and lifecycle integration (M-L)
+**Implemented and locally verified; customer/physical-device acceptance remains.**
+Web entitlement guards now cover free, expired, suspended and scheduled shops;
+account/security/subscription access remains available. Shop/role switches,
+server-clock expiry, polling/focus and denied requests refresh access and clear
+business caches. Web onboarding directs activation to Android; account-bound
+approved/activated request status excludes phone/email/receipt secrets. Renewals
+are manual developer changes to the existing shop, with no automatic payment.
+
+Android preflights cloud capability before transport, preserves offline billing and
+dirty rows, and resumes stable UUID uploads after renewal. Flutter 253 tests pass
+(16 live skipped), analyzer is clean; web 108 tests/typecheck/lint/build and API
+252 unit/210 PostgreSQL integration tests pass. Native full restore and real-browser
+activation/suspension/expiry/renewal/staff-revocation tests pass. Security gates pass.
+Details and limitations: [Phase 14 verification](docs/PHASE14_VERIFICATION.md).
+Customer printing review and offline staff cached-data policy are still open.
+
 - Add entitlement loading/guards, pending/expired screens and renewal/request
   status to shop web flows; preserve account/security/recovery access.
 - Ensure web onboarding cannot create an unrestricted free cloud shop.
@@ -1132,15 +1152,47 @@ approved metadata. KPI definitions and authorization tests are documented.
 normal cloud/web business access, and expiry/renewal never loses local records.
 All relevant cross-repo acceptance and security tests pass.
 
+### Web request follow-up — 2026-10-29
+**Implemented and verified.** The user confirmed support for existing Android shops
+and brand-new web shops. `/request-premium` submits verified-account contact/phone
+requests into the same admin queue. Existing Android requests use a copied shop code
+and activate on the phone after backup/upload consent; new web shops activate through
+an explicit confirmation after approval and open the resulting workspace. Requests
+cannot grant access, change the requesting UUID or merge an existing registration.
+Retry fingerprints, open-request uniqueness, status privacy and audited/idempotent
+claims remain enforced. API migration 0013 is additive and reapplicable.
+
+Validation: web 116 tests/build/typecheck/lint; mobile 254 tests (16 live skipped)
+and clean analyzer; API 252 unit/220 PostgreSQL integration tests; real Chromium and
+both web-origin/Android-origin native activation/full restore flows pass. Security
+and the 38-table restore checks pass. See [web request guide/evidence](docs/WEB_PREMIUM_REQUESTS.md).
+
 ### Phase 15: Production readiness and cutover (L)
+**Local readiness implemented/verified; production gates are NOT complete.**
+Consistent read-only snapshot/scratch restore verifies all 38 tables, content and
+RLS policy definitions, then deletes the temporary dump/database. Bounded local
+TLS load passes 100 authenticated reads at concurrency four, zero failures and
+55 ms p95. Safe request correlation/route-template timing logs and disposable
+production bootstrap/proxy/DB-TLS checks pass. These do not establish production
+capacity, provider recovery, encrypted off-site backup or delivered alerts.
+
+The existing Render/Vercel/external-PostgreSQL scaffold is retained; backend
+connection/deployment remains deferred per the user's direction. No deployment or
+remote legacy-data deletion was performed. Real provider setup/restore, monitoring,
+independent security review, retention/staff policy, customer print/physical-device
+checks and legacy cutover remain gates. See
+[Phase 15 local readiness](docs/PHASE15_LOCAL_READINESS.md).
+
 - Reconcile current deployment scaffolding with hosting/domains/email decisions.
 - Real TLS, encryption/backups and tested restore, monitoring/alerts, retention,
   load tests and independent security review under the existing security gate.
 - Verify legacy Supabase users/data before shutdown; no remote deletion assumed.
 - Validate privacy/help against actual free/request/premium flows and publish
   account-deletion/recovery documentation.
-- Staged Android release only after Phases 9–14 pass. Supabase removal is required
-  before this release, not deferred to another release.
+- Premium cloud/web rollout requires Phases 9–14 acceptance plus production gates.
+  The user-approved offline Android release lane can precede backend deployment
+  with no bundled API URL, after signing/physical-device upgrade/release checks.
+  Supabase removal is already implemented and is required in both release lanes.
 
 **Done when:** production restore/security/device gates pass and premium requests,
 platform administration and complete paid sync work together without Supabase.

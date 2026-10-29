@@ -486,6 +486,34 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     );
   }
 
+  Future<bool> findWebPremiumRequest() async {
+    final backend = _requireBackend() as ApiCloudBackend;
+    final user = backend.currentUser;
+    if (user == null) {
+      throw StateError('Sign in with the account used on the web.');
+    }
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    final rows =
+        (await backend.api.getJson('/v1/me/premium-requests'))['value'] as List;
+    if (backend.currentUser?.id != user.id) {
+      throw StateError('The account changed. Sign in and try again.');
+    }
+    for (final raw in rows) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      if (row['channel'] == 'web' &&
+          row['request_kind'] == 'existing_android' &&
+          row['local_shop_id'] == shopId) {
+        await PremiumRequestService.instance.importWebRequest(
+          row,
+          shopId: shopId,
+          userId: user.id,
+        );
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Activate only after explicit upload consent, keeping a durable local backup.
   Future<void> activatePremium() async {
     if (_activationInProgress || _syncInFlight != null) {
@@ -500,6 +528,11 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     final draft = await requests.load();
     if (draft == null) throw StateError('Submit a premium request first.');
     final body = draft['body'] as Map;
+    if (draft['channel'] == 'web' && draft['requested_user'] != user.id) {
+      throw StateError(
+        'Sign in with the account that submitted this web request.',
+      );
+    }
     final shopId = await DatabaseHelper.instance.currentShopId();
     if (body['local_shop_id'] != shopId) {
       throw StateError('This request belongs to a different local shop.');
@@ -514,10 +547,15 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         '${support.path}/premium_backups/${DateTime.now().microsecondsSinceEpoch}',
       ).create(recursive: true);
       final backup = await BackupService.createBackupFile(workDir: folder);
-      final response = await backend.api.postJson(
-        '/v1/premium-requests/${body['id']}/claim',
-        {'receipt_secret': body['receipt_secret']},
-      );
+      final response = draft['channel'] == 'web'
+          ? await backend.api.postJson(
+              '/v1/me/premium-requests/${body['id']}/claim-android',
+              {'shop_id': shopId},
+            )
+          : await backend.api.postJson(
+              '/v1/premium-requests/${body['id']}/claim',
+              {'receipt_secret': body['receipt_secret']},
+            );
       await requests.authorizeUpload(response, user.id, backup.path);
       state.value = state.value.copyWith(
         membership: CloudMembership.member,
@@ -644,6 +682,20 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         clearError: true,
       );
     } catch (error, stack) {
+      // Entitlement expiry pauses transport, not the owner's offline business.
+      // Resolve the current role through the unpaid control endpoint, including
+      // a fresh sign-in whose local role has not been populated yet.
+      if (error is ApiException && error.code == 'premium_required') {
+        final role = await backend.fetchRole(
+          await DatabaseHelper.instance.currentShopId(),
+        );
+        if (role != null) {
+          state.value = state.value.copyWith(
+            membership: CloudMembership.member,
+            shopRole: role,
+          );
+        }
+      }
       AppLog.error('Sync', error, stack);
       state.value = state.value.copyWith(
         phase: CloudSyncPhase.idle,

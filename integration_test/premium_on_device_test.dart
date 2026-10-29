@@ -9,6 +9,11 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:storely/db/database_helper.dart';
+import 'package:storely/config/cloud_defaults.dart';
+import 'package:storely/services/api/api_client.dart';
+import 'package:storely/services/api/http_client_factory.dart';
+import 'package:storely/services/api/token_store.dart';
+import 'package:uuid/uuid.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/shop_profile.dart';
 import 'package:storely/screens/premium_request_screen.dart';
@@ -18,6 +23,7 @@ import 'package:storely/theme/app_theme.dart';
 import 'support/full_shop_fixture.dart';
 
 const run = String.fromEnvironment('PREMIUM_DEVICE_RUN');
+const webDevice = bool.fromEnvironment('PREMIUM_WEB_DEVICE');
 const mail = String.fromEnvironment('STORELY_MAIL_URL');
 const password = 'Correct-Horse-Battery-Staple-42';
 
@@ -69,36 +75,38 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.byType(TextFormField).at(0),
-          'Emulator Owner',
-        );
-        await tester.enterText(
-          find.byType(TextFormField).at(1),
-          '+919876543210',
-        );
-        await tester.tap(find.byType(CheckboxListTile).first);
-        await tester.pump();
-        await tester.ensureVisible(find.text('Send premium request'));
-        await tester.tap(find.text('Send premium request'));
-        // Native networking and Keystore calls must complete before asserting UI state.
         Map<String, dynamic>? draft;
-        for (var i = 0; i < 100; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!webDevice) {
+          await tester.enterText(
+            find.byType(TextFormField).at(0),
+            'Emulator Owner',
+          );
+          await tester.enterText(
+            find.byType(TextFormField).at(1),
+            '+919876543210',
+          );
+          await tester.tap(find.byType(CheckboxListTile).first);
           await tester.pump();
-          draft = await PremiumRequestService.instance.load();
-          if (draft?['response'] != null &&
-              find.text('Request: pending').evaluate().isNotEmpty) {
-            break;
+          await tester.ensureVisible(find.text('Send premium request'));
+          await tester.tap(find.text('Send premium request'));
+          // Native networking and Keystore calls must complete before asserting UI state.
+          for (var i = 0; i < 100; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await tester.pump();
+            draft = await PremiumRequestService.instance.load();
+            if (draft?['response'] != null &&
+                find.text('Request: pending').evaluate().isNotEmpty) {
+              break;
+            }
           }
+          expect(draft!['response']['status'], 'pending');
+          expect(find.text('Request: pending'), findsOneWidget);
+          expect(service.state.value.isConfigured, isFalse);
+          expect(
+            await db.getCloudSyncState('last_successful_cloud_sync_at'),
+            isNull,
+          );
         }
-        expect(draft!['response']['status'], 'pending');
-        expect(find.text('Request: pending'), findsOneWidget);
-        expect(service.state.value.isConfigured, isFalse);
-        expect(
-          await db.getCloudSyncState('last_successful_cloud_sync_at'),
-          isNull,
-        );
         await service.useStorelyCloud();
         final email = 'premium-$run@example.com';
         await service.signUp(email, password, syncAfterAuth: false);
@@ -132,9 +140,57 @@ void main() {
         expect(code, isNotNull);
         await service.verifyEmail(email, code!);
         await service.signIn(email, password, syncAfterAuth: false);
+        if (webDevice) {
+          final api = ApiClient(
+            baseUrl: Uri.parse(CloudDefaults.apiUrl),
+            httpClient: createApiHttpClient(),
+            tokens: MemoryTokenStore(),
+          );
+          try {
+            await api.login(email, password);
+            await api.postJson('/v1/me/premium-requests', {
+              'id': const Uuid().v4(),
+              'request_kind': 'existing_android',
+              'shop_id': shopId,
+              'shop_name': 'Emulator Premium $run',
+              'contact_name': 'Web Emulator Owner',
+              'phone': '+919876543210',
+              'contact_consent': true,
+            });
+          } finally {
+            api.dispose();
+          }
+          await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+          await tester.pumpAndSettle();
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: StorelyTheme.light(),
+              home: const PremiumRequestScreen(),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('Find my web request'));
+          await tester.tap(find.text('Find my web request'));
+          for (var i = 0; i < 100; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            await tester.pump();
+            draft = await PremiumRequestService.instance.load();
+            if (draft?['channel'] == 'web') break;
+          }
+          expect(draft?['channel'], 'web');
+          expect(
+            (draft!['body'] as Map).containsKey('receipt_secret'),
+            isFalse,
+          );
+        }
         for (var i = 0; i < 60; i++) {
-          draft = await PremiumRequestService.instance.refresh();
-          if (draft['response']['status'] == 'approved') break;
+          if (webDevice) {
+            await service.findWebPremiumRequest();
+            draft = await PremiumRequestService.instance.load();
+          } else {
+            draft = await PremiumRequestService.instance.refresh();
+          }
+          if (draft!['response']['status'] == 'approved') break;
           await Future<void>.delayed(const Duration(milliseconds: 500));
         }
         expect(draft!['response']['status'], 'approved');
@@ -158,7 +214,11 @@ void main() {
           CheckboxListTile,
           'Create a local backup and upload my existing business data.',
         );
-        await tester.ensureVisible(checkbox);
+        await tester.scrollUntilVisible(
+          checkbox,
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.tap(checkbox);
         await tester.pump();
         await tester.ensureVisible(find.text('Back up and activate premium'));

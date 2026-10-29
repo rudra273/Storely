@@ -75,3 +75,15 @@ The browser harness grants only its exact UUID-tagged test account using a local
 operator fixture; it does not add a runtime approval bypass. No shop business
 policies are widened. Customer review and production deployment remain. Phase 14
 will integrate paid web access/lifecycle states and broader cross-device workflows.
+
+
+## Authenticator QR follow-up — 2026-10-29
+
+Both `/account/security` and `/platform/account/security` now render the backend's
+provisioning URI as a local SVG QR with a white background and four-module quiet
+zone. The manual setup key remains available. No external QR service receives the
+secret; QR/key state disappears on cancellation or successful enrollment.
+All 111 web tests, TypeScript, lint, production build and dependency audit pass.
+The real browser fixture decodes the rendered QR into the exact API provisioning
+URI, then completes MFA enrollment and developer sign-in. It uses throwaway
+accounts and does not reset or enroll an existing user's authenticator.

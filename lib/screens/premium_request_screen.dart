@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
@@ -126,6 +127,9 @@ class _PremiumRequestScreenState extends State<PremiumRequestScreen> {
       password: _password.text,
       syncAfterAuth: false,
     );
+    if (done && (_draft == null || _draft?['channel'] == 'web')) {
+      await CloudService.instance.findWebPremiumRequest();
+    }
     if (done && mounted) {
       setState(
         () => _message = 'Signed in. Confirm the backup and upload below.',
@@ -166,6 +170,22 @@ class _PremiumRequestScreenState extends State<PremiumRequestScreen> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 Text(_shopName, style: AppText.title),
+                if (_shopId != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  const Text('Shop code for web requests'),
+                  SelectableText(_shopId!),
+                  TextButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: _shopId!));
+                      if (!mounted || !context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Shop code copied')),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text('Copy shop code'),
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 const Text(
                   'Premium adds Storely Cloud and web access. Free use keeps your business data on this phone.',
@@ -262,17 +282,21 @@ class _PremiumRequestScreenState extends State<PremiumRequestScreen> {
                     onPressed: _busy
                         ? null
                         : () => _run(() async {
-                            await _requests.refresh();
+                            if (_draft?['channel'] == 'web') {
+                              await CloudService.instance
+                                  .findWebPremiumRequest();
+                            } else {
+                              await _requests.refresh();
+                            }
                           }),
                     child: const Text('Refresh request status'),
                   ),
-                if (_status == 'pending' ||
-                    _status == 'contacted' ||
-                    _status == 'approved' ||
-                    _status == 'activated') ...[
+                if (_available) ...[
                   const SizedBox(height: AppSpacing.lg),
-                  const Text(
-                    'Create and verify an email account, then tell our team which email to approve. Use that account to activate this shop.',
+                  Text(
+                    _status == null
+                        ? 'Requested from the web? Sign in with the same verified account to find the request for this shop code.'
+                        : 'Use the account approved for this shop. A web request stays tied to the account that submitted it.',
                   ),
                   TextField(
                     controller: _email,
@@ -295,6 +319,23 @@ class _PremiumRequestScreenState extends State<PremiumRequestScreen> {
                   OutlinedButton(
                     onPressed: _busy ? null : _signIn,
                     child: const Text('Sign in with approved account'),
+                  ),
+                  OutlinedButton(
+                    onPressed:
+                        _busy || !CloudService.instance.state.value.isSignedIn
+                        ? null
+                        : () => _run(() async {
+                            final found = await CloudService.instance
+                                .findWebPremiumRequest();
+                            if (mounted) {
+                              setState(
+                                () => _message = found
+                                    ? 'Web request found. Check its status above.'
+                                    : 'No matching web request for this account and shop code.',
+                              );
+                            }
+                          }),
+                    child: const Text('Find my web request'),
                   ),
                 ],
                 if (_status == 'approved' || _status == 'activated') ...[

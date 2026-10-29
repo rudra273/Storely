@@ -28,6 +28,79 @@ ApiClient client(http.Client transport) => ApiClient(
 
 void main() {
   test(
+    'web request import is shop/account scoped and never authorizes upload',
+    () async {
+      final store = ReceiptMemory();
+      var calls = 0;
+      final api = client(
+        MockClient((request) async {
+          calls++;
+          throw StateError('No anonymous calls for web requests');
+        }),
+      );
+      final service = PremiumRequestService(api: api, store: store);
+      final row = <String, dynamic>{
+        'id': 'web-request',
+        'local_shop_id': 'phone-shop',
+        'shop_name': 'My phone shop',
+        'channel': 'web',
+        'request_kind': 'existing_android',
+        'status': 'approved',
+      };
+      await expectLater(
+        service.importWebRequest(
+          {...row, 'local_shop_id': 'other-shop'},
+          shopId: 'phone-shop',
+          userId: 'owner',
+        ),
+        throwsStateError,
+      );
+      await expectLater(
+        service.importWebRequest(
+          {...row, 'request_kind': 'new_cloud'},
+          shopId: 'phone-shop',
+          userId: 'owner',
+        ),
+        throwsStateError,
+      );
+      expect(await service.load(), isNull);
+      await service.importWebRequest(
+        row,
+        shopId: 'phone-shop',
+        userId: 'owner',
+      );
+      final saved = (await service.load())!;
+      expect(saved['channel'], 'web');
+      expect(saved['requested_user'], 'owner');
+      expect(saved['upload_user'], isNull);
+      expect((saved['body'] as Map).containsKey('receipt_secret'), isFalse);
+      await expectLater(service.refresh(), throwsStateError);
+      expect(calls, 0);
+      await service.authorizeUpload(
+        {'status': 'activated'},
+        'owner',
+        'backup.sqlite',
+      );
+      await service.importWebRequest(
+        {...row, 'status': 'activated'},
+        shopId: 'phone-shop',
+        userId: 'owner',
+      );
+      expect((await service.load())!['backup_path'], 'backup.sqlite');
+      expect((await service.load())!['upload_user'], 'owner');
+      await expectLater(
+        service.importWebRequest(
+          {...row, 'id': 'another-request'},
+          shopId: 'phone-shop',
+          userId: 'owner',
+        ),
+        throwsStateError,
+      );
+      api.dispose();
+    },
+  );
+
+  test(
     'lost submission response retries exactly the durable request, with no business records',
     () async {
       final store = ReceiptMemory();
@@ -162,6 +235,9 @@ void main() {
             }),
             200,
           );
+        }
+        if (request.url.path.endsWith('/entitlement')) {
+          return http.Response('{"cloud_sync":true}', 200);
         }
         if (request.url.path.endsWith('/me')) {
           return http.Response('{"id":"u","email":"owner@example.com"}', 200);

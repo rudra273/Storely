@@ -80,6 +80,11 @@ class PremiumRequestService {
       };
       await _save(draft);
     }
+    if (draft['channel'] == 'web') {
+      throw StateError(
+        'This request was submitted on the web. Sign in to refresh it.',
+      );
+    }
     final body = Map<String, dynamic>.from(draft['body'] as Map);
     if (body['local_shop_id'] != shopId) {
       throw StateError(
@@ -99,6 +104,11 @@ class PremiumRequestService {
   Future<Map<String, dynamic>> refresh() async {
     final draft = await load();
     if (draft == null) throw StateError('Submit a premium request first.');
+    if (draft['channel'] == 'web') {
+      throw StateError(
+        'Sign in with the requesting account to refresh a web request.',
+      );
+    }
     final body = draft['body'] as Map;
     final response = await api.postJson(
       '/v1/premium-requests/${body['id']}/status',
@@ -108,6 +118,40 @@ class PremiumRequestService {
     draft['response'] = response;
     await _save(draft);
     return draft;
+  }
+
+  Future<void> importWebRequest(
+    Map<String, dynamic> response, {
+    required String shopId,
+    required String userId,
+  }) async {
+    if (response['channel'] != 'web' ||
+        response['request_kind'] != 'existing_android' ||
+        response['local_shop_id'] != shopId ||
+        response['id'] is! String) {
+      throw StateError('This web request does not match this Android shop.');
+    }
+    final previous = await load();
+    if (previous != null &&
+        (previous['response'] as Map?)?['status'] != 'rejected' &&
+        (previous['body'] as Map)['id'] != response['id']) {
+      throw StateError(
+        'A different request is saved on this phone. Contact support.',
+      );
+    }
+    await _save({
+      if (previous != null && (previous['body'] as Map)['id'] == response['id'])
+        ...previous,
+      'api_origin': api.baseUrl.toString(),
+      'channel': 'web',
+      'requested_user': userId,
+      'body': {
+        'id': response['id'],
+        'local_shop_id': shopId,
+        'shop_name': response['shop_name'],
+      },
+      'response': response,
+    });
   }
 
   Future<void> authorizeUpload(

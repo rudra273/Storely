@@ -19,9 +19,11 @@ class ApiSyncBackend implements SyncBackend {
     if (mine is List && mine.isNotEmpty) {
       final preferred = await preferredShopId?.call();
       for (final row in mine) {
-        if ((row as Map)['shop_id'] == preferred) return preferred;
+        if ((row as Map)['shop_id'] == preferred) {
+          return _requireCloudAccess(preferred!);
+        }
       }
-      return (mine.first as Map)['shop_id'].toString();
+      return _requireCloudAccess((mine.first as Map)['shop_id'].toString());
     }
 
     // 2. Invited somewhere? Accept it and join. Errors propagate, so an invited
@@ -33,9 +35,29 @@ class ApiSyncBackend implements SyncBackend {
         'shop_id': shopId,
       });
       final status = result['status'];
-      if (status == 'joined' || status == 'already_member') return shopId;
+      if (status == 'joined' || status == 'already_member') {
+        return _requireCloudAccess(shopId);
+      }
     }
     return null;
+  }
+
+  Future<String> _requireCloudAccess(String shopId) async {
+    final entitlement = await api.getJson('/v1/shops/$shopId/entitlement');
+    if (entitlement['cloud_sync'] != true) {
+      final status = entitlement['effective_status'];
+      final label =
+          const {'free', 'expired', 'suspended', 'scheduled'}.contains(status)
+          ? status.toString()
+          : 'unavailable';
+      throw ApiException(
+        403,
+        'premium_required',
+        'Cloud sync paused: subscription $label. Your local records are kept. '
+            'Contact the Storely team for activation or renewal.',
+      );
+    }
+    return shopId;
   }
 
   /// Throws when the role cannot be determined: guessing "not admin" would
