@@ -1,7 +1,7 @@
 # Business-data parity
 
 The authoritative field inventory is [sync_data_contract.json](sync_data_contract.json).
-It classifies every column in the real SQLite schema: 17 synced tables, 346 columns,
+It classifies every column in the real SQLite schema: 17 row-synced tables, 346 row-sync columns,
 31 nested cart-item fields, and nine portable preference keys. Its matching API
 fixture is checked against PostgreSQL columns, money types, private validators and
 public-table inventory. Adding an unclassified table or field fails the checks.
@@ -12,6 +12,12 @@ and cart snapshots retain their prices, discounts, tax, units and product identi
 Stock derives from movements; payment summaries derive from durable payments;
 customer aggregates reconcile from bills when customer data loads. Invoice counters
 remain device-specific and a restored device registers its own invoice letter.
+
+Schema 23 also has a separate purchase_documents snapshot table. Its nine columns
+are classified under document_tables in the manifest. Whole purchase headers/lines
+use the native publication and sequence-feed APIs, outside generic row sync; see
+[Android purchase documents](android-purchase-documents.md). Downloading a document
+never inserts stock.
 
 Coverage includes shop profile/logo/signature/bank/footer, settings, products,
 categories, units, suppliers, customers, bills/items/payments, stock movements,

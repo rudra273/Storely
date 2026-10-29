@@ -14,6 +14,7 @@ import '../models/pricing.dart';
 import '../utils/csv_importer.dart';
 import '../services/product_export.dart';
 import 'qr_sheet_screen.dart';
+import 'purchase_history_screen.dart';
 import '../utils/money.dart';
 
 part 'products/product_models.dart';
@@ -1083,7 +1084,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ),
           pickAndParseImport: _pickAndParseImport,
           matchExisting: _matchExistingByName,
-          commitBatch: _commitPurchaseBatch,
+          commitBatch: (drafts, date, imported) => _commitPurchaseBatch(
+            drafts,
+            date,
+            imported,
+            purchaseSupplier: selectedSupplier,
+          ),
         ),
       ),
     );
@@ -1106,8 +1112,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Future<int> _commitPurchaseBatch(
     List<_PurchaseDraft> drafts,
     DateTime purchaseDate,
-    List<Product> importedRows,
-  ) async {
+    List<Product> importedRows, {
+    String? purchaseSupplier,
+  }) async {
     final commits = drafts.map((draft) {
       final target = draft.restockTarget ?? _matchExistingByName(draft.name);
       return ProductPurchaseCommit(
@@ -1120,6 +1127,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
       commits,
       purchaseDate: purchaseDate,
       importedRows: importedRows,
+      usePurchaseSupplier: true,
+      purchaseSupplier: purchaseSupplier,
     );
   }
 
@@ -2410,6 +2419,17 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 tooltip: 'Clear selection',
               ),
             ] else ...[
+              if (DatabaseHelper.instance.isAdminMutationAllowed?.call() ??
+                  true)
+                IconButton(
+                  tooltip: 'Purchase history',
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const PurchaseHistoryScreen(),
+                    ),
+                  ),
+                ),
               if (_allProducts.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),

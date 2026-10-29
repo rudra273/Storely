@@ -24,7 +24,11 @@ void main() {
     )).map((row) => row['name'] as String).toSet();
     expect(
       actualTables,
-      {...CloudSyncEngine.syncedTables, 'cloud_sync_state'},
+      {
+        ...CloudSyncEngine.syncedTables,
+        'cloud_sync_state',
+        'purchase_documents',
+      },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
     );
@@ -104,8 +108,36 @@ void main() {
         'server_only': ['server_updated_at'],
       };
     }
+    final documentFields = {
+      'uuid': 'Stable document identity; preserve across retries and restore.',
+      'shop_id': 'Scope to the active authenticated shop.',
+      'payload':
+          'Whole immutable header and line snapshots via purchase-receipts/native and purchase-receipts/changes; never post stock on import.',
+      'origin': 'Preserve web/android origin from the document.',
+      'sync_state':
+          'Device runtime: pending/error/synced/local; downloaded documents start synced.',
+      'last_error':
+          'Device runtime: retain actionable rejection; never upload.',
+      'created_at':
+          'Document audit time; original phone time remains device_created_at in payload after acknowledgement.',
+      'purchase_date':
+          'Preserve the effective receipt date independently of sync order.',
+      'deleted_at':
+          'Reserved local tombstone; posted corrections require a future audited API.',
+    };
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(purchase_documents)',
+      )).map((column) => column['name']).toSet(),
+      documentFields.keys.toSet(),
+      reason:
+          'Review new document fields and their whole-document restore policy.',
+    );
     final result = {
-      'version': 1,
+      'version': 2,
+      'document_tables': {
+        'purchase_documents': {'fields': documentFields},
+      },
       'tables': tables,
       'cart_item_fields': {
         for (final field in BillItem(

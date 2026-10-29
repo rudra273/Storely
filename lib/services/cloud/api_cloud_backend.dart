@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import '../api/api_client.dart';
-import '../api/api_sync_backend.dart';
+import '../api/purchase_api_sync_backend.dart';
 import '../sync/sync_backend.dart';
 import 'cloud_backend.dart';
 
@@ -11,7 +11,7 @@ class ApiCloudBackend implements CloudBackend {
     this.api, {
     this.deviceLabel = 'Storely app',
     Future<String> Function()? preferredShopId,
-  }) : sync = ApiSyncBackend(api, preferredShopId: preferredShopId);
+  }) : sync = PurchaseApiSyncBackend(api, preferredShopId: preferredShopId);
 
   final ApiClient api;
   final String deviceLabel;

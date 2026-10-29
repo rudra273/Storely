@@ -1,6 +1,6 @@
 # Storely product and purchase implementation plan
 
-Status: expanded end-to-end upgrade plan, version 2; no application changes made.
+Status: end-to-end upgrade plan, version 2; implementation in progress (checkpoints below).
 Research and code review: 29 October 2026.
 
 ## Outcome
@@ -321,3 +321,39 @@ Next: Android native purchase-document persistence/sync and composer parity, pre
 atomic offline commits and safe upgrade/legacy behavior. Payments, invoice tax/charges,
 attachments, returns/reconciliation and advanced capabilities remain open before full
 end-to-end completion.
+
+
+## Stage 5 checkpoint — 29 October 2026
+
+API `aad807b` and the Android stage-5 commit add durable native receipt snapshots,
+whole-document sync and offline purchase history. Grouped phone purchases save
+header/lines with stock in one SQLite transaction. Schema 23 is additive and leaves
+legacy stock untouched. Zero-stock catalog setup remains available without a receipt.
+The optional header supplier overrides product preference, including anonymous buys.
+
+Stock uploads through existing row sync first; native receipt adoption verifies the
+entire immutable movement group and never posts stock or recalculates cost again.
+Stable UUIDs/content survive uncertain responses. The server refreshes only derived
+quantity caches. A shared receipt lock and sequence feed preserve committed order
+across web/native writers even with backdated purchases or different phone clocks.
+Other phones download snapshots without duplicating stock.
+
+History displays original supplier/product/unit/lot values, exact rounded amounts,
+source and pending/synced/error/local states. Admin costs stay hidden from staff.
+Conflicts retain pending local documents; start-fresh leaves old queued purchases
+local-only. Generic Use cloud copy cannot silently drop a purchase document.
+See [Android protocol and rollout](android-purchase-documents.md).
+
+Validation: 275 Flutter tests passed; 16 environment-dependent live tests skipped;
+Flutter analysis clean and debug APK built. API: 264 unit and 84 purchase/native/
+product/sync/report integration tests passed; Ruff, strict mypy and Bandit passed.
+Narrow mobile history and staff privacy widget checks passed. Migration 0016 is
+verified on the local development database. No remote deployment or device install.
+Unrelated workspace changes remain excluded from these commits. Pre-existing
+uncommitted API migrations through 0013 remain a dependency for exporting/deploying
+the full migration chain.
+
+Next: Android recoverable purchase drafts, explicit product/purchase entry points,
+simplified existing-product restock, and import-review parity. Supplier accounting,
+tax/charges, attachments, returns/corrections and remaining advanced work packages
+are still open; this checkpoint does not complete the end-to-end upgrade.

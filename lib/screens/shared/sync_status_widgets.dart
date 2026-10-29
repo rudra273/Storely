@@ -180,15 +180,16 @@ class _SyncStatusSheet extends StatelessWidget {
                         trailing: PopupMenuButton<String>(
                           tooltip: 'Fix',
                           onSelected: (action) => _resolve(context, c, action),
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(
                               value: 'retry',
                               child: Text('Try again'),
                             ),
-                            PopupMenuItem(
-                              value: 'cloud',
-                              child: Text('Use cloud copy'),
-                            ),
+                            if (c.table != 'purchase_documents')
+                              const PopupMenuItem(
+                                value: 'cloud',
+                                child: Text('Use cloud copy'),
+                              ),
                           ],
                         ),
                       ),

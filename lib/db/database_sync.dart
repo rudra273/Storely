@@ -259,6 +259,14 @@ mixin DatabaseSync {
       final n = (rows.first['n'] as num).toInt();
       if (n > 0) counts[table] = n;
     }
+    if (_canMutateAsAdmin()) {
+      final rows = await db.rawQuery(
+        "SELECT COUNT(*) AS n FROM purchase_documents WHERE shop_id = ? AND sync_state IN ('pending','error')",
+        [await _activeShopId(db)],
+      );
+      final n = (rows.single['n'] as num).toInt();
+      if (n > 0) counts['purchase_documents'] = n;
+    }
     return counts;
   }
 
@@ -366,6 +374,7 @@ mixin DatabaseSync {
       'stock_movements',
       'expenses',
       'held_bills',
+      'purchase_documents',
     ]) {
       final rows = await db.query(
         table,

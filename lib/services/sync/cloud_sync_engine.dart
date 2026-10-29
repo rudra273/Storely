@@ -1,5 +1,6 @@
 import '../../db/database_helper.dart';
 import 'sync_backend.dart';
+import 'purchase_sync_backend.dart';
 
 /// How a device's existing local data is handled on its first sync.
 enum FirstSyncMode { uploadExisting, startFresh }
@@ -68,6 +69,7 @@ class CloudSyncEngine {
     this.applyUserData,
   });
 
+  static const purchaseCursorStateKey = 'purchase_document_sequence';
   static const lastSyncStateKey = 'last_successful_cloud_sync_at';
   static const defaultPageSize = 500;
   static const pushChunkSize = 200;
@@ -96,6 +98,11 @@ class CloudSyncEngine {
     DatabaseHelper database,
     SyncConflict conflict,
   ) async {
+    if (conflict.table == 'purchase_documents') {
+      throw StateError(
+        'Review this purchase in Purchase history. Stock and pending documents are preserved.',
+      );
+    }
     await database.markRowSynced(conflict.table, conflict.key);
     await database.clearCloudSyncState(_cursorKey(conflict.table));
     final remaining = [
@@ -108,6 +115,7 @@ class CloudSyncEngine {
   /// Forget sync progress so the next sync is a first sync again.
   static Future<void> resetProgress(DatabaseHelper database) async {
     await database.clearCloudSyncState(lastSyncStateKey);
+    await database.clearCloudSyncState(purchaseCursorStateKey);
     for (final table in syncedTables) {
       await database.clearCloudSyncState(_cursorKey(table));
     }
@@ -170,6 +178,7 @@ class CloudSyncEngine {
     if (firstSync) {
       if (firstSyncMode == FirstSyncMode.startFresh) {
         await database.markAllCloudRowsClean();
+        await database.keepPendingPurchasesLocal();
       }
     }
 
@@ -178,6 +187,15 @@ class CloudSyncEngine {
       conflicts.addAll(await _push(table));
     }
 
+    final purchaseBackend = backend;
+    if (canPushAdminTables && purchaseBackend is PurchaseSyncBackend) {
+      conflicts.addAll(
+        await _syncPurchaseDocuments(
+          purchaseBackend as PurchaseSyncBackend,
+          shopId,
+        ),
+      );
+    }
     await applyUserData?.call();
     final syncedAt = DateTime.now().toUtc();
     await database.setCloudSyncState(
@@ -186,6 +204,76 @@ class CloudSyncEngine {
     );
     await database.saveSyncConflicts(conflicts);
     return CloudSyncResult.synced(syncedAt, conflicts: conflicts);
+  }
+
+  Future<List<SyncConflict>> _syncPurchaseDocuments(
+    PurchaseSyncBackend transport,
+    String shopId,
+  ) async {
+    final conflicts = <SyncConflict>[];
+    for (final receipt in await database.pendingPurchaseDocuments()) {
+      if (!await database.purchaseStockUploaded(receipt)) {
+        const message =
+            'Purchase stock is still waiting to upload. The document is kept pending.';
+        conflicts.add(
+          SyncConflict(
+            table: 'purchase_documents',
+            key: receipt.uuid,
+            message: message,
+          ),
+        );
+        continue;
+      }
+      try {
+        final cloud = await transport.publishNativePurchase(
+          shopId,
+          receipt.toJson(),
+        );
+        final conflict = await database.importPurchaseDocument(
+          cloud,
+          shopId: shopId,
+        );
+        if (conflict != null) conflicts.add(conflict);
+      } on SyncRowRejected catch (error) {
+        await database.setPurchaseSyncError(receipt.uuid, error.message);
+        conflicts.add(
+          SyncConflict(
+            table: 'purchase_documents',
+            key: receipt.uuid,
+            message: error.message,
+          ),
+        );
+      }
+    }
+    var sequence =
+        int.tryParse(
+          await database.getCloudSyncState(purchaseCursorStateKey) ?? '',
+        ) ??
+        0;
+    final limit = pageSize > 100 ? 100 : pageSize;
+    while (true) {
+      final page = await transport.pullPurchaseDocuments(
+        shopId,
+        afterSequence: sequence,
+        limit: limit,
+      );
+      if (page.isEmpty) break;
+      for (final row in page) {
+        final next = (row['change_sequence'] as num).toInt();
+        if (next <= sequence) {
+          throw StateError('Purchase feed did not advance.');
+        }
+        final conflict = await database.importPurchaseDocument(
+          row,
+          shopId: shopId,
+        );
+        if (conflict != null) conflicts.add(conflict);
+        sequence = next;
+      }
+      await database.setCloudSyncState(purchaseCursorStateKey, '$sequence');
+      if (page.length < limit) break;
+    }
+    return conflicts;
   }
 
   Future<List<SyncConflict>> _pull(String table, String shopId) async {

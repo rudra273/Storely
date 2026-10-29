@@ -39,6 +39,7 @@ class SyncStatus extends ChangeNotifier {
     'bill_items' => 'Bill items',
     'bill_payments' => 'Payments',
     'stock_movements' => 'Stock changes',
+    'purchase_documents' => 'Purchase documents',
     'expenses' => 'Expenses',
     'audit_log' => 'History',
     'held_bills' => 'Held carts and drafts',

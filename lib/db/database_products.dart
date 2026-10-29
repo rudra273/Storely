@@ -172,9 +172,37 @@ mixin DatabaseProducts {
     List<ProductPurchaseCommit> commits, {
     required DateTime purchaseDate,
     List<Product> importedRows = const [],
+    bool usePurchaseSupplier = false,
+    String? purchaseSupplier,
   }) async {
     await _requireAdminMutation();
     if (commits.isEmpty) return 0;
+    if (commits.length > 200) {
+      throw ArgumentError('Use up to 200 purchase rows.');
+    }
+    final effectiveDate = DateTime(
+      purchaseDate.year,
+      purchaseDate.month,
+      purchaseDate.day,
+    );
+    final hasTrackedStock = commits.any(
+      (c) => c.product.trackStock && c.quantityAdded > 0,
+    );
+    final today = DateTime.now().toUtc().add(
+      const Duration(hours: 5, minutes: 30),
+    );
+    if (hasTrackedStock &&
+        _dateOnly(effectiveDate).compareTo(_dateOnly(today)) > 0) {
+      throw ArgumentError('Choose a receipt date up to today.');
+    }
+    for (final commit in commits) {
+      if (commit.quantityAdded < 0) {
+        throw ArgumentError('Purchase quantities cannot be negative.');
+      }
+      purchaseDecimal(commit.quantityAdded);
+      purchaseDecimal(commit.product.purchasePrice);
+    }
+    final receiptUuid = _newUuid();
     final batchKey = importedRows.isEmpty
         ? null
         : _importBatchKey(
@@ -185,14 +213,24 @@ mixin DatabaseProducts {
         product.source == ProductSource.imported ? batchKey : null;
     final db = await database;
     return db.transaction((txn) async {
+      final headerSupplierId =
+          usePurchaseSupplier && _normaliseName(purchaseSupplier) != null
+          ? await _ensureSupplier(txn, purchaseSupplier!)
+          : null;
       var committed = 0;
       for (final commit in commits) {
+        final normalized = commit.product.copyWith(
+          quantity: double.parse(purchaseDecimal(commit.quantityAdded)),
+          purchasePrice: double.parse(
+            purchaseDecimal(commit.product.purchasePrice),
+          ),
+        );
         final target = commit.restockTarget;
         if (target != null) {
           if (target.id == null) {
             throw ArgumentError('Restock target id is required');
           }
-          final restockProduct = commit.product.copyWith(
+          final restockProduct = normalized.copyWith(
             id: target.id,
             uuid: target.uuid,
             shopId: target.shopId,
@@ -201,10 +239,16 @@ mixin DatabaseProducts {
           final count = await _restockProductInTransaction(
             txn,
             restockProduct,
-            quantityAdded: commit.quantityAdded,
-            purchaseDate: purchaseDate,
+            quantityAdded: normalized.quantity,
+            purchaseDate: effectiveDate,
             source: commit.product.source,
             importBatchKey: keyFor(commit.product),
+            purchaseDocumentUuid:
+                normalized.trackStock && normalized.quantity > 0
+                ? receiptUuid
+                : null,
+            usePurchaseSupplier: usePurchaseSupplier,
+            purchaseSupplierId: headerSupplierId,
           );
           if (count == 0) {
             throw StateError('Product "${target.name}" no longer exists');
@@ -212,12 +256,21 @@ mixin DatabaseProducts {
         } else {
           await _insertProductInTransaction(
             txn,
-            commit.product,
-            purchaseDate: purchaseDate,
+            normalized,
+            purchaseDate: effectiveDate,
             importBatchKey: keyFor(commit.product),
+            purchaseDocumentUuid:
+                normalized.trackStock && normalized.quantity > 0
+                ? receiptUuid
+                : null,
+            usePurchaseSupplier: usePurchaseSupplier,
+            purchaseSupplierId: headerSupplierId,
           );
         }
         committed++;
+      }
+      if (hasTrackedStock) {
+        await _captureNativePurchase(txn, receiptUuid, effectiveDate);
       }
       notifyDatabaseChanged();
       return committed;
@@ -930,6 +983,9 @@ mixin DatabaseProducts {
     Product product, {
     DateTime? purchaseDate,
     String? importBatchKey,
+    String? purchaseDocumentUuid,
+    bool usePurchaseSupplier = false,
+    int? purchaseSupplierId,
   }) async {
     final productToInsert = await _prepareProductForWrite(executor, product);
     await _assertProductCodeAndBarcodeUnique(executor, productToInsert);
@@ -949,8 +1005,14 @@ mixin DatabaseProducts {
         sourceType: productToInsert.source == ProductSource.imported
             ? 'import'
             : 'manual',
-        supplierId: productToInsert.supplierId,
+        supplierId: usePurchaseSupplier
+            ? purchaseSupplierId
+            : productToInsert.supplierId,
         importBatchKey: importBatchKey,
+        sourceDocumentType: purchaseDocumentUuid == null
+            ? null
+            : 'native_purchase',
+        sourceDocumentUuid: purchaseDocumentUuid,
         batchNo: product.purchaseBatchNo,
         expiryDate: product.purchaseExpiry,
         createdAt: purchaseDate ?? productToInsert.createdAt,
@@ -967,6 +1029,9 @@ mixin DatabaseProducts {
     required DateTime purchaseDate,
     String source = ProductSource.mobile,
     String? importBatchKey,
+    String? purchaseDocumentUuid,
+    bool usePurchaseSupplier = false,
+    int? purchaseSupplierId,
   }) async {
     if (product.id == null) throw ArgumentError('Product id is required');
     final existing = await _queryProducts(
@@ -1011,8 +1076,14 @@ mixin DatabaseProducts {
       quantityDelta: quantityAdded.toDouble(),
       unitCost: unitCost,
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
-      supplierId: updatedProduct.supplierId,
+      supplierId: usePurchaseSupplier
+          ? purchaseSupplierId
+          : updatedProduct.supplierId,
       importBatchKey: importBatchKey,
+      sourceDocumentType: purchaseDocumentUuid == null
+          ? null
+          : 'native_purchase',
+      sourceDocumentUuid: purchaseDocumentUuid,
       batchNo: product.purchaseBatchNo,
       expiryDate: product.purchaseExpiry,
       createdAt: purchaseDate,
