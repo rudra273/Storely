@@ -22,7 +22,7 @@ val hasReleaseSigning = !signingStoreFilePath.isNullOrBlank() &&
     !signingKeyAlias.isNullOrBlank()
 
 android {
-    namespace = "com.rudra.storely"
+    namespace = "com.storely"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -36,7 +36,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.rudra.storely"
+        applicationId = "com.storely"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
