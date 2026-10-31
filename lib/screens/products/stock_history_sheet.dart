@@ -120,6 +120,8 @@ class _StockMovementRow extends StatelessWidget {
                   [
                     _formatFullDate(movement.createdAt),
                     if (movement.sourceType != null) movement.sourceType!,
+                    if (movement.importRowNumber != null)
+                      'File row ${movement.importRowNumber}',
                     if (movement.unitCost != null) rupees(movement.unitCost!),
                   ].join(' • '),
                   maxLines: 1,

@@ -15,16 +15,19 @@ const storelyCloudTables = [
   'stock_movements',
   'expenses',
   'audit_log',
+  'held_bills',
+  'user_preferences',
 ];
 
 /// Billing records whose deletion (cancellation) is final: a stale copy from
 /// another device can never bring them back. Mirrors the server rule in
-/// supabase/migrations/20261024_sync_v2.sql.
+/// the API database sticky-cancellation migration.
 const _stickyDeleteTables = {
   'bills',
   'bill_items',
   'bill_payments',
   'stock_movements',
+  'held_bills',
 };
 
 /// A row that could not be applied locally or uploaded. It is skipped (and
@@ -68,6 +71,81 @@ mixin DatabaseSync {
   static const _conflictsKey = 'sync_conflicts';
   static const _deviceIdKey = 'device_id';
 
+  Future<void> bindCloudUserData(
+    String userId, {
+    bool bindPreferences = true,
+  }) async {
+    final db = await database;
+    final shop = await _activeShopId(db);
+    final device = await localDeviceId();
+    await setCloudSyncState('preference_owner', userId);
+    await db.update(
+      'held_bills',
+      {'owner_user_id': userId, 'updated_at': _nowIso()},
+      where: 'shop_id = ? AND origin_device_id = ? AND owner_user_id IS NULL',
+      whereArgs: [shop, device],
+    );
+    if (!bindPreferences) return;
+    final pending = await db.query(
+      'user_preferences',
+      where: "shop_id = ? AND owner_user_id = 'local'",
+      whereArgs: [shop],
+    );
+    for (final row in pending) {
+      final key = row['key'] as String;
+      await db.insert('user_preferences', {
+        ...row,
+        'id': null,
+        'uuid': '$shop:$userId:$key',
+        'owner_user_id': userId,
+        'sync_dirty': 1,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      await db.delete(
+        'user_preferences',
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
+  }
+
+  Future<void> savePortablePreference(
+    String key,
+    String value, {
+    bool onlyIfMissing = false,
+  }) async {
+    final db = await database;
+    final shop = await _activeShopId(db);
+    final user = await getCloudSyncState('preference_owner') ?? 'local';
+    final rows = await db.query(
+      'user_preferences',
+      where: 'shop_id = ? AND owner_user_id = ? AND key = ?',
+      whereArgs: [shop, user, key],
+    );
+    if (rows.isNotEmpty && (onlyIfMissing || rows.single['value'] == value)) {
+      return;
+    }
+    final now = _nowIso();
+    if (rows.isEmpty) {
+      await db.insert('user_preferences', {
+        'uuid': '$shop:$user:$key',
+        'shop_id': shop,
+        'owner_user_id': user,
+        'key': key,
+        'value': value,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } else {
+      await db.update(
+        'user_preferences',
+        {'value': value, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [rows.single['id']],
+      );
+    }
+    notifyDatabaseChanged();
+  }
+
   /// Permanent id of this install, used to register its bill-number letter.
   Future<String> localDeviceId() async {
     final existing = await getCloudSyncState(_deviceIdKey);
@@ -95,7 +173,14 @@ mixin DatabaseSync {
       whereArgs: [shopId],
       orderBy: 'updated_at ASC',
     );
-    return [for (final row in rows) await _toCloudMap(db, table, row)];
+    final owner = await getCloudSyncState('preference_owner');
+    return [
+      for (final row in rows)
+        if ((table != 'held_bills' && table != 'user_preferences') ||
+            (row['owner_user_id'] != null &&
+                (owner == null || row['owner_user_id'] == owner)))
+          await _toCloudMap(db, table, row),
+    ];
   }
 
   /// Marks uploaded rows as in sync — unless they were edited again while
@@ -143,9 +228,18 @@ mixin DatabaseSync {
   /// "Start fresh" first sync: existing local rows are not uploaded.
   Future<void> markAllCloudRowsClean() async {
     final db = await database;
+    final owner = await getCloudSyncState('preference_owner') ?? 'local';
     await db.transaction((txn) async {
       for (final table in ['shops', ...storelyCloudTables]) {
-        await txn.update(table, {'sync_dirty': 0});
+        final private = table == 'held_bills' || table == 'user_preferences';
+        await txn.update(
+          table,
+          {'sync_dirty': 0},
+          where: private
+              ? 'owner_user_id IS NULL OR owner_user_id = ? OR owner_user_id = ?'
+              : null,
+          whereArgs: private ? [owner, 'local'] : null,
+        );
       }
     });
   }
@@ -154,12 +248,24 @@ mixin DatabaseSync {
   Future<Map<String, int>> pendingSyncCounts() async {
     final db = await database;
     final counts = <String, int>{};
+    final owner = await getCloudSyncState('preference_owner') ?? 'local';
     for (final table in ['shops', ...storelyCloudTables]) {
+      final private = table == 'held_bills' || table == 'user_preferences';
       final rows = await db.rawQuery(
-        'SELECT COUNT(*) AS n FROM $table WHERE sync_dirty = 1',
+        'SELECT COUNT(*) AS n FROM $table WHERE sync_dirty = 1'
+        '${private ? " AND (owner_user_id IS NULL OR owner_user_id = ? OR owner_user_id = ?)" : ""}',
+        private ? [owner, 'local'] : null,
       );
       final n = (rows.first['n'] as num).toInt();
       if (n > 0) counts[table] = n;
+    }
+    if (_canMutateAsAdmin()) {
+      final rows = await db.rawQuery(
+        "SELECT COUNT(*) AS n FROM purchase_documents WHERE shop_id = ? AND sync_state IN ('pending','error')",
+        [await _activeShopId(db)],
+      );
+      final n = (rows.single['n'] as num).toInt();
+      if (n > 0) counts['purchase_documents'] = n;
     }
     return counts;
   }
@@ -267,6 +373,8 @@ mixin DatabaseSync {
       'bill_payments',
       'stock_movements',
       'expenses',
+      'held_bills',
+      'purchase_documents',
     ]) {
       final rows = await db.query(
         table,
@@ -277,7 +385,22 @@ mixin DatabaseSync {
       );
       if (rows.isNotEmpty) return true;
     }
-    return false;
+    // Older Android SQLite builds do not consistently include JSON functions.
+    final drafts = await db.query(
+      'purchase_drafts',
+      columns: ['payload'],
+      where: "shop_id = ? AND status = 'editing'",
+      whereArgs: [shopId],
+      limit: 1,
+    );
+    if (drafts.isEmpty) return false;
+    try {
+      return ((jsonDecode(drafts.single['payload'] as String) as Map)['lines']
+              as List)
+          .isNotEmpty;
+    } catch (_) {
+      return true; // Preserve an unreadable draft for backup/recovery.
+    }
   }
 
   /// Applies pulled cloud rows. A row that cannot be applied (e.g. a unique
@@ -289,6 +412,9 @@ mixin DatabaseSync {
   ) async {
     if (rows.isEmpty) return const [];
     final conflicts = <SyncConflict>[];
+    final privateOwner = (table == 'held_bills' || table == 'user_preferences')
+        ? await getCloudSyncState('preference_owner')
+        : null;
     final db = await database;
     await db.transaction((txn) async {
       final activeShopId = await _activeShopId(txn);
@@ -306,6 +432,11 @@ mixin DatabaseSync {
           // cloud project must not be able to leak another shop's data onto
           // this device (and from there back up on the next push).
           if (!_belongsToActiveShop(table, localMap, activeShopId)) continue;
+          if ((table == 'held_bills' || table == 'user_preferences') &&
+              (privateOwner == null ||
+                  localMap['owner_user_id'] != privateOwner)) {
+            continue;
+          }
           if (table == 'app_settings') {
             await _upsertAppSetting(txn, localMap);
             continue;
@@ -320,6 +451,10 @@ mixin DatabaseSync {
         } on DatabaseException catch (error) {
           conflicts.add(
             SyncConflict(table: table, key: key, message: '$error'),
+          );
+        } on FormatException catch (error) {
+          conflicts.add(
+            SyncConflict(table: table, key: key, message: error.message),
           );
         } on StateError catch (error) {
           conflicts.add(
@@ -373,6 +508,22 @@ mixin DatabaseSync {
       ..remove('id')
       ..remove('sync_dirty');
     switch (table) {
+      case 'held_bills':
+        final items = <Map<String, dynamic>>[];
+        for (final value in jsonDecode(row['items_json'] as String) as List) {
+          final item = Map<String, dynamic>.from(value as Map);
+          item['product_uuid'] ??= await _uuidForId(
+            executor,
+            'products',
+            item['product_id'] as int?,
+          );
+          item.remove('id');
+          item.remove('product_id');
+          item.remove('bill_id');
+          items.add(item);
+        }
+        map['items_json'] = jsonEncode(items);
+        break;
       case 'products':
         map
           ..remove('category_id')
@@ -395,7 +546,15 @@ mixin DatabaseSync {
           );
         break;
       case 'bills':
-        map.remove('customer_id');
+        map
+          ..remove('customer_id')
+          ..['customer_uuid'] =
+              await _uuidForId(
+                executor,
+                'customers',
+                row['customer_id'] as int?,
+              ) ??
+              row['customer_uuid'];
         break;
       case 'bill_items':
         map
@@ -429,6 +588,19 @@ mixin DatabaseSync {
       ..remove('server_updated_at')
       ..['sync_dirty'] = DatabaseSchema.syncDirtyFromCloud;
     switch (table) {
+      case 'held_bills':
+        final items = <Map<String, dynamic>>[];
+        for (final value in jsonDecode(row['items_json'] as String) as List) {
+          final item = Map<String, dynamic>.from(value as Map);
+          item['product_id'] = await _idForUuid(
+            executor,
+            'products',
+            item['product_uuid']?.toString(),
+          );
+          items.add(item);
+        }
+        map['items_json'] = jsonEncode(items);
+        break;
       case 'products':
         map
           // Stock is rebuilt from the synced ledger, never copied.
@@ -494,7 +666,13 @@ mixin DatabaseSync {
             'suppliers',
             row['supplier_uuid']?.toString(),
           )
-          ..remove('source_document_id');
+          ..['source_document_id'] = row['source_document_type'] == 'bill'
+              ? await _idForUuid(
+                  executor,
+                  'bills',
+                  row['source_document_uuid']?.toString(),
+                )
+              : null;
         break;
     }
     return map;
@@ -648,7 +826,8 @@ mixin DatabaseSync {
 
   /// Update the single live local row identified by [where]/[whereArgs] to adopt
   /// the cloud row's UUID and data — but only if it is the only match and the
-  /// cloud copy is newer than the local one.
+  /// cloud copy is newer than the local one. Customers always adopt the cloud
+  /// identity for the same phone, retaining newer local fields for upload.
   Future<void> _mergeMatchingRow(
     DatabaseExecutor executor,
     String table,
@@ -667,7 +846,19 @@ mixin DatabaseSync {
     if (matches.length != 1) return;
     final localUpdatedAt = matches.single['updated_at']?.toString();
     final cloudUpdatedAt = map['updated_at']?.toString();
-    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) return;
+    if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) {
+      if (table == 'customers') {
+        // The cloud owns the UUID for an existing phone number. Keep newer
+        // local details dirty, but upload them against that canonical identity.
+        await executor.update(
+          table,
+          {'uuid': map['uuid']},
+          where: 'id = ?',
+          whereArgs: [matches.single['id']],
+        );
+      }
+      return;
+    }
     await executor.update(
       table,
       map..remove('id'),

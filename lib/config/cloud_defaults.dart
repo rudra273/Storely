@@ -1,21 +1,15 @@
-/// Compile-time defaults for the Storely-hosted Supabase backend (Option A).
-///
-/// These are injected at build time so the real project values never live in
-/// source control:
-///
-///   flutter run \
-///     --dart-define=STORELY_CLOUD_URL=https://xxxx.supabase.co \
-///     --dart-define=STORELY_CLOUD_ANON_KEY=eyJhbGci...
-///
-/// The anon key is safe to ship in the APK — it only grants access *through*
-/// Row Level Security. The service-role key must NEVER be defined here.
+/// Storely API configuration. There are no user-entered backend credentials.
 class CloudDefaults {
   const CloudDefaults._();
+  static const apiUrl = String.fromEnvironment('STORELY_API_URL');
+  static bool get apiAvailable {
+    final uri = Uri.tryParse(apiUrl);
+    return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty;
+  }
 
-  static const url = String.fromEnvironment('STORELY_CLOUD_URL');
-  static const anonKey = String.fromEnvironment('STORELY_CLOUD_ANON_KEY');
+  static const devCaBase64 = String.fromEnvironment('STORELY_DEV_CA_B64');
 
-  /// True when the app was built with valid Storely-hosted credentials, i.e.
-  /// the "Use Storely Cloud" option can be offered to the user.
-  static bool get isAvailable => url.isNotEmpty && anonKey.isNotEmpty;
+  // The server enforces subscriptions; accounts can submit/claim requests before
+  // gaining business access. Without a bundled API, free offline use still works.
+  static bool get isAvailable => apiAvailable;
 }

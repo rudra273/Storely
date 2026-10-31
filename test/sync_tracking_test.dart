@@ -120,6 +120,46 @@ void main() {
     expect(after, before);
   });
 
+  for (final cloudNewer in [true, false]) {
+    test(
+      'customer identity merge exports valid bill references (cloud newer: $cloudNewer)',
+      () async {
+        final productId = await db.insertProduct(
+          Product(name: 'Rice', mrp: 105, purchasePrice: 60, quantity: 10),
+        );
+        await sell(productId, phone: '9876543210', paid: false);
+        final raw = await db.database;
+        final localCustomer = (await raw.query('customers')).single;
+        await raw.update('customers', {
+          'updated_at': '2026-10-20T00:00:00.000Z',
+        });
+        final shop = await db.currentShopId();
+        final conflicts = await db.cloudImportRows('customers', [
+          {
+            'uuid': 'web-customer',
+            'shop_id': shop,
+            'name': 'Web customer',
+            'phone': localCustomer['phone'],
+            'created_at': '2026-10-19T00:00:00.000Z',
+            'updated_at': cloudNewer
+                ? '2026-10-21T00:00:00.000Z'
+                : '2026-10-19T00:00:00.000Z',
+          },
+        ]);
+        expect(conflicts, isEmpty);
+        final customer = (await raw.query('customers')).single;
+        expect(customer['uuid'], 'web-customer');
+        expect(customer['id'], localCustomer['id']);
+        expect(customer['name'], cloudNewer ? 'Web customer' : 'Asha');
+        final outgoing = (await db.cloudDirtyRows('bills')).single;
+        expect(outgoing['customer_uuid'], 'web-customer');
+        if (!cloudNewer) {
+          expect(await dirty('customers'), 1);
+        }
+      },
+    );
+  }
+
   test('rows imported from the cloud arrive clean', () async {
     final shopId = await db.currentShopId();
     await db.cloudImportRows('categories', [

@@ -172,9 +172,68 @@ mixin DatabaseProducts {
     List<ProductPurchaseCommit> commits, {
     required DateTime purchaseDate,
     List<Product> importedRows = const [],
+    bool usePurchaseSupplier = false,
+    String? purchaseSupplier,
+    PurchaseComposerDraft? composerDraft,
   }) async {
     await _requireAdminMutation();
+    if (composerDraft != null) {
+      await _requirePurchaseDraftAccess();
+      commits = [
+        for (final line in composerDraft.lines)
+          ProductPurchaseCommit(
+            product: line.product,
+            quantityAdded: line.quantityAdded,
+            restockTarget: line.restockTarget,
+            importKey: line.importKey,
+            importRowNumber: line.importRowNumber,
+            newProductKey: line.newProductKey,
+            duplicateApproved: line.duplicateApproved,
+          ),
+      ];
+      purchaseDate = composerDraft.date;
+      importedRows = composerDraft.importedRows;
+      purchaseSupplier = composerDraft.supplier;
+      usePurchaseSupplier = true;
+    }
     if (commits.isEmpty) return 0;
+    if (commits.length > 200) {
+      throw ArgumentError('Use up to 200 purchase rows.');
+    }
+    final effectiveDate = DateTime(
+      purchaseDate.year,
+      purchaseDate.month,
+      purchaseDate.day,
+    );
+    final hasTrackedStock = commits.any(
+      (c) =>
+          (composerDraft != null && c.restockTarget != null
+              ? c.restockTarget!.trackStock
+              : c.product.trackStock) &&
+          c.quantityAdded > 0,
+    );
+    final today = DateTime.now().toUtc().add(
+      const Duration(hours: 5, minutes: 30),
+    );
+    if (hasTrackedStock &&
+        _dateOnly(effectiveDate).compareTo(_dateOnly(today)) > 0) {
+      throw ArgumentError('Choose a receipt date up to today.');
+    }
+    for (final commit in commits) {
+      if (commit.quantityAdded < 0) {
+        throw ArgumentError('Purchase quantities cannot be negative.');
+      }
+      purchaseDecimal(commit.quantityAdded);
+      purchaseDecimal(commit.product.purchasePrice);
+      if ((commit.importKey == null) != (commit.importRowNumber == null) ||
+          (commit.importKey != null &&
+              (!RegExp(r'^[a-f0-9]{64}$').hasMatch(commit.importKey!) ||
+                  commit.importRowNumber! < 1 ||
+                  commit.importRowNumber! > 2020))) {
+        throw ArgumentError('Invalid import source or row number.');
+      }
+    }
+    final receiptUuid = composerDraft?.uuid ?? _newUuid();
     final batchKey = importedRows.isEmpty
         ? null
         : _importBatchKey(
@@ -185,39 +244,185 @@ mixin DatabaseProducts {
         product.source == ProductSource.imported ? batchKey : null;
     final db = await database;
     return db.transaction((txn) async {
+      if (composerDraft != null) {
+        final shop = await _activeShopId(txn);
+        if (shop != composerDraft.shopId) {
+          throw StateError('The active shop changed. Your draft is preserved.');
+        }
+        final rows = await txn.query(
+          'purchase_drafts',
+          where: 'uuid = ? AND shop_id = ?',
+          whereArgs: [composerDraft.uuid, shop],
+        );
+        if (rows.isEmpty) {
+          throw StateError('This draft was discarded. Reopen Add purchase.');
+        }
+        if (rows.single['status'] == 'posted') {
+          return _composerFromRow(rows.single).lines.length;
+        }
+        if (rows.single['revision'] != composerDraft.revision ||
+            rows.single['payload'] != jsonEncode(composerDraft.toJson())) {
+          throw StateError(
+            'This draft changed. Reopen Add purchase before confirming.',
+          );
+        }
+      }
+      if (composerDraft != null) {
+        final shop = await _activeShopId(txn);
+        for (final commit in commits.where(
+          (c) => c.importKey != null && !c.duplicateApproved,
+        )) {
+          final previous = await txn.query(
+            'stock_movements',
+            columns: ['uuid'],
+            where:
+                'shop_id = ? AND import_batch_key = ? AND deleted_at IS NULL',
+            whereArgs: [shop, 'mobile-import-v1:${commit.importKey}'],
+            limit: 1,
+          );
+          if (previous.isNotEmpty) {
+            throw StateError(
+              'This file may already be recorded. Review it and confirm an intentional repeat.',
+            );
+          }
+        }
+      }
+      final createdProducts = <String, Product>{};
+      final newMetadata = <String, String>{};
+      final headerSupplierId =
+          usePurchaseSupplier && _normaliseName(purchaseSupplier) != null
+          ? await _ensureSupplier(txn, purchaseSupplier!)
+          : null;
       var committed = 0;
       for (final commit in commits) {
-        final target = commit.restockTarget;
+        var normalized = commit.product.copyWith(
+          quantity: double.parse(purchaseDecimal(commit.quantityAdded)),
+          purchasePrice: double.parse(
+            purchaseDecimal(commit.product.purchasePrice),
+          ),
+        );
+        final key = commit.newProductKey;
+        if (key != null) {
+          if (commit.restockTarget != null) {
+            throw ArgumentError(
+              'A staged new item cannot also target an existing product.',
+            );
+          }
+          final metadata = PurchaseDraftLine.productJson(commit.product)
+            ..removeWhere(
+              (name, _) => {
+                'quantity_cache',
+                'purchase_price',
+                'purchase_batch_no',
+                'purchase_expiry',
+                'created_at',
+                'updated_at',
+              }.contains(name),
+            );
+          final signature = jsonEncode(metadata);
+          if (newMetadata.containsKey(key) && newMetadata[key] != signature) {
+            throw StateError(
+              'Rows linked to a new product have different product details. Review the draft.',
+            );
+          }
+          newMetadata[key] = signature;
+        }
+        final target =
+            commit.restockTarget ?? (key == null ? null : createdProducts[key]);
+        final sourceKey = commit.importKey == null
+            ? keyFor(commit.product)
+            : 'mobile-import-v1:${commit.importKey}';
         if (target != null) {
           if (target.id == null) {
             throw ArgumentError('Restock target id is required');
           }
-          final restockProduct = commit.product.copyWith(
-            id: target.id,
+          if (composerDraft != null) {
+            final currentRows = await _queryProducts(
+              txn,
+              where: 'p.uuid = ? AND p.shop_id = ?',
+              whereArgs: [target.uuid, composerDraft.shopId],
+              limit: 1,
+            );
+            if (currentRows.isEmpty) {
+              throw StateError(
+                'Product "${target.name}" was removed. Remove this line and choose another product.',
+              );
+            }
+            final current = Product.fromMap(currentRows.single);
+            if (!current.trackStock || current.unit != target.unit) {
+              throw StateError(
+                'Stock tracking or unit changed for "${target.name}". Remove this line and select it again.',
+              );
+            }
+            normalized = current.copyWith(
+              quantity: normalized.quantity,
+              purchasePrice: normalized.purchasePrice,
+              purchaseBatchNo: normalized.purchaseBatchNo,
+              purchaseExpiry: normalized.purchaseExpiry,
+            );
+          }
+          final restockProduct = normalized.copyWith(
+            id: composerDraft == null ? target.id : normalized.id,
             uuid: target.uuid,
             shopId: target.shopId,
-            createdAt: target.createdAt,
+            createdAt: composerDraft == null
+                ? target.createdAt
+                : normalized.createdAt,
           );
           final count = await _restockProductInTransaction(
             txn,
             restockProduct,
-            quantityAdded: commit.quantityAdded,
-            purchaseDate: purchaseDate,
+            quantityAdded: normalized.quantity,
+            purchaseDate: effectiveDate,
             source: commit.product.source,
-            importBatchKey: keyFor(commit.product),
+            importBatchKey: sourceKey,
+            importRowNumber: commit.importRowNumber,
+            purchaseDocumentUuid:
+                normalized.trackStock && normalized.quantity > 0
+                ? receiptUuid
+                : null,
+            usePurchaseSupplier: usePurchaseSupplier,
+            purchaseSupplierId: headerSupplierId,
           );
           if (count == 0) {
             throw StateError('Product "${target.name}" no longer exists');
           }
         } else {
-          await _insertProductInTransaction(
+          final createdId = await _insertProductInTransaction(
             txn,
-            commit.product,
-            purchaseDate: purchaseDate,
-            importBatchKey: keyFor(commit.product),
+            normalized,
+            purchaseDate: effectiveDate,
+            importBatchKey: sourceKey,
+            importRowNumber: commit.importRowNumber,
+            purchaseDocumentUuid:
+                normalized.trackStock && normalized.quantity > 0
+                ? receiptUuid
+                : null,
+            usePurchaseSupplier: usePurchaseSupplier,
+            purchaseSupplierId: headerSupplierId,
           );
+          if (key != null) {
+            final inserted = await _queryProducts(
+              txn,
+              where: 'p.id = ?',
+              whereArgs: [createdId],
+              limit: 1,
+            );
+            createdProducts[key] = Product.fromMap(inserted.single);
+          }
         }
         committed++;
+      }
+      if (hasTrackedStock) {
+        await _captureNativePurchase(txn, receiptUuid, effectiveDate);
+      }
+      if (composerDraft != null) {
+        await txn.update(
+          'purchase_drafts',
+          {'status': 'posted', 'updated_at': _nowIso()},
+          where: 'uuid = ? AND shop_id = ?',
+          whereArgs: [composerDraft.uuid, composerDraft.shopId],
+        );
       }
       notifyDatabaseChanged();
       return committed;
@@ -930,6 +1135,10 @@ mixin DatabaseProducts {
     Product product, {
     DateTime? purchaseDate,
     String? importBatchKey,
+    int? importRowNumber,
+    String? purchaseDocumentUuid,
+    bool usePurchaseSupplier = false,
+    int? purchaseSupplierId,
   }) async {
     final productToInsert = await _prepareProductForWrite(executor, product);
     await _assertProductCodeAndBarcodeUnique(executor, productToInsert);
@@ -949,8 +1158,15 @@ mixin DatabaseProducts {
         sourceType: productToInsert.source == ProductSource.imported
             ? 'import'
             : 'manual',
-        supplierId: productToInsert.supplierId,
+        supplierId: usePurchaseSupplier
+            ? purchaseSupplierId
+            : productToInsert.supplierId,
         importBatchKey: importBatchKey,
+        importRowNumber: importRowNumber,
+        sourceDocumentType: purchaseDocumentUuid == null
+            ? null
+            : 'native_purchase',
+        sourceDocumentUuid: purchaseDocumentUuid,
         batchNo: product.purchaseBatchNo,
         expiryDate: product.purchaseExpiry,
         createdAt: purchaseDate ?? productToInsert.createdAt,
@@ -967,6 +1183,10 @@ mixin DatabaseProducts {
     required DateTime purchaseDate,
     String source = ProductSource.mobile,
     String? importBatchKey,
+    int? importRowNumber,
+    String? purchaseDocumentUuid,
+    bool usePurchaseSupplier = false,
+    int? purchaseSupplierId,
   }) async {
     if (product.id == null) throw ArgumentError('Product id is required');
     final existing = await _queryProducts(
@@ -1011,8 +1231,15 @@ mixin DatabaseProducts {
       quantityDelta: quantityAdded.toDouble(),
       unitCost: unitCost,
       sourceType: source == ProductSource.imported ? 'import' : 'manual',
-      supplierId: updatedProduct.supplierId,
+      supplierId: usePurchaseSupplier
+          ? purchaseSupplierId
+          : updatedProduct.supplierId,
       importBatchKey: importBatchKey,
+      importRowNumber: importRowNumber,
+      sourceDocumentType: purchaseDocumentUuid == null
+          ? null
+          : 'native_purchase',
+      sourceDocumentUuid: purchaseDocumentUuid,
       batchNo: product.purchaseBatchNo,
       expiryDate: product.purchaseExpiry,
       createdAt: purchaseDate,

@@ -803,6 +803,7 @@ class _OptionDropdown extends StatelessWidget {
   static const _addValue = '__storely_add_option__';
 
   const _OptionDropdown({
+    super.key,
     required this.label,
     required this.value,
     required this.options,

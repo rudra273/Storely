@@ -9,7 +9,7 @@ class _CloudSetupSheet extends StatefulWidget {
 
 /// Which section of the Cloud Sync sheet to show, derived from [CloudState].
 enum _CloudStage {
-  /// No backend configured yet — offer one-tap enable + advanced own-Supabase.
+  /// No cloud backend configured yet.
   notConfigured,
 
   /// Configured but signed out — show the email/password auth form.
@@ -26,14 +26,8 @@ enum _CloudStage {
 }
 
 class _CloudSetupSheetState extends State<_CloudSetupSheet> {
-  late final TextEditingController _urlCtrl;
-  late final TextEditingController _anonKeyCtrl;
   late final TextEditingController _emailCtrl;
   late final TextEditingController _passwordCtrl;
-  late CloudBackendMode _mode;
-
-  /// Reveals the "use your own Supabase" form in the not-configured stage.
-  bool _showAdvanced = false;
   bool _isBusy = false;
   String? _sheetError;
   String? _sheetMessage;
@@ -41,16 +35,6 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   @override
   void initState() {
     super.initState();
-    final config = CloudService.instance.state.value.config;
-    // When the bundled Storely Cloud creds aren't compiled in, the one-tap
-    // path can't work — fall back to the own-Supabase form, expanded.
-    final storelyCloudAvailable = CloudDefaults.isAvailable;
-    _mode = storelyCloudAvailable
-        ? CloudService.instance.state.value.mode
-        : CloudBackendMode.ownSupabase;
-    _showAdvanced = !storelyCloudAvailable && config == null;
-    _urlCtrl = TextEditingController(text: config?.url ?? '');
-    _anonKeyCtrl = TextEditingController(text: config?.anonKey ?? '');
     _emailCtrl = TextEditingController(
       text: CloudService.instance.state.value.user?.email ?? '',
     );
@@ -67,8 +51,6 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
 
   @override
   void dispose() {
-    _urlCtrl.dispose();
-    _anonKeyCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -107,35 +89,74 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
     successMessage: 'Storely Cloud enabled',
   );
 
-  /// Save a user-provided Supabase URL + anon key (Option B, advanced).
-  Future<void> _saveOwnSupabase() => _run(
-    () => CloudService.instance.saveConfig(
-      CloudConfig(url: _urlCtrl.text, anonKey: _anonKeyCtrl.text),
-    ),
-    successMessage: 'Cloud settings saved',
-  );
-
-  Future<void> _signIn() {
-    return _run(
-      () => CloudService.instance.signIn(_emailCtrl.text, _passwordCtrl.text),
-      successMessage: 'Signed in. Sync will run automatically.',
-    );
+  Future<void> _signIn() async {
+    var signedIn = false;
+    await _run(() async {
+      // Confirms the email address or asks for a second-factor code when the
+      // account needs it, before reporting success.
+      signedIn = await signInWithChallenges(
+        context,
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+      );
+    });
+    if (signedIn && mounted) {
+      setState(() => _sheetMessage = 'Signed in. Sync will run automatically.');
+    }
   }
 
-  Future<void> _signUp() {
-    return _run(
-      () => CloudService.instance.signUp(_emailCtrl.text, _passwordCtrl.text),
-      successMessage: 'Account created. Check email confirmation if required.',
+  Future<void> _signUp() async {
+    setState(() {
+      _isBusy = true;
+      _sheetError = null;
+      _sheetMessage = null;
+    });
+    try {
+      final outcome = await CloudService.instance.signUp(
+        _emailCtrl.text,
+        _passwordCtrl.text,
+      );
+      var confirmed = false;
+      if (outcome == SignUpOutcome.emailCodeSent && mounted) {
+        confirmed = await showEmailCodeDialog(
+          context,
+          email: _emailCtrl.text.trim(),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _isBusy = false;
+        _sheetMessage = switch (outcome) {
+          SignUpOutcome.emailCodeSent when confirmed =>
+            'Email confirmed. You can sign in now.',
+          SignUpOutcome.emailCodeSent =>
+            'Account created. Confirm your email with the code we sent, then sign in.',
+          _ => 'Account created. Check email confirmation if required.',
+        };
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isBusy = false;
+        _sheetError = _cleanCloudError(error);
+      });
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final changed = await showResetPasswordDialog(
+      context,
+      email: _emailCtrl.text.trim(),
     );
+    if (changed && mounted) {
+      setState(
+        () => _sheetMessage = 'Password changed. Sign in with your new one.',
+      );
+    }
   }
 
   Future<void> _signOut() =>
       _run(CloudService.instance.signOut, successMessage: 'Signed out');
-
-  Future<void> _registerShop() => _run(
-    CloudService.instance.registerShop,
-    successMessage: 'Shop registered. Syncing…',
-  );
 
   Future<void> _chooseFirstSync(FirstSyncMode mode) => _run(
     () => CloudService.instance.chooseFirstSync(mode),
@@ -152,11 +173,6 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   Future<void> _disableCloud() => _run(
     CloudService.instance.clearConfig,
     successMessage: 'Cloud sync disabled',
-    onSuccess: () {
-      setState(() => _showAdvanced = !CloudDefaults.isAvailable);
-      _urlCtrl.clear();
-      _anonKeyCtrl.clear();
-    },
   );
 
   @override
@@ -206,6 +222,18 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
                       ),
                     ),
                     _buildBanner(state),
+                    const SizedBox(height: AppSpacing.md),
+                    OutlinedButton.icon(
+                      onPressed: _isBusy
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const PremiumRequestScreen(),
+                              ),
+                            ),
+                      icon: const Icon(Icons.workspace_premium_outlined),
+                      label: const Text('Request Premium / View Request'),
+                    ),
                     const SizedBox(height: 16),
                     ..._buildStage(stage, state),
                     if (state.isSignedIn) ...[
@@ -268,17 +296,9 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
       case _CloudStage.notConfigured:
         return [
           _EnableCloudSection(
-            mode: _mode,
-            showAdvanced: _showAdvanced,
             storelyCloudAvailable: CloudDefaults.isAvailable,
             busy: _isBusy,
-            urlCtrl: _urlCtrl,
-            anonKeyCtrl: _anonKeyCtrl,
-            onToggleAdvanced: () =>
-                setState(() => _showAdvanced = !_showAdvanced),
-            onModeChanged: (m) => setState(() => _mode = m),
             onEnableStorely: _enableStorelyCloud,
-            onSaveOwnSupabase: _saveOwnSupabase,
           ),
         ];
       case _CloudStage.signedOut:
@@ -289,21 +309,17 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
             busy: _isBusy,
             onSignIn: _signIn,
             onSignUp: _signUp,
+            onForgotPassword: CloudService.instance.supportsEmailCodes
+                ? _forgotPassword
+                : null,
           ),
         ];
       case _CloudStage.needsRegistration:
         return [
           _CloudAccountCard(state: state, compact: true),
           const SizedBox(height: 12),
-          const _RegisterShopPrompt(),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _isBusy ? null : _registerShop,
-              icon: const Icon(Icons.storefront_outlined),
-              label: const Text('Register My Shop'),
-            ),
+          const Text(
+            'Open your premium request above to activate this shop after approval.',
           ),
         ];
       case _CloudStage.firstSyncChoice:
@@ -355,94 +371,6 @@ class _CloudSetupSheetState extends State<_CloudSetupSheet> {
   }
 }
 
-class _BackendModeSelector extends StatelessWidget {
-  final CloudBackendMode mode;
-  final bool enabled;
-  final ValueChanged<CloudBackendMode> onChanged;
-
-  const _BackendModeSelector({
-    required this.mode,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppColors.softBgOf(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderOf(context)),
-      ),
-      child: Row(
-        children: [
-          _segment(
-            context,
-            label: 'Storely Cloud',
-            icon: Icons.cloud_outlined,
-            value: CloudBackendMode.storelyHosted,
-          ),
-          _segment(
-            context,
-            label: 'Own Supabase',
-            icon: Icons.dns_outlined,
-            value: CloudBackendMode.ownSupabase,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _segment(
-    BuildContext context, {
-    required String label,
-    required IconData icon,
-    required CloudBackendMode value,
-  }) {
-    final selected = mode == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: enabled && !selected ? () => onChanged(value) : null,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.surfaceOf(context) : Colors.transparent,
-            borderRadius: BorderRadius.circular(11),
-            border: selected
-                ? Border.all(color: AppColors.borderStrongOf(context))
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: selected
-                    ? AppColors.brandOf(context)
-                    : AppColors.inkMutedOf(context),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: selected
-                      ? AppColors.inkOf(context)
-                      : AppColors.inkMutedOf(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _StorelyCloudBlurb extends StatelessWidget {
   const _StorelyCloudBlurb();
 
@@ -467,54 +395,11 @@ class _StorelyCloudBlurb extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'No setup needed. Storely manages the cloud for you — just sign up '
-              'with your email and password below. Shop owners can invite staff '
-              'from the Members screen.',
+              'Storely Premium includes cloud sync and web access. Request approval above, or sign in to an existing premium shop.',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.4,
                 color: AppColors.inkMutedOf(context),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RegisterShopPrompt extends StatelessWidget {
-  const _RegisterShopPrompt();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.amber.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.info_outline_rounded,
-            size: 18,
-            color: AppColors.amber,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "You're signed in but don't belong to a shop yet. Register this "
-              'device\'s shop to become its owner — then you can invite staff '
-              'from the Members screen.',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.4,
-                color: AppColors.inkOf(context),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -565,119 +450,33 @@ class _FirstSyncChoicePrompt extends StatelessWidget {
   }
 }
 
-/// Stage A — no backend yet. One-tap "Enable Storely Cloud" plus an advanced
-/// disclosure for users who want to point at their own Supabase project.
 class _EnableCloudSection extends StatelessWidget {
-  final CloudBackendMode mode;
-  final bool showAdvanced;
   final bool storelyCloudAvailable;
   final bool busy;
-  final TextEditingController urlCtrl;
-  final TextEditingController anonKeyCtrl;
-  final VoidCallback onToggleAdvanced;
-  final ValueChanged<CloudBackendMode> onModeChanged;
   final Future<void> Function() onEnableStorely;
-  final Future<void> Function() onSaveOwnSupabase;
-
   const _EnableCloudSection({
-    required this.mode,
-    required this.showAdvanced,
     required this.storelyCloudAvailable,
     required this.busy,
-    required this.urlCtrl,
-    required this.anonKeyCtrl,
-    required this.onToggleAdvanced,
-    required this.onModeChanged,
     required this.onEnableStorely,
-    required this.onSaveOwnSupabase,
   });
-
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (storelyCloudAvailable) ...[
-          const _StorelyCloudBlurb(),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: busy ? null : onEnableStorely,
-              icon: const Icon(Icons.cloud_done_outlined),
-              label: const Text('Enable Storely Cloud'),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: busy ? null : onToggleAdvanced,
-              icon: Icon(
-                showAdvanced ? Icons.expand_less_rounded : Icons.tune_rounded,
-                size: 18,
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.inkMutedOf(context),
-              ),
-              label: const Text('Advanced — use your own Supabase'),
-            ),
-          ),
-        ],
-        if (showAdvanced || !storelyCloudAvailable) ...[
-          const SizedBox(height: 4),
-          if (storelyCloudAvailable) ...[
-            _BackendModeSelector(
-              mode: mode,
-              enabled: !busy,
-              onChanged: onModeChanged,
-            ),
-            const SizedBox(height: 12),
-          ],
-          if (mode == CloudBackendMode.ownSupabase ||
-              !storelyCloudAvailable) ...[
-            TextField(
-              controller: urlCtrl,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'Supabase URL',
-                prefixIcon: Icon(Icons.link_rounded),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: anonKeyCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Supabase anon key',
-                prefixIcon: Icon(Icons.key_outlined),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: busy ? null : onSaveOwnSupabase,
-                icon: const Icon(Icons.save_outlined),
-                label: const Text('Save Cloud Settings'),
-              ),
-            ),
-          ] else ...[
-            // Advanced open but mode is still Storely Cloud — nudge toward the
-            // one-tap button above.
-            const SizedBox(height: 4),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: busy ? null : onEnableStorely,
-                icon: const Icon(Icons.cloud_done_outlined),
-                label: const Text('Enable Storely Cloud'),
-              ),
-            ),
-          ],
-        ],
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _StorelyCloudBlurb(),
+      const SizedBox(height: 12),
+      if (storelyCloudAvailable)
+        FilledButton.icon(
+          onPressed: busy ? null : onEnableStorely,
+          icon: const Icon(Icons.cloud_done_outlined),
+          label: const Text('Enable Storely Cloud'),
+        )
+      else
+        const Text(
+          'Cloud activation is not available yet. Your data stays on this device.',
+        ),
+    ],
+  );
 }
 
 /// Stage B — configured but signed out. Email/password auth form.
@@ -688,12 +487,16 @@ class _AuthSection extends StatelessWidget {
   final Future<void> Function() onSignIn;
   final Future<void> Function() onSignUp;
 
+  /// Shown only when the cloud can reset a password from the app.
+  final VoidCallback? onForgotPassword;
+
   const _AuthSection({
     required this.emailCtrl,
     required this.passwordCtrl,
     required this.busy,
     required this.onSignIn,
     required this.onSignUp,
+    this.onForgotPassword,
   });
 
   @override
@@ -718,6 +521,15 @@ class _AuthSection extends StatelessWidget {
             prefixIcon: Icon(Icons.lock_outline_rounded),
           ),
         ),
+        if (onForgotPassword != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const Key('cloud-forgot-password'),
+              onPressed: busy ? null : onForgotPassword,
+              child: const Text('Forgot password?'),
+            ),
+          ),
         const SizedBox(height: 12),
         Row(
           children: [

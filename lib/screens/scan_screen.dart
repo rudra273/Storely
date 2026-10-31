@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../services/app_settings_service.dart';
+import '../services/app_log.dart';
 import '../services/bill_share.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
@@ -121,11 +122,21 @@ class _ScanScreenState extends State<ScanScreen> {
     _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
   }
 
-  void _saveDraftNow() {
+  Future<void> _saveDraftNow() async {
     final encoded = HeldBill.encodeItems(_items);
     if (encoded == _savedDraft) return;
+    final previous = _savedDraft;
     _savedDraft = encoded;
-    DatabaseHelper.instance.saveCartDraft(List.of(_items));
+    try {
+      await DatabaseHelper.instance.saveCartDraft(List.of(_items));
+    } catch (error, stack) {
+      if (_savedDraft == encoded) _savedDraft = previous;
+      AppLog.error('Save cart draft', error, stack);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save your draft: $error')),
+      );
+    }
   }
 
   Future<void> _restoreDraft() async {
@@ -193,9 +204,18 @@ class _ScanScreenState extends State<ScanScreen> {
     if (chosen == null || !mounted) return;
     // Swap: the cart being billed is held, so nothing is lost.
     if (_items.isNotEmpty) await _holdCart();
-    await DatabaseHelper.instance.deleteHeldBill(chosen.id);
+    HeldBill resumed;
+    try {
+      resumed = await DatabaseHelper.instance.takeHeldBill(chosen.id);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      return;
+    }
     if (!mounted) return;
-    setState(() => _items.addAll(chosen.items));
+    setState(() => _items.addAll(resumed.items));
     await _loadHeldCount();
   }
 

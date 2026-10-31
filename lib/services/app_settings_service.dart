@@ -1,3 +1,4 @@
+import 'portable_preference_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -82,6 +83,7 @@ class AppSettingsService extends ChangeNotifier {
     _billingSearchFirst = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_billingSearchFirstKey, value);
+    await PortablePreferenceChanges.record(_billingSearchFirstKey, value);
   }
 
   Future<void> setThemePreference(AppThemePreference value) async {
@@ -91,6 +93,10 @@ class AppSettingsService extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themePreferenceKey, value.storageValue);
+    await PortablePreferenceChanges.record(
+      _themePreferenceKey,
+      value.storageValue,
+    );
   }
 
   Future<void> setLanguage(AppLanguage value) async {
@@ -99,6 +105,7 @@ class AppSettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_languageKey, value.storageValue);
+    await PortablePreferenceChanges.record(_languageKey, value.storageValue);
   }
 
   Future<void> setAppLockEnabled(bool value) async {
@@ -108,5 +115,10 @@ class AppSettingsService extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_appLockEnabledKey, value);
+  }
+
+  Future<void> reload() async {
+    await load();
+    notifyListeners();
   }
 }
