@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../config/cloud_defaults.dart';
 import 'premium_request_screen.dart';
 import '../db/database_helper.dart';
@@ -55,11 +56,23 @@ class _StoreScreenState extends State<StoreScreen> {
   InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
   int _lowStockThreshold = 5;
   bool _isLoading = true;
+  String? _appVersion;
 
   @override
   void initState() {
     super.initState();
     _loadStoreData();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion = info.version);
+    } catch (_) {
+      // Without a version the About row just leaves the number out.
+    }
   }
 
   @override
@@ -607,7 +620,9 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.4',
+                    subtitle: _appVersion == null
+                        ? 'App information and version'
+                        : 'App information and version $_appVersion',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),
