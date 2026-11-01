@@ -10,10 +10,14 @@ part of 'database_helper.dart';
 //   GST is owed on the invoice, not on payment.
 // - Collected = payments actually received (bill_payments).
 // - Line profit = (taxable value after discount - cost) x qty. GST is never
-//   profit, and the bill discount reduces it.
+//   profit, and the bill discount reduces it. A line with no cost price (cost 0)
+//   has no known profit, so it is left out of profit and margin.
 const _lineProfit =
-    '((bi.taxable_value_snapshot - bi.cost_snapshot) * bi.quantity)';
-const _lineNetRevenue = '(bi.taxable_value_snapshot * bi.quantity)';
+    '(CASE WHEN bi.cost_snapshot > 0 THEN '
+    '(bi.taxable_value_snapshot - bi.cost_snapshot) * bi.quantity END)';
+const _lineNetRevenue =
+    '(CASE WHEN bi.cost_snapshot > 0 THEN '
+    'bi.taxable_value_snapshot * bi.quantity END)';
 const _lineAmount =
     '((bi.taxable_value_snapshot + bi.gst_snapshot) * bi.quantity)';
 

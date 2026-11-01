@@ -38,17 +38,22 @@ class DayBook {
 class ProfitAndLoss {
   final double sales;
   final double costOfGoods;
+
+  /// Sales of products with no cost price: their profit is unknown, so they
+  /// stay out of gross profit.
+  final double salesWithoutCost;
   final double gstCollected;
   final Map<String, double> expensesByCategory;
 
   const ProfitAndLoss({
     required this.sales,
     required this.costOfGoods,
+    this.salesWithoutCost = 0,
     required this.gstCollected,
     required this.expensesByCategory,
   });
 
-  double get grossProfit => roundMoney(sales - costOfGoods);
+  double get grossProfit => roundMoney(sales - salesWithoutCost - costOfGoods);
   double get expenses =>
       roundMoney(expensesByCategory.values.fold(0.0, (s, v) => s + v));
   double get netProfit => roundMoney(grossProfit - expenses);
@@ -217,7 +222,10 @@ mixin DatabaseReports {
       '''
       SELECT ROUND(COALESCE(SUM(bi.taxable_value_snapshot * bi.quantity), 0), 2)
                AS sales,
-             ROUND(COALESCE(SUM(bi.cost_snapshot * bi.quantity), 0), 2) AS cost
+             ROUND(COALESCE(SUM(bi.cost_snapshot * bi.quantity), 0), 2) AS cost,
+             ROUND(COALESCE(SUM(CASE WHEN bi.cost_snapshot <= 0
+                 THEN bi.taxable_value_snapshot * bi.quantity END), 0), 2)
+               AS uncosted_sales
       FROM bill_items bi
       JOIN bills b ON b.id = bi.bill_id
       WHERE b.shop_id = ? AND b.deleted_at IS NULL AND bi.deleted_at IS NULL
@@ -249,6 +257,7 @@ mixin DatabaseReports {
     return ProfitAndLoss(
       sales: (totals.first['sales'] as num).toDouble(),
       costOfGoods: (totals.first['cost'] as num).toDouble(),
+      salesWithoutCost: (totals.first['uncosted_sales'] as num).toDouble(),
       gstCollected: (gst.first['gst'] as num).toDouble(),
       expensesByCategory: {
         for (final row in expenses)

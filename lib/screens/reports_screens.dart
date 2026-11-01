@@ -410,6 +410,11 @@ class _ProfitLossScreenState extends State<ProfitLossScreen> {
                           'Cost of goods sold',
                           '-${rupees(pl.costOfGoods)}',
                         ),
+                        if (pl.salesWithoutCost > 0)
+                          _Line(
+                            'Sales with no cost price (left out of profit)',
+                            '-${rupees(pl.salesWithoutCost)}',
+                          ),
                         const Divider(),
                         _Line(
                           'Gross profit',

@@ -548,7 +548,8 @@ class _PricingCalculationTable extends StatelessWidget {
               controller: marginCtrl,
               suffixText: '%',
               result: breakdown.preGstSellingPrice,
-              delta: breakdown.profitAmount,
+              // No cost price means no known profit; don't show the whole price as one.
+              delta: breakdown.totalCost > 0 ? breakdown.profitAmount : null,
               sourceHint: marginSourceHint,
               onResetSource: onResetMargin,
               onChanged: onMarginChanged,
