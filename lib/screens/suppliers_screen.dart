@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'supplier_payments_screen.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/supplier.dart';
@@ -253,6 +254,15 @@ class _SupplierCard extends StatelessWidget {
             ),
           ),
           if (canManage) ...[
+            IconButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SupplierPaymentsScreen(supplier: supplier),
+                ),
+              ),
+              icon: const Icon(Icons.payments_outlined),
+              tooltip: 'Statement and payments',
+            ),
             IconButton(
               onPressed: onEdit,
               icon: const Icon(Icons.edit_outlined, size: 20),

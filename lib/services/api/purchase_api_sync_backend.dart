@@ -5,8 +5,30 @@ import 'api_sync_backend.dart';
 
 /// Preserves existing row sync; publishes document metadata only after stock upload.
 class PurchaseApiSyncBackend extends ApiSyncBackend
-    implements PurchaseSyncBackend {
+    implements PurchaseSyncBackend, SupplierPaymentSyncBackend {
   PurchaseApiSyncBackend(super.api, {super.preferredShopId});
+
+  @override
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    try {
+      return await api.postJson(
+        '/v1/shops/$shopId/suppliers/$supplierId/payments',
+        payment,
+      );
+    } on ApiException catch (error) {
+      if (error.status >= 400 &&
+          error.status < 500 &&
+          error.status != 408 &&
+          error.status != 429) {
+        throw SyncRowRejected(error.message);
+      }
+      rethrow;
+    }
+  }
 
   @override
   Future<Map<String, dynamic>> publishNativePurchase(

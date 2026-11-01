@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/product.dart';
+import 'package:storely/models/supplier.dart';
 import 'package:storely/models/product_purchase.dart';
 import 'package:storely/models/purchase_document.dart';
 import 'package:storely/services/sync/cloud_sync_engine.dart';
@@ -13,12 +14,54 @@ import 'package:storely/services/sync/sync_backend.dart';
 
 import 'support/fake_sync_backend.dart';
 
-class ReceiptServer extends FakeSyncBackend implements PurchaseSyncBackend {
+class ReceiptServer extends FakeSyncBackend
+    implements PurchaseSyncBackend, SupplierPaymentSyncBackend {
   final Map<String, Map<String, dynamic>> documents = {};
   final Map<String, String> originalRequests = {};
   final List<String> publishes = [];
   bool dropAck = false;
   bool deny = false;
+
+  bool dropPaymentAck = false;
+  bool rejectPayment = false;
+  final Map<String, Map<String, dynamic>> paymentRequests = {};
+  @override
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    if (rejectPayment) {
+      throw const SyncRowRejected('Balance changed on another device.');
+    }
+    final key = payment['request_key'] as String;
+    if (paymentRequests.containsKey(key)) {
+      expect(jsonEncode(payment), jsonEncode(paymentRequests[key]));
+    } else {
+      paymentRequests[key] = payment;
+      final id = documents.keys.single;
+      documents[id] = {
+        ...documents[id]!,
+        'change_sequence': 3,
+        'payment_status': 'partial',
+        'paid_amount': '4.00',
+        'balance_due': '6.00',
+        'payments': [
+          {
+            'uuid': key,
+            'payment_date': payment['payment_date'],
+            'amount': '4.00',
+            'payment_method': 'cash',
+          },
+        ],
+      };
+    }
+    if (dropPaymentAck) {
+      dropPaymentAck = false;
+      throw StateError('Lost payment acknowledgement');
+    }
+    return {'uuid': key};
+  }
 
   @override
   Future<Map<String, dynamic>> publishNativePurchase(
@@ -112,6 +155,68 @@ void main() {
         ),
       ], purchaseDate: DateTime(2026, 10, 1))
       .then((_) {});
+
+  test(
+    'offline supplier payment survives reopen and lost acknowledgement without duplicate balance or stock',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'Payments vendor'));
+      final profiles = await db.getSupplierProfiles();
+      final supplierId = profiles.single.uuid;
+      final server = ReceiptServer()..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+        pageSize: 1,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final id = server.documents.keys.single;
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'supplier_uuid': supplierId,
+        'total': '10.00',
+        'balance_due': '10.00',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      await db.queueSupplierPayment(supplierId, '4', 'cash', '2026-10-01');
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      expect((await db.pendingSyncCounts())['supplier_payment_queue'], 1);
+      await db.close();
+      expect((await db.pendingSupplierPayments()).length, 1);
+      server.dropPaymentAck = true;
+      await expectLater(engine.sync(), throwsStateError);
+      expect((await db.pendingSupplierPayments()).length, 1);
+      await engine.sync();
+      expect(server.paymentRequests.length, 1);
+      expect((await db.pendingSupplierPayments()), isEmpty);
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      expect((await db.getAllProducts()).single.quantity, 2);
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '7', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+      await db.queueSupplierPayment(supplierId, '1', 'cash', '2026-10-01');
+      server.rejectPayment = true;
+      final rejected = await engine.sync();
+      expect(
+        rejected.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      server.rejectPayment = false;
+      await engine.sync();
+      expect(server.paymentRequests.length, 1);
+      db.isAdminMutationAllowed = () => false;
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '1', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+    },
+  );
 
   test('exact line amounts and currency do not use binary money math', () {
     expect(purchaseCentsText(purchaseLineCents('1', '0.005')), '0.01');
@@ -223,6 +328,28 @@ void main() {
       await engine.sync();
       expect((await db.getAllProducts()).single.quantity, 2);
       expect((await db.getPurchaseDocuments()).length, 1);
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'change_sequence': 2,
+        'payment_status': 'partial',
+        'total': '10.00',
+        'paid_amount': '4.00',
+        'balance_due': '6.00',
+        'payments': [
+          {
+            'uuid': 'payment-1',
+            'payment_date': '2026-10-01',
+            'amount': '4.00',
+            'payment_method': 'cash',
+          },
+        ],
+      };
+      await engine.sync();
+      final updated = (await db.getPurchaseDocuments()).single;
+      expect(updated.paymentStatus, 'partial');
+      expect(updated.balanceDue, '6.00');
+      expect(updated.payments.single['amount'], '4.00');
+      expect((await db.getAllProducts()).single.quantity, 2);
     },
   );
 

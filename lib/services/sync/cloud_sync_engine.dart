@@ -1,6 +1,7 @@
 import '../../db/database_helper.dart';
 import 'sync_backend.dart';
 import 'purchase_sync_backend.dart';
+import 'dart:convert';
 
 /// How a device's existing local data is handled on its first sync.
 enum FirstSyncMode { uploadExisting, startFresh }
@@ -98,6 +99,11 @@ class CloudSyncEngine {
     DatabaseHelper database,
     SyncConflict conflict,
   ) async {
+    if (conflict.table == 'supplier_payment_queue') {
+      throw StateError(
+        'Review this payment in Suppliers. The saved request is preserved.',
+      );
+    }
     if (conflict.table == 'purchase_documents') {
       throw StateError(
         'Review this purchase in Purchase history. Stock and pending documents are preserved.',
@@ -243,6 +249,34 @@ class CloudSyncEngine {
             message: error.message,
           ),
         );
+      }
+    }
+    if (transport is SupplierPaymentSyncBackend) {
+      final payments = transport as SupplierPaymentSyncBackend;
+      for (final payment in await database.pendingSupplierPayments()) {
+        final key = payment['request_key'] as String;
+        try {
+          final result = await payments.publishSupplierPayment(
+            shopId,
+            payment['supplier_uuid'] as String,
+            Map<String, dynamic>.from(
+              jsonDecode(payment['payload'] as String) as Map,
+            ),
+          );
+          await database.setSupplierPaymentSync(
+            key,
+            cloudUuid: result['uuid'] as String,
+          );
+        } on SyncRowRejected catch (error) {
+          await database.setSupplierPaymentSync(key, error: error.message);
+          conflicts.add(
+            SyncConflict(
+              table: 'supplier_payment_queue',
+              key: key,
+              message: error.message,
+            ),
+          );
+        }
       }
     }
     var sequence =

@@ -10,3 +10,12 @@ abstract interface class PurchaseSyncBackend {
     required int limit,
   });
 }
+
+/// Optional capability, separate so existing purchase-only backends stay compatible.
+abstract interface class SupplierPaymentSyncBackend {
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  );
+}

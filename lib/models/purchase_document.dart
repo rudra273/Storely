@@ -101,6 +101,17 @@ class PurchaseDocument {
   String get date => _json['purchase_date'] as String;
   String get createdAt => _json['created_at'] as String;
   String get subtotal => _json['subtotal'] as String;
+  String get paymentStatus =>
+      _json['payment_status'] as String? ?? 'not_recorded';
+  String? get total => _json['total'] as String?;
+  String? get balanceDue => _json['balance_due'] as String?;
+  String get taxAmount => _json['tax_amount'] as String? ?? '0';
+  String get chargesAmount => _json['charges_amount'] as String? ?? '0';
+  String get discountAmount => _json['discount_amount'] as String? ?? '0';
+  List<Map<String, dynamic>> get payments => [
+    for (final row in _json['payments'] as List? ?? [])
+      Map<String, dynamic>.from(row as Map),
+  ];
   String get origin => _json['origin']?.toString() ?? 'web';
   String? get supplier => _json['supplier_name'] as String?;
   int get sequence => (_json['change_sequence'] as num?)?.toInt() ?? 0;

@@ -3,6 +3,162 @@ part of 'database_helper.dart';
 mixin DatabasePurchaseDocuments {
   Future<Database> get database;
 
+  Future<Map<String, dynamic>> supplierAccounting(String supplier) async {
+    if (!_canMutateAsAdmin()) {
+      throw StateError('Supplier payments require admin access.');
+    }
+    final db = await database;
+    return _supplierAccounting(db, await _activeShopId(db), supplier);
+  }
+
+  Future<Map<String, dynamic>> _supplierAccounting(
+    DatabaseExecutor db,
+    String shop,
+    String supplier,
+  ) async {
+    final rows = await db.query(
+      'purchase_documents',
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shop],
+    );
+    final receipts = [
+      for (final row in rows) _purchaseFromRow(row),
+    ].where((r) => r.toJson()['supplier_uuid'] == supplier).toList();
+    final queue = await db.query(
+      'supplier_payment_queue',
+      where: 'shop_id = ? AND supplier_uuid = ?',
+      whereArgs: [shop, supplier],
+      orderBy: 'created_at, request_key',
+    );
+    BigInt cents(String amount) {
+      if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(amount)) {
+        throw const FormatException('Invalid currency amount');
+      }
+      final parts = amount.split('.');
+      return BigInt.parse(parts[0]) * BigInt.from(100) +
+          BigInt.parse((parts.length == 1 ? '' : parts[1]).padRight(2, '0'));
+    }
+
+    var balance = BigInt.zero;
+    final known = <String>{};
+    for (final receipt in receipts) {
+      if (receipt.balanceDue != null) balance += cents(receipt.balanceDue!);
+      for (final payment in receipt.payments) {
+        known.add(payment['uuid'] as String);
+      }
+    }
+    for (final row in queue) {
+      if ((row['sync_state'] == 'pending' || row['sync_state'] == 'synced') &&
+          !known.contains(row['cloud_uuid'])) {
+        balance -= cents(
+          (jsonDecode(row['payload'] as String) as Map)['amount'] as String,
+        );
+      }
+    }
+    return {
+      'balance': purchaseCentsText(
+        balance < BigInt.zero ? BigInt.zero : balance,
+      ),
+      'receipts': receipts,
+      'queue': queue,
+    };
+  }
+
+  Future<void> queueSupplierPayment(
+    String supplier,
+    String amount,
+    String method,
+    String date,
+  ) async {
+    if (!_canMutateAsAdmin()) {
+      throw StateError('Supplier payments require admin access.');
+    }
+    if (!RegExp(r'^\d{1,12}(\.\d{1,2})?$').hasMatch(amount)) {
+      throw ArgumentError('Enter an amount with up to two decimal places.');
+    }
+    final parsed = DateTime.tryParse(date);
+    if (parsed == null ||
+        _dateOnly(parsed) != date ||
+        date.compareTo(_dateOnly(DateTime.now())) > 0) {
+      throw ArgumentError('Choose a valid payment date up to today.');
+    }
+    if (!['cash', 'upi', 'card', 'bank_transfer', 'online'].contains(method)) {
+      throw ArgumentError('Choose a payment method.');
+    }
+    BigInt cents(String value) {
+      final parts = value.split('.');
+      return BigInt.parse(parts[0]) * BigInt.from(100) +
+          BigInt.parse((parts.length == 1 ? '' : parts[1]).padRight(2, '0'));
+    }
+
+    final paid = cents(amount);
+    if (paid <= BigInt.zero) {
+      throw ArgumentError('Payment must be greater than zero.');
+    }
+    final db = await database;
+    final shop = await _activeShopId(db);
+    await db.transaction((txn) async {
+      final suppliers = await txn.query(
+        'suppliers',
+        where: 'shop_id = ? AND uuid = ? AND deleted_at IS NULL',
+        whereArgs: [shop, supplier],
+      );
+      if (suppliers.isEmpty) {
+        throw StateError('Supplier is no longer available.');
+      }
+      final statement = await _supplierAccounting(txn, shop, supplier);
+      if (paid > cents(statement['balance'] as String)) {
+        throw StateError(
+          'Payment cannot exceed the recorded supplier balance.',
+        );
+      }
+      final key = _newUuid();
+      await txn.insert('supplier_payment_queue', {
+        'request_key': key,
+        'shop_id': shop,
+        'supplier_uuid': supplier,
+        'payload': jsonEncode({
+          'request_key': key,
+          'amount': purchaseCentsText(paid),
+          'payment_date': date,
+          'payment_method': method,
+          'reference': null,
+          'notes': null,
+        }),
+        'sync_state': 'pending',
+        'created_at': _nowIso(),
+      });
+    });
+  }
+
+  Future<List<Map<String, Object?>>> pendingSupplierPayments() async {
+    final db = await database;
+    return db.query(
+      'supplier_payment_queue',
+      where: "shop_id = ? AND sync_state = 'pending'",
+      whereArgs: [await _activeShopId(db)],
+      orderBy: 'created_at, request_key',
+    );
+  }
+
+  Future<void> setSupplierPaymentSync(
+    String key, {
+    String? cloudUuid,
+    String? error,
+  }) async {
+    final db = await database;
+    await db.update(
+      'supplier_payment_queue',
+      {
+        'sync_state': error == null ? 'synced' : 'error',
+        'cloud_uuid': cloudUuid,
+        'last_error': error,
+      },
+      where: 'shop_id = ? AND request_key = ?',
+      whereArgs: [await _activeShopId(db), key],
+    );
+  }
+
   Future<List<PurchaseDocument>> getPurchaseDocuments({
     int limit = 50,
     int offset = 0,
@@ -71,6 +227,12 @@ mixin DatabasePurchaseDocuments {
 
   Future<void> keepPendingPurchasesLocal() async {
     final db = await database;
+    await db.update(
+      'supplier_payment_queue',
+      {'sync_state': 'local'},
+      where: "shop_id = ? AND sync_state IN ('pending','error')",
+      whereArgs: [await _activeShopId(db)],
+    );
     await db.update(
       'purchase_documents',
       {'sync_state': 'local', 'last_error': null},

@@ -266,6 +266,12 @@ mixin DatabaseSync {
       );
       final n = (rows.single['n'] as num).toInt();
       if (n > 0) counts['purchase_documents'] = n;
+      final payments = await db.rawQuery(
+        "SELECT COUNT(*) AS n FROM supplier_payment_queue WHERE shop_id = ? AND sync_state IN ('pending','error')",
+        [await _activeShopId(db)],
+      );
+      final paymentCount = (payments.single['n'] as num).toInt();
+      if (paymentCount > 0) counts['supplier_payment_queue'] = paymentCount;
     }
     return counts;
   }
