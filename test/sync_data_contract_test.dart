@@ -166,6 +166,12 @@ void main() {
           'Exact payment request via suppliers/payments; never row-sync. Full SQLite backup preserves pending requests.',
       'sync_state':
           'Local pending/synced/error/local state. Rejected requests require review and are never automatically resubmitted.',
+      'command_state':
+          'Local ready/sending/unknown/accepted/rejected/conflict/local lifecycle; never sent on wire.',
+      'attempt_count':
+          'Local durable send count; preserved through backup and retry.',
+      'last_attempt_at':
+          'Local last-send time; never changes the payment business date.',
       'cloud_uuid':
           'Acknowledged payment UUID; avoid double-counting when receipt feed arrives.',
       'last_error':
@@ -180,7 +186,7 @@ void main() {
       paymentFields.keys.toSet(),
     );
     final result = {
-      'version': 4,
+      'version': 5,
       'local_payment_tables': {
         'supplier_payment_queue': {'fields': paymentFields},
       },

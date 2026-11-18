@@ -188,8 +188,40 @@ void main() {
       expect((await db.pendingSupplierPayments()).length, 1);
       server.dropPaymentAck = true;
       await expectLater(engine.sync(), throwsStateError);
-      expect((await db.pendingSupplierPayments()).length, 1);
+      final uncertain = (await db.pendingSupplierPayments()).single;
+      expect(uncertain['command_state'], 'unknown');
+      expect(uncertain['attempt_count'], 1);
+      expect(uncertain['last_attempt_at'], isNotNull);
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['payload'],
+        uncertain['payload'],
+      );
+      server.rejectPayment =
+          true; // e.g. access revoked after the first commit.
+      final deniedReplay = await engine.sync();
+      expect(
+        deniedReplay.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      final stillUnknown = (await db.pendingSupplierPayments()).single;
+      expect(stillUnknown['command_state'], 'unknown');
+      expect(stillUnknown['payload'], uncertain['payload']);
+      // The receipt feed already includes the remote payment, but no matching
+      // result UUID was acknowledged. Keep a conservative reservation until
+      // replay resolves identity rather than allowing another unsafe payment.
+      expect((await db.supplierAccounting(supplierId))['balance'], '2.00');
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '3', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+      server.rejectPayment = false;
       await engine.sync();
+      final accepted = (await (await db.database).query(
+        'supplier_payment_queue',
+      )).single;
+      expect(accepted['command_state'], 'accepted');
+      expect(accepted['attempt_count'], 3);
       expect(server.paymentRequests.length, 1);
       expect((await db.pendingSupplierPayments()), isEmpty);
       expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
@@ -276,6 +308,135 @@ void main() {
       expect(
         (await db.supplierAccounting(supplierId))['balance'],
         '900719925474.02',
+      );
+    },
+  );
+
+  test(
+    'interrupted send reopens as unknown and duplicate claim cannot send twice',
+    () async {
+      final sql = await db.database;
+      final shop = await db.currentShopId();
+      const payload = '{"request_key":"durable-key","amount":"0.01"}';
+      await sql.insert('supplier_payment_queue', {
+        'request_key': 'durable-key',
+        'shop_id': shop,
+        'supplier_uuid': 'supplier',
+        'payload': payload,
+        'sync_state': 'pending',
+        'created_at': '2026-10-01',
+      });
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isTrue,
+      );
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isFalse,
+      );
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      // A callback constrained to a different shop cannot accept this request.
+      await db.setSupplierPaymentSync(
+        'durable-key',
+        shopId: 'other-shop',
+        cloudUuid: 'wrong',
+      );
+      expect(
+        (await sql.query('supplier_payment_queue')).single['command_state'],
+        'sending',
+      );
+      await db.close();
+      final recovered = (await db.pendingSupplierPayments()).single;
+      expect(recovered['command_state'], 'unknown');
+      expect(recovered['payload'], payload);
+      expect(recovered['attempt_count'], 1);
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isTrue,
+      );
+      await db.setSupplierPaymentSync(
+        'durable-key',
+        shopId: shop,
+        error: 'Identity conflict',
+        isConflict: true,
+      );
+      final conflict = (await (await db.database).query(
+        'supplier_payment_queue',
+      )).single;
+      expect(conflict['command_state'], 'conflict');
+      expect(conflict['sync_state'], 'pending');
+      expect(conflict['attempt_count'], 2);
+      expect(conflict['payload'], payload);
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'v25 queue from an older backup gains local state without changing saved requests',
+    () async {
+      final sql = await db.database;
+      final shop = await db.currentShopId();
+      for (final state in ['pending', 'synced', 'error', 'local']) {
+        await sql.insert('supplier_payment_queue', {
+          'request_key': state,
+          'shop_id': shop,
+          'supplier_uuid': 'supplier',
+          'payload': '{"request_key":"$state","amount":"0.01"}',
+          'sync_state': state,
+          'created_at': '2026-10-01',
+        });
+      }
+      await db.close();
+      final raw = await openDatabase(
+        p.join(await getDatabasesPath(), files.first),
+      );
+      for (final column in [
+        'command_state',
+        'attempt_count',
+        'last_attempt_at',
+      ]) {
+        await raw.execute(
+          'ALTER TABLE supplier_payment_queue DROP COLUMN $column',
+        );
+      }
+      await raw.delete(
+        'cloud_sync_state',
+        where: 'key = ?',
+        whereArgs: ['migration_done:v26_supplier_payment_state'],
+      );
+      await raw.execute('PRAGMA user_version = 25');
+      await raw.close();
+      final migrated = await db.database;
+      final rows = await migrated.query(
+        'supplier_payment_queue',
+        orderBy: 'request_key',
+      );
+      expect(
+        {for (final row in rows) row['request_key']: row['command_state']},
+        {
+          'pending': 'unknown',
+          'synced': 'accepted',
+          'error': 'rejected',
+          'local': 'local',
+        },
+      );
+      for (final row in rows) {
+        expect(row['attempt_count'], 0);
+        expect(
+          (jsonDecode(row['payload'] as String) as Map)['request_key'],
+          row['request_key'],
+        );
+      }
+      await db.beginSupplierPaymentAttempt('pending', shopId: shop);
+      await db.markSupplierPaymentUncertain('pending', shopId: shop);
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
       );
     },
   );

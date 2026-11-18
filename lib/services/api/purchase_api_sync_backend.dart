@@ -24,7 +24,7 @@ class PurchaseApiSyncBackend extends ApiSyncBackend
           error.status < 500 &&
           error.status != 408 &&
           error.status != 429) {
-        throw SyncRowRejected(error.message);
+        throw SyncRowRejected(error.message, isConflict: error.status == 409);
       }
       rethrow;
     }

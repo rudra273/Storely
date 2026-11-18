@@ -6,12 +6,23 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 25,
+      version: 26,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
     await _ensureSchema(db);
+    // A persisted send may have committed remotely before the process stopped.
+    // Recover once per database open, never while another sender is in flight.
+    await db.update(
+      'supplier_payment_queue',
+      {
+        'command_state': 'unknown',
+        'last_error':
+            'Previous send was interrupted. Sync to recover the saved payment.',
+      },
+      where: "sync_state = 'pending' AND command_state = 'sending'",
+    );
     return db;
   }
 
@@ -147,8 +158,17 @@ mixin DatabaseSchema {
   static const _v16BillingBackfillKey = 'v16_billing_backfill';
   static const _v21IndexRebuildKey = 'v21_index_rebuild';
   static const _gstInvoiceNumberKey = 'v2_gst_invoice_number_default';
+  static const _v26PaymentStateKey = 'v26_supplier_payment_state';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
+    if (!await _isMigrationDone(executor, _v26PaymentStateKey)) {
+      await executor.execute(
+        """UPDATE supplier_payment_queue SET command_state =
+        CASE sync_state WHEN 'synced' THEN 'accepted' WHEN 'error' THEN 'rejected'
+          WHEN 'local' THEN 'local' ELSE 'unknown' END""",
+      );
+      await _markMigrationDone(executor, _v26PaymentStateKey);
+    }
     if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
       await _backfillV16Billing(executor);
       await _markMigrationDone(executor, _v16BillingBackfillKey);
@@ -220,6 +240,11 @@ mixin DatabaseSchema {
       payload TEXT NOT NULL, sync_state TEXT NOT NULL DEFAULT 'pending',
       cloud_uuid TEXT, last_error TEXT, created_at TEXT NOT NULL
     )''');
+    await _ensureColumns(executor, 'supplier_payment_queue', {
+      'command_state': "TEXT NOT NULL DEFAULT 'ready'",
+      'attempt_count': 'INTEGER NOT NULL DEFAULT 0',
+      'last_attempt_at': 'TEXT',
+    });
     await _createCloudSyncTables(executor);
     await _createHeldBillTables(executor);
     await executor.execute('''

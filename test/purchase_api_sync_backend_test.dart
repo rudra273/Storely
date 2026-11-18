@@ -93,6 +93,36 @@ void main() {
   });
 
   for (final status in [403, 409, 422, 408, 429, 503]) {
+    test(
+      'supplier HTTP $status preserves conflict versus retry classification',
+      () async {
+        final transport = await backend(
+          (_) => http.Response(
+            jsonEncode({
+              'error': {'code': 'test_error', 'message': 'Review payment'},
+            }),
+            status,
+          ),
+        );
+        await expectLater(
+          transport.publishSupplierPayment('s', 'supplier', {
+            'request_key': 'stable-key',
+          }),
+          throwsA(
+            status == 408 || status == 429 || status >= 500
+                ? isA<ApiException>()
+                : isA<SyncRowRejected>().having(
+                    (e) => e.isConflict,
+                    'isConflict',
+                    status == 409,
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  for (final status in [403, 409, 422, 408, 429, 503]) {
     test('HTTP $status retains the appropriate retry classification', () async {
       final transport = await backend(
         (_) => http.Response(

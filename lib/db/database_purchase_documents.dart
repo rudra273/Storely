@@ -125,31 +125,81 @@ mixin DatabasePurchaseDocuments {
     });
   }
 
-  Future<List<Map<String, Object?>>> pendingSupplierPayments() async {
+  Future<List<Map<String, Object?>>> pendingSupplierPayments({
+    String? shopId,
+  }) async {
     final db = await database;
     return db.query(
       'supplier_payment_queue',
-      where: "shop_id = ? AND sync_state = 'pending'",
-      whereArgs: [await _activeShopId(db)],
+      where:
+          "shop_id = ? AND sync_state = 'pending' AND command_state IN ('ready','unknown')",
+      whereArgs: [shopId ?? await _activeShopId(db)],
       orderBy: 'created_at, request_key',
     );
   }
 
-  Future<void> setSupplierPaymentSync(
+  /// Claim one saved request before any network call. Competing sync engines
+  /// cannot both send it, and its payload/id remain unchanged through recovery.
+  Future<bool> beginSupplierPaymentAttempt(
     String key, {
-    String? cloudUuid,
-    String? error,
+    required String shopId,
+  }) async {
+    final db = await database;
+    return await db.rawUpdate(
+          """UPDATE supplier_payment_queue SET command_state = 'sending',
+        attempt_count = attempt_count + 1, last_attempt_at = ?, last_error = NULL
+        WHERE shop_id = ? AND request_key = ? AND sync_state = 'pending'
+          AND command_state IN ('ready','unknown')""",
+          [_nowIso(), shopId, key],
+        ) ==
+        1;
+  }
+
+  Future<void> markSupplierPaymentUncertain(
+    String key, {
+    required String shopId,
   }) async {
     final db = await database;
     await db.update(
       'supplier_payment_queue',
       {
-        'sync_state': error == null ? 'synced' : 'error',
+        'command_state': 'unknown',
+        'last_error':
+            'Payment confirmation is unknown. Sync to recover the saved request.',
+      },
+      where:
+          "shop_id = ? AND request_key = ? AND sync_state = 'pending' AND command_state = 'sending'",
+      whereArgs: [shopId, key],
+    );
+  }
+
+  Future<void> setSupplierPaymentSync(
+    String key, {
+    required String shopId,
+    String? cloudUuid,
+    String? error,
+    bool isConflict = false,
+  }) async {
+    final db = await database;
+    await db.update(
+      'supplier_payment_queue',
+      {
+        'sync_state': error == null
+            ? 'synced'
+            : isConflict
+            ? 'pending'
+            : 'error',
+        'command_state': error == null
+            ? 'accepted'
+            : isConflict
+            ? 'conflict'
+            : 'rejected',
         'cloud_uuid': cloudUuid,
         'last_error': error,
       },
-      where: 'shop_id = ? AND request_key = ?',
-      whereArgs: [await _activeShopId(db), key],
+      where:
+          "shop_id = ? AND request_key = ? AND sync_state = 'pending' AND command_state = 'sending'",
+      whereArgs: [shopId, key],
     );
   }
 

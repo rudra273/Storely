@@ -53,6 +53,40 @@ void main() {
     );
   });
 
+  test(
+    'backup preserves interrupted payment identity and recovers it as unknown',
+    () async {
+      final sql = await db.database;
+      final shop = await db.currentShopId();
+      const payload = '{"request_key":"backup-payment","amount":"0.01"}';
+      await sql.insert('supplier_payment_queue', {
+        'request_key': 'backup-payment',
+        'shop_id': shop,
+        'supplier_uuid': 'supplier',
+        'payload': payload,
+        'sync_state': 'pending',
+        'created_at': '2026-10-01',
+      });
+      expect(
+        await db.beginSupplierPaymentAttempt('backup-payment', shopId: shop),
+        isTrue,
+      );
+      final file = await BackupService.createBackupFile(workDir: work);
+      final (_, bytes) = await BackupService.readBackup(
+        await file.readAsBytes(),
+        workDir: work,
+      );
+      await sql.delete('supplier_payment_queue');
+      await BackupService.restore(bytes, keepDir: work);
+      final restored = (await db.pendingSupplierPayments()).single;
+      expect(restored['request_key'], 'backup-payment');
+      expect(restored['payload'], payload);
+      expect(restored['command_state'], 'unknown');
+      expect(restored['attempt_count'], 1);
+      expect(restored['last_attempt_at'], isNotNull);
+    },
+  );
+
   test('other files are refused', () async {
     expect(
       () => BackupService.readBackup([1, 2, 3, 4], workDir: work),

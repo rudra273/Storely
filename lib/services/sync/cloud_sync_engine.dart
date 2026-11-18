@@ -253,8 +253,14 @@ class CloudSyncEngine {
     }
     if (transport is SupplierPaymentSyncBackend) {
       final payments = transport as SupplierPaymentSyncBackend;
-      for (final payment in await database.pendingSupplierPayments()) {
+      for (final payment in await database.pendingSupplierPayments(
+        shopId: shopId,
+      )) {
         final key = payment['request_key'] as String;
+        final previouslyUnknown = payment['command_state'] == 'unknown';
+        if (!await database.beginSupplierPaymentAttempt(key, shopId: shopId)) {
+          continue;
+        }
         try {
           final result = await payments.publishSupplierPayment(
             shopId,
@@ -265,10 +271,22 @@ class CloudSyncEngine {
           );
           await database.setSupplierPaymentSync(
             key,
+            shopId: shopId,
             cloudUuid: result['uuid'] as String,
           );
         } on SyncRowRejected catch (error) {
-          await database.setSupplierPaymentSync(key, error: error.message);
+          // A retry denied after a lost response cannot prove that the first
+          // attempt did not commit. Keep the reservation and original identity.
+          if (previouslyUnknown) {
+            await database.markSupplierPaymentUncertain(key, shopId: shopId);
+          } else {
+            await database.setSupplierPaymentSync(
+              key,
+              shopId: shopId,
+              error: error.message,
+              isConflict: error.isConflict,
+            );
+          }
           conflicts.add(
             SyncConflict(
               table: 'supplier_payment_queue',
@@ -276,6 +294,9 @@ class CloudSyncEngine {
               message: error.message,
             ),
           );
+        } catch (_) {
+          await database.markSupplierPaymentUncertain(key, shopId: shopId);
+          rethrow;
         }
       }
     }
