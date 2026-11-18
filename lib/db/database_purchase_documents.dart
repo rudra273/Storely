@@ -34,9 +34,7 @@ mixin DatabasePurchaseDocuments {
       if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(amount)) {
         throw const FormatException('Invalid currency amount');
       }
-      final parts = amount.split('.');
-      return BigInt.parse(parts[0]) * BigInt.from(100) +
-          BigInt.parse((parts.length == 1 ? '' : parts[1]).padRight(2, '0'));
+      return decimalScaledInteger(amount, scale: 2);
     }
 
     var balance = BigInt.zero;
@@ -85,11 +83,7 @@ mixin DatabasePurchaseDocuments {
     if (!['cash', 'upi', 'card', 'bank_transfer', 'online'].contains(method)) {
       throw ArgumentError('Choose a payment method.');
     }
-    BigInt cents(String value) {
-      final parts = value.split('.');
-      return BigInt.parse(parts[0]) * BigInt.from(100) +
-          BigInt.parse((parts.length == 1 ? '' : parts[1]).padRight(2, '0'));
-    }
+    BigInt cents(String value) => decimalScaledInteger(value, scale: 2);
 
     final paid = cents(amount);
     if (paid <= BigInt.zero) {

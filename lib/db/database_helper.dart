@@ -17,6 +17,7 @@ import '../models/product_purchase.dart';
 import '../models/purchase_document.dart';
 import '../models/purchase_composer_draft.dart';
 import '../utils/money.dart';
+import '../utils/decimal_text.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';

@@ -218,6 +218,68 @@ void main() {
     },
   );
 
+  test(
+    'large supplier payment stays exact across queue persistence and rejection',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'Exact vendor'));
+      final supplierId = (await db.getSupplierProfiles()).single.uuid;
+      final server = ReceiptServer()..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final id = server.documents.keys.single;
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'supplier_uuid': supplierId,
+        'total': '900719925474.02',
+        'balance_due': '900719925474.02',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      for (final invalid in ['1.005', '1.2300', '-1', ' 1 ', '1e2', '0']) {
+        await expectLater(
+          db.queueSupplierPayment(supplierId, invalid, 'cash', '2026-10-01'),
+          throwsArgumentError,
+          reason: invalid,
+        );
+      }
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      await db.queueSupplierPayment(
+        supplierId,
+        '900719925474.01',
+        'cash',
+        '2026-10-01',
+      );
+      final original = (await db.pendingSupplierPayments()).single;
+      expect(
+        (jsonDecode(original['payload'] as String) as Map)['amount'],
+        '900719925474.01',
+      );
+      expect((await db.supplierAccounting(supplierId))['balance'], '0.01');
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['payload'],
+        original['payload'],
+      );
+      expect((await db.supplierAccounting(supplierId))['balance'], '0.01');
+      server.rejectPayment = true;
+      final result = await engine.sync();
+      expect(
+        result.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      expect(
+        (await db.supplierAccounting(supplierId))['balance'],
+        '900719925474.02',
+      );
+    },
+  );
+
   test('exact line amounts and currency do not use binary money math', () {
     expect(purchaseCentsText(purchaseLineCents('1', '0.005')), '0.01');
     expect(
@@ -226,6 +288,13 @@ void main() {
     );
     expect(() => purchaseDecimal(1.12345), throwsArgumentError);
     expect(purchaseDecimal(0.1 + 0.2), '0.3');
+    expect(normalizePurchaseDecimal('0001.2300'), '1.23');
+    for (final legacyInvalid in ['-0', ' 1 ', '+1', '1.23000']) {
+      expect(
+        () => normalizePurchaseDecimal(legacyInvalid),
+        throwsFormatException,
+      );
+    }
   });
 
   test(
