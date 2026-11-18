@@ -1,6 +1,6 @@
 # E01 command foundations — draft for implementation
 
-Status: proposed, not a frozen wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
+Status: overall design remains proposed; [slice 1](E01-slice-1.md) freezes the implemented recovery and decimal boundaries. This document is not a frozen universal wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
 
 ## Observed implementation anchors
 
