@@ -8,7 +8,7 @@
 
 Read [refractor.md](refractor.md) first. The preserved [comparison](<refactor plan.md>) explains what exists, what differs and what is missing. [Feature tracker](docs/refactor/feature-tracker.md) assigns all 145 comparison rows to execution phases. The [Vyapar reference](../vyapar-rea/CLONE_SPEC.md) remains the fallback for functional questions; do not implement guesses from a screen name or UNKNOWN entry.
 
-This document governs the implementation order. Its **E00–E18** identifiers are deliberately distinct from the comparison's broader **P0–P10** groups. Each R phase ends with tested, integrated work across the affected repositories. Do not implement all backend changes first and postpone mobile/web integration until the end.
+This document governs the implementation order. Its **E00–E18** identifiers are deliberately distinct from the comparison's broader **P0–P10** groups. Each E phase ends with tested, integrated work across the affected repositories. Do not implement all backend changes first and postpone mobile/web integration until the end.
 
 This turn creates work plans only. After implementation is authorized, the coordinator carries approved work through implementation, automated verification, repairs and evidence collection without repeatedly requesting permission for ordinary engineering steps. Do not interpret this plan as authorization to merge into production, spend on external providers or mark human UX acceptance passed. Existing repository verification requirements are satisfied by investigating each slice before changing it and using the already-authorized scope; genuinely unresolved product decisions remain explicit.
 

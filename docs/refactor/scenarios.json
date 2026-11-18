@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "status": "planned",
+  "run_isolation": {
+    "shop_prefix": "refactor-e00-",
+    "cleanup": "Only exact IDs created by run; no name-based bulk deletion.",
+    "shared_environment_owner": "coordinator"
+  },
+  "fixtures": [
+    {
+      "id": "premium-owner",
+      "purpose": "Synthetic active premium shop with owner/admin/staff and second tenant."
+    },
+    {
+      "id": "free-local",
+      "purpose": "Local-only mobile shop without cloud identity."
+    },
+    {
+      "id": "valuation",
+      "purpose": "Quantity 10; purchase 100; GST 18%; overhead 5; unregistered; compare current 1000/1230 valuation difference without altering historical invoices."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "E2E-01",
+      "name": "sale-parity",
+      "state": "planned",
+      "description": "Equivalent seed shops; compare explicit payment choice and steps.",
+      "evidence": null
+    },
+    {
+      "id": "E2E-02",
+      "name": "cross-client-roundtrip",
+      "state": "planned",
+      "description": "Web invoice \u2192 mobile pull \u2192 mobile payment/return \u2192 web.",
+      "evidence": null
+    },
+    {
+      "id": "E2E-03",
+      "name": "offline-restart",
+      "state": "planned",
+      "description": "Offline sale, restart, reconnect and reconcile.",
+      "evidence": null
+    },
+    {
+      "id": "E2E-04",
+      "name": "uncertain-save",
+      "state": "planned",
+      "description": "Lose response after commit; recover same operation.",
+      "evidence": null
+    },
+    {
+      "id": "E2E-19",
+      "name": "local-only",
+      "state": "planned",
+      "description": "Core local use without account/network.",
+      "evidence": null
+    }
+  ]
+}

@@ -182,7 +182,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 
 | Phase | State | Blocking prerequisite |
 |---|---|---|
-| E00 | planned | Implementation has not started. |
+| E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E02 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
