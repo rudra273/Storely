@@ -41,3 +41,17 @@ Web TLS failures are explained by the active development Vite service bypassing 
 - Parallel workers reached their usage limit; coordinator reviewed pending patches, corrected new decimal/paper-size test assumptions, reran focused checks and made the commits.
 
 The command-foundation contract remains a draft. No E01 business-command implementation or full refactor completion is claimed.
+
+## Full integration diagnosis
+
+First complete API baseline: 322 passed, 6 failed (328 selected). Five failures shared a purchase-register SQL query referencing nonexistent `purchase_documents.deleted_at`; the receipt schema uses reversal state and the query already excludes reversed documents. Removed the invalid join predicate, preserving movement tombstones and reversed-document filtering. The sixth failure proved business audit events bypassed paid access; restored the standard admin+premium guard while leaving the separate security-event recovery route available. Full rerun and lint results recorded next.
+
+## API integration repaired and verified
+
+`make test-integration` full rerun: **328 passed**, 317 deselected, exit 0 (existing duplicate health OpenAPI operation-ID warning). `make lint`: passed, exit 0. Committed report/access repairs as API `87d35f4`. Unit baseline 317 passed remains separately recorded. Premium device activation/restore roundtrip is now running; no pass claimed until completion.
+
+## Premium device outcome
+
+Actual premium scenario passed (1 test): activation, upload, all-table clean restore and two-device/web roundtrip. Original wrapper exited 2 after the test because screenshot collection used obsolete Android package `com.rudra.storely`. Current application ID is `com.storely`; corrected script path, `bash -n` passed, and the exact corrected ADB pull succeeded (264,523-byte PNG at `/tmp/storely-e00-artifacts/premium-activated.png`). The original wrapper is not reported as a zero-exit run. Temporary reviewer removed successfully.
+
+Current E00 outstanding work: built-static Docker/header acceptance, broad browser harness modernization, schema consistency and remaining reproducible scenario fixtures. Paid device roundtrip is now evidenced; no human UX acceptance or full E01 completion claimed.
