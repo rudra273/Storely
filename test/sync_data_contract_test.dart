@@ -175,7 +175,7 @@ void main() {
       'cloud_uuid':
           'Acknowledged payment UUID; avoid double-counting when receipt feed arrives.',
       'last_error':
-          'Actionable server rejection retained on the originating device.',
+          'Actionable rejection or uncertain-send diagnostic retained on the originating device.',
       'created_at':
           'Local audit and deterministic upload order; never derived from business date.',
     };

@@ -183,7 +183,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | Phase | State | Blocking prerequisite |
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
-| E01 | implementing | Recovery/decimal slice verified and committed; see evidence/E01/summary.md. Outbox/job/posting infrastructure remains open. |
+| E01 | implementing | Recovery/decimal plus posting-lock, payment-attempt and browser-ownership slices committed; see evidence/E01/summary.md. Emulator/localhost/production Docker verified; jobs, revision negotiation and allocation-key binding remain open. |
 | E02 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |

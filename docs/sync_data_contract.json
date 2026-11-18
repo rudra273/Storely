@@ -12,7 +12,7 @@
         "attempt_count": "Local durable send count; preserved through backup and retry.",
         "last_attempt_at": "Local last-send time; never changes the payment business date.",
         "cloud_uuid": "Acknowledged payment UUID; avoid double-counting when receipt feed arrives.",
-        "last_error": "Actionable server rejection retained on the originating device.",
+        "last_error": "Actionable rejection or uncertain-send diagnostic retained on the originating device.",
         "created_at": "Local audit and deterministic upload order; never derived from business date."
       }
     }

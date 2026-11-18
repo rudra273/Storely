@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "planned",
+  "status": "partially_verified",
   "run_isolation": {
     "shop_prefix": "refactor-e00-",
     "cleanup": "Only exact IDs created by run; no name-based bulk deletion.",
@@ -31,9 +31,17 @@
     {
       "id": "E2E-02",
       "name": "cross-client-roundtrip",
-      "state": "planned",
-      "description": "Web invoice \u2192 mobile pull \u2192 mobile payment/return \u2192 web.",
-      "evidence": null
+      "state": "partially_verified",
+      "description": "Web invoice → mobile pull → mobile payment/return → web.",
+      "evidence": "evidence/E01/summary.md",
+      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice → mobile payment/return → browser flow remains open.",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "make test-device-premium DEVICE=emulator-5554",
+          "prerequisites": "Booted Android emulator and local TLS API; exclusive shared API window, synthetic fixtures only."
+        }
+      ]
     },
     {
       "id": "E2E-03",
@@ -45,9 +53,22 @@
     {
       "id": "E2E-04",
       "name": "uncertain-save",
-      "state": "planned",
+      "state": "partially_verified",
       "description": "Lose response after commit; recover same operation.",
-      "evidence": null
+      "evidence": "evidence/E01/summary.md",
+      "verified_scope": "Web invoice committed/lost response, reload and identical retry with one stock decrement; API ledger-family authorization/collision checks. Full mobile sales recovery remains open.",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/invoice-recovery.cjs",
+          "prerequisites": "Current-source localhost server, Chromium, run-owned premium fixture; see script environment variables."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-integration",
+          "scope": "tests/test_operation_recovery.py; complete integration command provisions scratch DB exclusively."
+        }
+      ]
     },
     {
       "id": "E2E-19",
@@ -56,5 +77,6 @@
       "description": "Core local use without account/network.",
       "evidence": null
     }
-  ]
+  ],
+  "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
 }
