@@ -21,6 +21,7 @@ class PricingScreen extends StatefulWidget {
 }
 
 class _PricingScreenState extends State<PricingScreen> {
+  SettingsEditBaseline? _settingsBaseline;
   final _gstCtrl = TextEditingController();
   final _overheadCtrl = TextEditingController();
   final _marginCtrl = TextEditingController();
@@ -48,6 +49,7 @@ class _PricingScreenState extends State<PricingScreen> {
 
   Future<void> _load() async {
     final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
     final settings = await db.getGlobalPricingSettings();
     final categories = await db.getCategories();
 
@@ -59,6 +61,7 @@ class _PricingScreenState extends State<PricingScreen> {
 
     if (!mounted) return;
     setState(() {
+      _settingsBaseline = baseline;
       _settings = settings;
       _categories = categories;
       _categoryPricing = pricing;
@@ -87,10 +90,17 @@ class _PricingScreenState extends State<PricingScreen> {
       defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
     );
     try {
-      await DatabaseHelper.instance.saveGlobalPricingSettings(updated);
+      final savedBaseline = await DatabaseHelper.instance
+          .savePricingSettingsWithBaseline(
+            updated,
+            baseline: _settingsBaseline!,
+          );
       await DatabaseHelper.instance.refreshAllProductSellingPrices();
       if (!mounted) return;
-      setState(() => _settings = updated);
+      setState(() {
+        _settings = updated;
+        _settingsBaseline = savedBaseline;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Pricing defaults saved')));

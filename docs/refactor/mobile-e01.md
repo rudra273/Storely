@@ -85,3 +85,24 @@ Added `ServerCapabilities.load` against the frozen membership-only `/v1/shops/{s
 A missing old capability route/method (`http_404`/`http_405`) preserves the existing exact-body proof probe. Explicit proof feature version zero/absent returns unsupported and therefore uses the existing safe fallback policy (including fail-closed selected-target guards). Future/invalid proof versions, malformed metadata, tenant mismatch and access/network errors fail closed and retain unknown payment work through the existing queue state handling. A changed account during the metadata request is refused.
 
 Verification: **60 focused tests passed** across purchase API transport, durable purchase/payment queue and API sync backend; analyzer clean. New tests cover fresh support→unsupported transitions, feature metadata not granting staff permission, malformed/future/cross-tenant responses, denied auth/refresh, network failures and no business dispatch after failed negotiation. Old capability-route fallback remains covered by existing recovery-proof transport tests. No schema, theme, offline/free behavior or sync wire changes.
+
+# E01 slice 5 — guarded settings and atomic invoice-editor saves
+
+Date: 19 November 2026. Found two local gaps: the invoice editor saved `bill_settings` and invoice-series configuration in separate transactions, and profile/pricing editors did not compare a frozen persisted baseline. Profile/pricing sheets also closed before persistence, making a failed save lose the visible form.
+
+## Implementation
+
+- `SettingsEditBaseline` captures canonical persisted configuration rows from the actual current shop. It is in memory only, never row-synced or uploaded as configuration data. Keys/row representations are sorted deterministically. Runtime invoice counters, device/transport flags and bookkeeping timestamps are excluded so ordinary billing/sync does not create false conflicts.
+- Guarded writes compare that baseline and tenant identity inside the SQLite transaction before any settings mutation. Existing programmatic callers retain optional-baseline compatibility; this is not a replacement for server sync revision enforcement.
+- The actual invoice editor captures its baseline before loading fields and commits bill appearance plus default invoice-series configuration in one transaction. A later-write failure rolls back the first write and all associated local dirty flags.
+- Shop/profile and global-pricing sheets persist under their frozen baseline before closing. A conflict leaves existing fields visible. Async Store-screen refresh can replace surrounding view data without replacing the sheet's frozen baseline.
+- The standalone pricing editor receives its next baseline from the same transaction that saved its settings, avoiding a post-save recapture race. Its text controllers remain intact on failure.
+- No schema, wire, theme or navigation changes. Settings mutation rights still use the existing authoritative local mutation guard, including free/offline operation. Product selling-price recomputation remains the existing separate derived refresh; the new atomic claim is for the settings rows, not a new all-product repricing transaction.
+
+## Verification
+
+`flutter test test/settings_concurrency_test.dart test/pricing_test.dart test/billing_database_test.dart test/invoice_v2_test.dart`: **46 passed**. `flutter analyze`: clean, no issues. `git diff --check`: passed.
+
+Cases include a sync-style concurrent settings update, stale profile/pricing rejection, same-transaction follow-up pricing baseline, invoice counter/transport-only updates, revoked edit rights, changed shop identity, and an injected failure on the second invoice-series write proving full rollback. A real BillSettingsScreen widget test edits its title, changes persisted settings concurrently, attempts Save and verifies the route stays open, typed title is retained and persisted title is unchanged.
+
+The widget harness initially targeted the preview scroller and attempted settling an active loading spinner; bounded async pumping and selecting the actual vertical settings list fixed the harness. The final run above is the passing evidence. Logs: `/tmp/storely-mobile-e01-settings-tests.log`, `/tmp/storely-mobile-e01-settings-analyze.log`. No emulator or live Docker access was used by this lane; coordinator owns integrated acceptance.

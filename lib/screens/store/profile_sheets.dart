@@ -2,8 +2,9 @@ part of '../store_screen.dart';
 
 class _ShopProfileSheet extends StatefulWidget {
   final ShopProfile profile;
+  final Future<void> Function(ShopProfile) onSave;
 
-  const _ShopProfileSheet({required this.profile});
+  const _ShopProfileSheet({required this.profile, required this.onSave});
 
   @override
   State<_ShopProfileSheet> createState() => _ShopProfileSheetState();
@@ -17,6 +18,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
   late final TextEditingController _gstinCtrl;
   late final TextEditingController _addressCtrl;
   late String _gstScheme;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -40,7 +42,8 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     if (_gstScheme != GstScheme.unregistered &&
         _cleanOptional(_gstinCtrl.text) == null) {
@@ -52,21 +55,31 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
       return;
     }
     final current = widget.profile;
-    Navigator.pop(
-      context,
-      ShopProfile(
-        id: current.id,
-        uuid: current.uuid,
-        name: _nameCtrl.text.trim(),
-        phone: _cleanOptional(_phoneCtrl.text),
-        email: _cleanOptional(_emailCtrl.text),
-        gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
-        address: _cleanOptional(_addressCtrl.text),
-        gstScheme: _gstScheme,
-        createdAt: current.createdAt,
-        updatedAt: current.updatedAt,
-      ),
+    final result = ShopProfile(
+      id: current.id,
+      uuid: current.uuid,
+      name: _nameCtrl.text.trim(),
+      phone: _cleanOptional(_phoneCtrl.text),
+      email: _cleanOptional(_emailCtrl.text),
+      gstin: _cleanOptional(_gstinCtrl.text)?.toUpperCase(),
+      address: _cleanOptional(_addressCtrl.text),
+      gstScheme: _gstScheme,
+      createdAt: current.createdAt,
+      updatedAt: current.updatedAt,
     );
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(result);
+      if (mounted) Navigator.pop(context, result);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -194,7 +207,7 @@ class _ShopProfileSheetState extends State<_ShopProfileSheet> {
             TestKeys.tag(
               TestKeys.saveBtn,
               FilledButton(
-                onPressed: _submit,
+                onPressed: _saving ? null : _submit,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

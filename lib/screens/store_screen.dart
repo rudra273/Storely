@@ -46,6 +46,7 @@ class StoreScreen extends StatefulWidget {
 }
 
 class _StoreScreenState extends State<StoreScreen> {
+  SettingsEditBaseline? _settingsBaseline;
   String? _shopName;
   ShopProfile? _shopProfile;
   List<String> _categories = [];
@@ -85,6 +86,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
   Future<void> _loadStoreData() async {
     final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
     final shopProfile = await db.getShopProfile();
     final shopName = shopProfile?.name;
     final categories = await db.getCategories();
@@ -98,6 +100,7 @@ class _StoreScreenState extends State<StoreScreen> {
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
+      _settingsBaseline = baseline;
       _shopName = shopName;
       _shopProfile = shopProfile;
       _categories = categories;
@@ -112,11 +115,20 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _editShopProfile() async {
+    final baseline = _settingsBaseline;
+    if (baseline == null) return;
     final value = await showModalBottomSheet<ShopProfile>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _ShopProfileSheet(
+        onSave: (profile) async {
+          await DatabaseHelper.instance.saveShopProfile(
+            profile,
+            baseline: baseline,
+          );
+          await DatabaseHelper.instance.refreshAllProductSellingPrices();
+        },
         profile:
             _shopProfile ??
             ShopProfile(
@@ -126,10 +138,7 @@ class _StoreScreenState extends State<StoreScreen> {
       ),
     );
     if (value == null) return;
-    await _runStoreAction(() async {
-      await DatabaseHelper.instance.saveShopProfile(value);
-      await DatabaseHelper.instance.refreshAllProductSellingPrices();
-    });
+    await _loadStoreData();
   }
 
   Future<void> _addCategory() async {
@@ -248,18 +257,26 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showGlobalPricingSettings() async {
+    final baseline = _settingsBaseline;
+    if (baseline == null) return;
     final result = await showModalBottomSheet<GlobalPricingSettings>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _GlobalPricingSheet(settings: _pricingSettings, units: _units),
+      builder: (_) => _GlobalPricingSheet(
+        settings: _pricingSettings,
+        units: _units,
+        onSave: (settings) async {
+          await DatabaseHelper.instance.saveGlobalPricingSettings(
+            settings,
+            baseline: baseline,
+          );
+          await DatabaseHelper.instance.refreshAllProductSellingPrices();
+        },
+      ),
     );
     if (result == null) return;
-    await _runStoreAction(() async {
-      await DatabaseHelper.instance.saveGlobalPricingSettings(result);
-      await DatabaseHelper.instance.refreshAllProductSellingPrices();
-    });
+    await _loadStoreData();
   }
 
   Future<void> _showBillSettings() async {

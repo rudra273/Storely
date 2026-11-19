@@ -13,6 +13,72 @@ mixin DatabaseSettings {
   Future<Database> get database;
   Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
 
+  Future<SettingsEditBaseline> captureSettingsEditBaseline() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      await _seedDefaultInvoiceSeries(txn);
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
+      );
+    });
+  }
+
+  Future<void> _assertSettingsBaseline(
+    DatabaseExecutor txn,
+    SettingsEditBaseline? baseline,
+  ) async {
+    if (baseline == null) {
+      return; // Legacy programmatic callers stay compatible.
+    }
+    final shopId = await _activeShopId(txn);
+    if (shopId != baseline.shopId ||
+        await _settingsSnapshot(txn, shopId) != baseline._snapshot) {
+      throw StateError(
+        'Shop settings changed while you were editing. Your entries are kept; reopen settings before saving.',
+      );
+    }
+  }
+
+  Future<String> _settingsSnapshot(DatabaseExecutor txn, String shopId) async {
+    final snapshot = <String, Object?>{};
+    for (final table in [
+      'shops',
+      'app_settings',
+      'bill_settings',
+      'invoice_series',
+    ]) {
+      final rows = await txn.query(
+        table,
+        where:
+            '${table == 'shops' ? 'uuid' : 'shop_id'} = ? AND deleted_at IS NULL',
+        whereArgs: [shopId],
+      );
+      final values = rows.map((row) {
+        final keys =
+            row.keys
+                .where(
+                  (key) => !{
+                    'id',
+                    'sync_dirty',
+                    'server_updated_at',
+                    'device_id',
+                    'created_at',
+                    'updated_at',
+                    'next_sequence',
+                    'last_sequence_key',
+                  }.contains(key),
+                )
+                .toList()
+              ..sort();
+        return jsonEncode({for (final key in keys) key: row[key]});
+      }).toList()..sort();
+      snapshot[table] = values;
+    }
+    return jsonEncode(snapshot);
+  }
+
   Future<String?> getShopName() async {
     final profile = await getShopProfile();
     if (profile != null) return profile.name;
@@ -88,13 +154,17 @@ mixin DatabaseSettings {
     return ShopProfile(name: legacyName, gstScheme: scheme);
   }
 
-  Future<void> saveShopProfile(ShopProfile profile) async {
+  Future<void> saveShopProfile(
+    ShopProfile profile, {
+    SettingsEditBaseline? baseline,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     final name = _normaliseName(profile.name);
     if (name == null) throw ArgumentError('Shop name is required');
 
     await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
       final shopId = await _activeShopId(txn);
       final now = _nowIso();
       final existing = await txn.query(
@@ -245,10 +315,26 @@ mixin DatabaseSettings {
     );
   }
 
-  Future<void> saveGlobalPricingSettings(GlobalPricingSettings settings) async {
+  Future<void> saveGlobalPricingSettings(
+    GlobalPricingSettings settings, {
+    SettingsEditBaseline? baseline,
+  }) async {
+    await _persistGlobalPricingSettings(settings, baseline);
+  }
+
+  Future<SettingsEditBaseline> savePricingSettingsWithBaseline(
+    GlobalPricingSettings settings, {
+    required SettingsEditBaseline baseline,
+  }) => _persistGlobalPricingSettings(settings, baseline);
+
+  Future<SettingsEditBaseline> _persistGlobalPricingSettings(
+    GlobalPricingSettings settings,
+    SettingsEditBaseline? baseline,
+  ) async {
     await _requireAdminMutation();
     final db = await database;
-    await db.transaction((txn) async {
+    final saved = await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
       await _saveSetting(
         txn,
         _defaultGstPercentKey,
@@ -274,8 +360,14 @@ mixin DatabaseSettings {
         _showPurchasePriceGloballyKey,
         settings.showPurchasePriceGlobally ? '1' : '0',
       );
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
+      );
     });
     notifyDatabaseChanged();
+    return saved;
   }
 
   Future<BillSettings> getBillSettings() async {
@@ -292,41 +384,67 @@ mixin DatabaseSettings {
     return BillSettings(shopId: shopId, createdAt: now, updatedAt: now);
   }
 
-  Future<void> saveBillSettings(BillSettings settings) async {
+  Future<void> saveBillSettings(
+    BillSettings settings, {
+    SettingsEditBaseline? baseline,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     await db.transaction((txn) async {
-      final shopId = await _activeShopId(txn);
-      final now = _nowIso();
-      final existing = await txn.query(
-        'bill_settings',
-        columns: ['id', 'uuid', 'created_at'],
-        where: 'shop_id = ? AND deleted_at IS NULL',
-        whereArgs: [shopId],
-        limit: 1,
-      );
-      final createdAt = existing.isEmpty
-          ? now
-          : existing.single['created_at']?.toString() ?? now;
-      final uuid = existing.isEmpty
-          ? (settings.uuid.isEmpty ? _newUuid() : settings.uuid)
-          : existing.single['uuid'] as String;
-      final map =
-          settings
-              .copyWith(
-                id: existing.isEmpty ? null : existing.single['id'] as int?,
-                uuid: uuid,
-                shopId: shopId,
-                createdAt: DateTime.parse(createdAt),
-                updatedAt: DateTime.parse(now),
-              )
-              .toMap()
-            ..remove('id');
-      await txn.insert(
-        'bill_settings',
-        map,
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await _assertSettingsBaseline(txn, baseline);
+      await _saveBillSettings(txn, settings);
+    });
+    notifyDatabaseChanged();
+  }
+
+  Future<void> _saveBillSettings(
+    DatabaseExecutor txn,
+    BillSettings settings,
+  ) async {
+    final shopId = await _activeShopId(txn);
+    final now = _nowIso();
+    final existing = await txn.query(
+      'bill_settings',
+      columns: ['id', 'uuid', 'created_at'],
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shopId],
+      limit: 1,
+    );
+    final createdAt = existing.isEmpty
+        ? now
+        : existing.single['created_at']?.toString() ?? now;
+    final uuid = existing.isEmpty
+        ? (settings.uuid.isEmpty ? _newUuid() : settings.uuid)
+        : existing.single['uuid'] as String;
+    final map =
+        settings
+            .copyWith(
+              id: existing.isEmpty ? null : existing.single['id'] as int?,
+              uuid: uuid,
+              shopId: shopId,
+              createdAt: DateTime.parse(createdAt),
+              updatedAt: DateTime.parse(now),
+            )
+            .toMap()
+          ..remove('id');
+    await txn.insert(
+      'bill_settings',
+      map,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> saveInvoiceSettings(
+    BillSettings settings,
+    InvoiceSeriesSettings series, {
+    required SettingsEditBaseline baseline,
+  }) async {
+    await _requireAdminMutation();
+    final db = await database;
+    await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
+      await _saveBillSettings(txn, settings);
+      await _saveInvoiceSeries(txn, series);
     });
     notifyDatabaseChanged();
   }
@@ -361,6 +479,15 @@ mixin DatabaseSettings {
     InvoiceSeriesSettings settings,
   ) async {
     await _requireAdminMutation();
+    final db = await database;
+    await db.transaction((txn) => _saveInvoiceSeries(txn, settings));
+    notifyDatabaseChanged();
+  }
+
+  Future<void> _saveInvoiceSeries(
+    DatabaseExecutor txn,
+    InvoiceSeriesSettings settings,
+  ) async {
     final template = _normaliseName(settings.formatTemplate);
     final problem = InvoiceNumbering.validate(
       template: template ?? '',
@@ -368,10 +495,19 @@ mixin DatabaseSettings {
       resetPeriod: settings.resetPeriod,
     );
     if (problem != null) throw ArgumentError(problem);
-    final db = await database;
-    await db.transaction((txn) async {
-      final shopId = await _activeShopId(txn);
-      var rows = await txn.query(
+    final shopId = await _activeShopId(txn);
+    var rows = await txn.query(
+      'invoice_series',
+      columns: ['id'],
+      where:
+          'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+      whereArgs: [shopId],
+      orderBy: 'id ASC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      await _seedDefaultInvoiceSeries(txn);
+      rows = await txn.query(
         'invoice_series',
         columns: ['id'],
         where:
@@ -380,35 +516,22 @@ mixin DatabaseSettings {
         orderBy: 'id ASC',
         limit: 1,
       );
-      if (rows.isEmpty) {
-        await _seedDefaultInvoiceSeries(txn);
-        rows = await txn.query(
-          'invoice_series',
-          columns: ['id'],
-          where:
-              'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
-          whereArgs: [shopId],
-          orderBy: 'id ASC',
-          limit: 1,
-        );
-      }
-      if (rows.isEmpty) {
-        throw StateError('No active invoice series is configured');
-      }
-      await txn.update(
-        'invoice_series',
-        {
-          'name': _normaliseName(settings.name) ?? 'Default',
-          'format_template': template,
-          'sequence_padding': settings.sequencePadding.clamp(1, 8),
-          'reset_period': settings.resetPeriod,
-          'updated_at': _nowIso(),
-        },
-        where: 'id = ?',
-        whereArgs: [rows.single['id']],
-      );
-    });
-    notifyDatabaseChanged();
+    }
+    if (rows.isEmpty) {
+      throw StateError('No active invoice series is configured');
+    }
+    await txn.update(
+      'invoice_series',
+      {
+        'name': _normaliseName(settings.name) ?? 'Default',
+        'format_template': template,
+        'sequence_padding': settings.sequencePadding.clamp(1, 8),
+        'reset_period': settings.resetPeriod,
+        'updated_at': _nowIso(),
+      },
+      where: 'id = ?',
+      whereArgs: [rows.single['id']],
+    );
   }
 }
 
@@ -434,4 +557,11 @@ Future<String?> _getSetting(DatabaseExecutor executor, String key) async {
     limit: 1,
   );
   return rows.isEmpty ? null : rows.single['value']?.toString();
+}
+
+/// Frozen persisted configuration values, never serialized into cloud settings.
+class SettingsEditBaseline {
+  final String shopId;
+  final String _snapshot;
+  const SettingsEditBaseline._(this.shopId, this._snapshot);
 }
