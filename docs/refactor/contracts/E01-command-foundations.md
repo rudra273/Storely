@@ -1,8 +1,8 @@
 # E01 command foundations — draft for implementation
 
-Status: overall design remains proposed; [slice 1](E01-slice-1.md) freezes the implemented recovery and decimal boundaries. This document is not a frozen universal wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
+Status: the universal design remains proposed; current implemented boundaries are in [slice 4](E01-slice-4.md) and preceding slices. [Slice 1](E01-slice-1.md) freezes the implemented recovery and decimal boundaries. This document is not a frozen universal wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
 
-## Observed implementation anchors
+## Initial implementation anchors (before the verified slices)
 
 - API purchase receipt requests bind `request_key` to a normalized payload fingerprint; native receipt adoption verifies existing stock movements rather than receiving stock twice (`app/domains/purchases/native_purchases.py`). This is an adoption protocol, not proof that upload of every stock row is atomic.
 - Mobile purchase drafts store UUID/shop/revision, while sale drafts currently persist only cart items. Supplier payments have an explicit pending queue.

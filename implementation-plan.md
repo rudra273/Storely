@@ -95,6 +95,8 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 ### E01 — Shared contracts and financial foundations
 
+**Execution update (19 November 2026):** slices 1–4 are committed and verified; see [current evidence](docs/refactor/evidence/E01/slice-4.md). Durable report-job primitives and per-feature negotiation/product revision guards are implemented. General posting adapters and multirow settings revision handling remain open before closing this phase.
+
 **Dependency:** E00. **Comparison groups:** P0/P2 foundation; P4 interface only.
 
 - API: versioned command envelope, idempotency/result lookup, expected revision, structured errors, transaction boundaries, durable job/outbox/retry infrastructure and posting interface for stock/payments/future journals. Build this generic infrastructure before external reconciliation or restore jobs; calendar scheduling arrives in E14.

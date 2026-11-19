@@ -81,6 +81,44 @@
       "state": "planned",
       "description": "Core local use without account/network.",
       "evidence": null
+    },
+    {
+      "id": "E01-PRODUCT-CAS",
+      "name": "guarded-product-edit",
+      "state": "verified-scoped",
+      "description": "Two guarded server writers cannot both accept one version; browser retains input and explicitly reapplies only dirty fields. Mobile local CAS and tenant guard covered separately.",
+      "evidence": "evidence/E01/slice-4.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-product-revision",
+          "prerequisites": "Current-source localhost/Chromium and run-owned premium product fixture."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_command_capabilities.py",
+          "prerequisites": "Exclusive scratch database window."
+        }
+      ]
+    },
+    {
+      "id": "E01-JOBS",
+      "name": "durable-inventory-report",
+      "state": "verified-scoped",
+      "description": "Enqueue rollback, private artifact, lease/retry/cancel/revocation/expiry/fencing and real dispatcher/restart recovery. No external provider exactly-once claim.",
+      "evidence": "evidence/E01/slice-4.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_background_jobs.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-platform",
+          "prerequisites": "Docker; isolated production stack only."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

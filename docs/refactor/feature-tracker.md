@@ -183,7 +183,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | Phase | State | Blocking prerequisite |
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
-| E01 | implementing | Slices 1–3 verified: recovery/decimal, posting/attempt ownership, allocation-key binding and exact supplier-payment proof; see evidence/E01/summary.md. Emulator/localhost/Docker pass. Durable jobs, revision negotiation and general posting adapters remain open. |
+| E01 | implementing | Slices 1–4 verified, including durable report jobs, shared capabilities and guarded product edits; see evidence/E01/summary.md. Emulator/localhost/Docker pass. Shared posting adapters and aggregate settings revision semantics remain open. |
 | E02 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
