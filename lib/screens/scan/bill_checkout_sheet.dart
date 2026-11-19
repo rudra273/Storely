@@ -623,6 +623,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       CheckboxListTile(
                         key: const ValueKey('checkout-unassigned-consent'),
                         title: const Text('Keep this balance unassigned'),
+                        subtitle: const Text(
+                          'Add a customer with a phone number to put this balance on their account. Unassigned balances can be collected from the invoice.',
+                        ),
                         value: _allowUnassignedCredit,
                         onChanged: (value) => setState(
                           () => _allowUnassignedCredit = value ?? false,

@@ -88,6 +88,12 @@ void main() {
       );
       expect(await tester.runAsync(db.getAllBills), isEmpty);
       await tapVisible(tester, find.text('Partial'));
+      expect(
+        find.textContaining(
+          'Unassigned balances can be collected from the invoice.',
+        ),
+        findsOneWidget,
+      );
       final amount = find.byKey(const ValueKey('checkout-partial-amount'));
       await tester.enterText(amount, '50.000');
       await tapVisible(tester, find.byKey(const ValueKey('checkout-save')));
