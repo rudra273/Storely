@@ -69,3 +69,11 @@ Unknown supplier-payment attempts can use the optional authenticated exact-body 
 The adapter validates contract/version/nullability and rejects malformed responses. Permission/network/conflicting intent retain unknown state and the reservation. Older servers lacking the endpoint allow exact unselected legacy replay; a restored selected-purchase attempt fails closed when target binding cannot be verified. Saved queue/body key mismatch prevents dispatch. Backends without this optional capability remain compatible.
 
 Final coordinator check: analyzer clean; 42 tests passed across purchase API parsing, durable purchase/payment recovery, backup and database upgrades. Real-device broad premium regression is recorded centrally; these focused tests exercise the new proof states explicitly. No SQLite schema or money algorithm changed in this slice.
+
+# E01 slice 4 — guarded local catalog edits
+
+Date: 19 November 2026. The existing mobile purchase draft path already performs revision-checked save/discard/post. Catalog editing did not: `updateProduct` reloaded current stock but unconditionally wrote the editor's older master/quantity snapshot, potentially creating a stale stock-count adjustment.
+
+Added an optional `expectedUpdatedAt` local precondition and wired the catalog editor and bulk-edit entry points to their original loaded timestamp. Guarded writes check the original UUID, active tenant and equal timestamp instant before preparing any rows or stock movements. Rejection uses the existing error handling, so fields/selection remain available for review; no layout or theme change. Existing programmatic callers remain compatible, and no sync wire/schema token is added by this local guard.
+
+Focused inventory + purchase-draft regression: **30 passed**. Cases verify stale edit cannot overwrite the newer name/stock or add a movement; current timestamp in another timezone is accepted; foreign-tenant source is refused; existing purchase-draft conflicts remain safe. Analyzer: clean, no issues. This guard does not claim optimistic concurrency across disconnected devices; server row-sync compatibility remains unchanged.

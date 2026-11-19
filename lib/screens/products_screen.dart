@@ -449,6 +449,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
             changeSupplier: changeSupplier,
             supplier: supplier?.isEmpty == true ? null : supplier,
           ),
+          expectedUpdatedAt: product.updatedAt,
         );
       }
       _clearProductSelection();
@@ -1433,7 +1434,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     return;
                   }
                   if (isEditing) {
-                    await DatabaseHelper.instance.updateProduct(p);
+                    await DatabaseHelper.instance.updateProduct(
+                      p,
+                      expectedUpdatedAt: product.updatedAt,
+                    );
                   } else {
                     await DatabaseHelper.instance.insertProduct(
                       p,

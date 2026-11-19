@@ -93,7 +93,10 @@ mixin DatabaseProducts {
     return result.isEmpty;
   }
 
-  Future<int> updateProduct(Product product) async {
+  Future<int> updateProduct(
+    Product product, {
+    DateTime? expectedUpdatedAt,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
@@ -108,6 +111,15 @@ mixin DatabaseProducts {
       final current = existing.isEmpty
           ? null
           : Product.fromMap(existing.single);
+      if (expectedUpdatedAt != null &&
+          (current == null ||
+              current.uuid != product.uuid ||
+              current.shopId != await _activeShopId(txn) ||
+              !current.updatedAt.isAtSameMomentAs(expectedUpdatedAt))) {
+        throw StateError(
+          'This product changed while you were editing. Your entries are kept; reopen the product before saving.',
+        );
+      }
       final productToUpdate = await _prepareProductForWrite(
         txn,
         product.copyWith(updatedAt: DateTime.now().toUtc()),
