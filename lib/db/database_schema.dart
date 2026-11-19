@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 26,
+      version: 27,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -206,6 +206,13 @@ mixin DatabaseSchema {
   /// every open. Does NOT seed data or create the local shop — that lives in
   /// [_seedBaseData] so it is not repeated needlessly on each launch.
   Future<void> _createCleanSchema(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS checkout_acceptances(
+        attempt_id TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
+        owner TEXT, request_fingerprint TEXT NOT NULL,
+        bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL
+      )
+    ''');
     await _createShopTables(executor);
     await _createSettingsTable(executor);
     await _createBillSettingsTable(executor);

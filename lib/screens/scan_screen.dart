@@ -13,6 +13,9 @@ import '../services/app_log.dart';
 import '../services/bill_share.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
+import '../models/checkout_settlement.dart';
+import '../utils/decimal_text.dart';
+import 'package:uuid/uuid.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
 import '../models/held_bill.dart';
@@ -122,7 +125,21 @@ class _ScanScreenState extends State<ScanScreen> {
     _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
   }
 
+  Future<void>? _draftWrite;
+
   Future<void> _saveDraftNow() async {
+    final pending = _draftWrite;
+    if (pending != null) await pending;
+    final write = _writeDraftNow();
+    _draftWrite = write;
+    try {
+      await write;
+    } finally {
+      if (identical(_draftWrite, write)) _draftWrite = null;
+    }
+  }
+
+  Future<void> _writeDraftNow() async {
     final encoded = HeldBill.encodeItems(_items);
     if (encoded == _savedDraft) return;
     final previous = _savedDraft;
@@ -460,103 +477,32 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  Future<({int id, BillTotals totals})?> _completeBill({
-    required String customerName,
-    required String? customerPhone,
-    required String billType,
-    required String? customerGstin,
-    required String? customerGstLegalName,
-    required String? customerGstTradeName,
-    required String? customerAddress,
-    required String? placeOfSupplyStateCode,
-    required double discountPercent,
-    required double paidAmount,
-    required String paymentMethod,
-    String? transactionReference,
-  }) async {
-    if (_items.isEmpty) return null;
-    if (_isSavingBill) return null;
-
-    setState(() => _isSavingBill = true);
-    final percent = discountPercent.clamp(0, 100).toDouble();
-    final shop = await DatabaseHelper.instance.getShopProfile();
-    final settings = await DatabaseHelper.instance.getBillSettings();
-    final gstRegistered = shop?.gstRegistered ?? false;
-    final shopStateCode = _stateCodeFromGstin(shop?.gstin);
-    final supplyStateCode =
-        _cleanStateCode(placeOfSupplyStateCode) ??
-        _stateCodeFromGstin(customerGstin);
-    final interState =
-        gstRegistered &&
-        shopStateCode != null &&
-        supplyStateCode != null &&
-        shopStateCode != supplyStateCode;
-    final itemCopies = _items
-        .map(
-          (item) => BillTotals.taxedItem(
-            item,
-            discountPercent: percent,
-            gstRegistered: gstRegistered,
-            interState: interState,
-          ),
-        )
-        .toList();
-    final totals = BillTotals.fromTaxedItems(
-      itemCopies,
-      roundOff: settings.roundOffTotal,
-    );
-    final total = totals.grandTotal;
-    final received = paidAmount.clamp(0, total).toDouble();
-
-    final bill = Bill(
-      billType: billType,
-      customerName: customerName.trim().isEmpty
-          ? 'Walk-in Customer'
-          : customerName.trim(),
-      customerPhone: _cleanOptionalText(customerPhone),
-      customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
-      customerGstLegalName: _cleanOptionalText(customerGstLegalName),
-      customerGstTradeName: _cleanOptionalText(customerGstTradeName),
-      customerAddressSnapshot: _cleanOptionalText(customerAddress),
-      placeOfSupplyStateCode: supplyStateCode,
-      subtotalAmount: totals.subtotal,
-      discountPercent: percent,
-      discountAmount: totals.discountAmount,
-      taxableAmount: totals.taxableAmount,
-      cgstAmount: totals.cgstAmount,
-      sgstAmount: totals.sgstAmount,
-      igstAmount: totals.igstAmount,
-      roundOffAmount: totals.roundOffAmount,
-      totalAmount: total,
-      itemCount: _itemCount,
-      isPaid: received >= total - 0.005,
-      paymentMethod: paymentMethod,
-      paidAmount: received,
-      transactionReference: transactionReference,
-      duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
-    );
-
-    try {
-      final id = await DatabaseHelper.instance.insertBill(bill, itemCopies);
-      return (id: id, totals: totals);
-    } finally {
-      if (mounted) setState(() => _isSavingBill = false);
-    }
-  }
-
   Future<void> _openBillSheet() async {
     if (_items.isEmpty || _isOpeningBillSheet || _isSavingBill) return;
     _isOpeningBillSheet = true;
     try {
       await _runBillCheckout();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       _isOpeningBillSheet = false;
     }
   }
 
   Future<void> _runBillCheckout() async {
+    _draftTimer?.cancel();
+    await _saveDraftNow();
+    final device = await DatabaseHelper.instance.localDeviceId();
+    var baseline = await DatabaseHelper.instance.captureSettingsEditBaseline();
+    final owner = await DatabaseHelper.instance.getCloudSyncState(
+      'preference_owner',
+    );
+    var shop = await DatabaseHelper.instance.getShopProfile();
     final customers = await DatabaseHelper.instance.getAllCustomers();
-    final settings = await DatabaseHelper.instance.getBillSettings();
+    var settings = await DatabaseHelper.instance.getBillSettings();
     if (!mounted) return;
     final cartItems = List<BillItem>.of(_items);
     // GST-inclusive prices: the payable total does not depend on GST
@@ -569,38 +515,160 @@ class _ScanScreenState extends State<ScanScreen> {
       roundOff: settings.roundOffTotal,
     );
 
+    var attemptId = const Uuid().v4();
+    Bill? frozenBill;
+    List<BillItem>? frozenItems;
+    BillTotals? frozenTotals;
+    Future<({int id, BillTotals totals})> save(_BillDraft draft) async {
+      if (_isSavingBill) throw StateError('Checkout save already in progress.');
+      if (mounted) setState(() => _isSavingBill = true);
+      try {
+        if (frozenBill == null) {
+          final customerName = draft.customerName;
+          final customerPhone = draft.customerPhone;
+          final billType = draft.billType;
+          final customerGstin = draft.customerGstin;
+          final customerGstLegalName = draft.customerGstLegalName;
+          final customerGstTradeName = draft.customerGstTradeName;
+          final customerAddress = draft.customerAddress;
+          final placeOfSupplyStateCode = draft.placeOfSupplyStateCode;
+          final discountPercent = draft.discountPercent;
+          final paidAmount = draft.paidAmount;
+          final paymentMethod = draft.paymentMethod;
+          final transactionReference = draft.transactionReference;
+          final percent = discountPercent;
+          final gstRegistered = shop?.gstRegistered ?? false;
+          final shopStateCode = _stateCodeFromGstin(shop?.gstin);
+          final supplyStateCode =
+              _cleanStateCode(placeOfSupplyStateCode) ??
+              _stateCodeFromGstin(customerGstin);
+          final interState =
+              gstRegistered &&
+              shopStateCode != null &&
+              supplyStateCode != null &&
+              shopStateCode != supplyStateCode;
+          final itemCopies = cartItems
+              .map(
+                (item) => BillTotals.taxedItem(
+                  item,
+                  discountPercent: percent,
+                  gstRegistered: gstRegistered,
+                  interState: interState,
+                ),
+              )
+              .toList();
+          final totals = BillTotals.fromTaxedItems(
+            itemCopies,
+            roundOff: settings.roundOffTotal,
+          );
+          final total = totals.grandTotal;
+          final received = paidAmount;
+
+          final bill = Bill(
+            uuid: const Uuid().v4(),
+            shopId: baseline.shopId,
+            billType: billType,
+            customerName: customerName.trim().isEmpty
+                ? 'Walk-in Customer'
+                : customerName.trim(),
+            customerPhone: _cleanOptionalText(customerPhone),
+            customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
+            customerGstLegalName: _cleanOptionalText(customerGstLegalName),
+            customerGstTradeName: _cleanOptionalText(customerGstTradeName),
+            customerAddressSnapshot: _cleanOptionalText(customerAddress),
+            placeOfSupplyStateCode: supplyStateCode,
+            subtotalAmount: totals.subtotal,
+            discountPercent: percent,
+            discountAmount: totals.discountAmount,
+            taxableAmount: totals.taxableAmount,
+            cgstAmount: totals.cgstAmount,
+            sgstAmount: totals.sgstAmount,
+            igstAmount: totals.igstAmount,
+            roundOffAmount: totals.roundOffAmount,
+            totalAmount: total,
+            itemCount: _itemCount,
+            isPaid: received >= total - 0.005,
+            paymentMethod: paymentMethod,
+            paidAmount: received,
+            transactionReference: transactionReference,
+            duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
+          );
+
+          if (decimalScaledInteger(total.toStringAsFixed(2), scale: 2) !=
+              decimalScaledInteger(
+                totalsFor(percent).grandTotal.toStringAsFixed(2),
+                scale: 2,
+              )) {
+            throw StateError(
+              'Reviewed total changed. Return to the cart and review checkout again.',
+            );
+          }
+          frozenBill = bill;
+          frozenItems = itemCopies;
+          frozenTotals = totals;
+        }
+        final id = await DatabaseHelper.instance.insertReviewedCheckout(
+          attemptId: attemptId,
+          expectedShopId: baseline.shopId,
+          expectedOwner: owner,
+          baseline: baseline,
+          cartSnapshot: HeldBill.encodeItems(cartItems),
+          originDeviceId: device,
+          bill: frozenBill!,
+          items: frozenItems!,
+        );
+        return (id: id, totals: frozenTotals!);
+      } finally {
+        if (mounted) setState(() => _isSavingBill = false);
+      }
+    }
+
     try {
-      final draft = await showModalBottomSheet<_BillDraft>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: AppColors.surfaceOf(context),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (_) => _BillCheckoutSheet(
-          customers: customers,
-          totalsFor: totalsFor,
-          itemCount: _itemCount,
-          initialBill: widget.duplicateFromBill,
-        ),
-      );
-      if (draft == null) return;
-      final saved = await _completeBill(
-        customerName: draft.customerName,
-        customerPhone: draft.customerPhone,
-        billType: draft.billType,
-        customerGstin: draft.customerGstin,
-        customerGstLegalName: draft.customerGstLegalName,
-        customerGstTradeName: draft.customerGstTradeName,
-        customerAddress: draft.customerAddress,
-        placeOfSupplyStateCode: draft.placeOfSupplyStateCode,
-        discountPercent: draft.discountPercent,
-        paidAmount: draft.paidAmount,
-        paymentMethod: draft.paymentMethod,
-        transactionReference: draft.transactionReference,
-      );
-      if (saved == null || !mounted) return;
+      final completed =
+          await showModalBottomSheet<
+            ({_BillDraft draft, int id, BillTotals totals})
+          >(
+            context: context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            backgroundColor: AppColors.surfaceOf(context),
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            builder: (_) => _BillCheckoutSheet(
+              customers: customers,
+              onSave: save,
+              onReview: () async {
+                final next = await DatabaseHelper.instance
+                    .captureSettingsEditBaseline();
+                if (next.shopId != baseline.shopId ||
+                    await DatabaseHelper.instance.getCloudSyncState(
+                          'preference_owner',
+                        ) !=
+                        owner) {
+                  throw StateError(
+                    'Return to the original shop and account before reviewing.',
+                  );
+                }
+                final nextShop = await DatabaseHelper.instance.getShopProfile();
+                final nextSettings = await DatabaseHelper.instance
+                    .getBillSettings();
+                baseline = next;
+                shop = nextShop;
+                settings = nextSettings;
+                frozenBill = null;
+                frozenItems = null;
+                frozenTotals = null;
+                attemptId = const Uuid().v4();
+              },
+              totalsFor: totalsFor,
+              itemCount: _itemCount,
+              initialBill: widget.duplicateFromBill,
+            ),
+          );
+      if (completed == null || !mounted) return;
+      final draft = completed.draft;
+      final saved = completed;
       final totalAmount = saved.totals.grandTotal;
       final itemCount = _itemCount;
       // The bill is saved: empty the cart now so no path back to this screen

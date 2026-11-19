@@ -1,5 +1,17 @@
 {
-  "version": 5,
+  "version": 6,
+  "local_checkout_acceptance": {
+    "table": "checkout_acceptances",
+    "policy": "Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.",
+    "fields": [
+      "attempt_id",
+      "shop_id",
+      "owner",
+      "request_fingerprint",
+      "bill_id",
+      "bill_uuid"
+    ]
+  },
   "local_payment_tables": {
     "supplier_payment_queue": {
       "fields": {
@@ -2035,7 +2047,8 @@
   "device_only_tables": [
     "cloud_sync_state",
     "purchase_drafts",
-    "supplier_payment_queue"
+    "supplier_payment_queue",
+    "checkout_acceptances"
   ],
   "server_managed_public_tables": {
     "shop_members": "Membership and roles via authenticated API",

@@ -10,6 +10,131 @@ mixin DatabaseBills {
     int productId,
   );
 
+  Future<void> _assertSettingsBaseline(
+    DatabaseExecutor txn,
+    SettingsEditBaseline? baseline,
+  );
+
+  /// Local checkout only. Acceptance and invoice effects share one transaction.
+  /// A retry must carry the original immutable request, even after settings drift.
+  Future<int> insertReviewedCheckout({
+    required String attemptId,
+    required String expectedShopId,
+    required String? expectedOwner,
+    required SettingsEditBaseline baseline,
+    required String cartSnapshot,
+    required String originDeviceId,
+    required Bill bill,
+    required List<BillItem> items,
+  }) async {
+    if (attemptId.isEmpty || bill.uuid.isEmpty) {
+      throw ArgumentError('Missing checkout identity');
+    }
+    final totalPaise = decimalScaledInteger(
+      bill.totalAmount.toString(),
+      scale: 2,
+    );
+    final paidPaise = decimalScaledInteger(
+      bill.paidAmount.toString(),
+      scale: 2,
+    );
+    if (totalPaise < BigInt.zero ||
+        paidPaise < BigInt.zero ||
+        paidPaise > totalPaise ||
+        totalPaise > BigInt.from(99999999900)) {
+      throw const FormatException('Invalid checkout settlement amount.');
+    }
+    if (items.any(
+      (item) => item.shopId.isNotEmpty && item.shopId != expectedShopId,
+    )) {
+      throw StateError('Checkout items belong to another shop.');
+    }
+    final fingerprint = sha256
+        .convert(
+          utf8.encode(
+            jsonEncode({
+              'bill': bill.toMap(),
+              'reference': bill.transactionReference,
+              'cart': cartSnapshot,
+              'device': originDeviceId,
+              'items': items.map((item) => item.toMap(0)).toList(),
+            }),
+          ),
+        )
+        .toString();
+    final db = await database;
+    return db.transaction((txn) async {
+      final owners = await txn.query(
+        'cloud_sync_state',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: ['preference_owner'],
+      );
+      final owner = owners.isEmpty ? null : owners.single['value'];
+      if (await _activeShopId(txn) != expectedShopId ||
+          owner != expectedOwner ||
+          baseline.shopId != expectedShopId ||
+          bill.shopId != expectedShopId) {
+        throw StateError(
+          'Checkout shop or account changed. Return to the original shop to retry.',
+        );
+      }
+      final accepted = await txn.query(
+        'checkout_acceptances',
+        where: 'attempt_id = ?',
+        whereArgs: [attemptId],
+      );
+      if (accepted.isNotEmpty) {
+        final row = accepted.single;
+        if (row['shop_id'] != expectedShopId ||
+            row['owner'] != expectedOwner ||
+            row['request_fingerprint'] != fingerprint) {
+          throw StateError('Checkout retry differs from the original request.');
+        }
+        final invoice = await txn.query(
+          'bills',
+          columns: ['id'],
+          where: 'id = ? AND uuid = ? AND shop_id = ?',
+          whereArgs: [row['bill_id'], row['bill_uuid'], expectedShopId],
+        );
+        if (invoice.isEmpty) {
+          throw StateError(
+            'Saved checkout invoice is missing. Restore the complete original database before retrying.',
+          );
+        }
+        return row['bill_id'] as int;
+      }
+      try {
+        await _assertSettingsBaseline(txn, baseline);
+      } on StateError {
+        throw const CheckoutReviewChanged();
+      }
+      final id = await _insertBillTxn(txn, bill, items);
+      final now = _nowIso();
+      await txn.update(
+        'held_bills',
+        {'deleted_at': now, 'updated_at': now},
+        where:
+            "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND ${expectedOwner == null ? 'owner_user_id IS NULL' : 'owner_user_id = ?'} AND items_json = ? AND deleted_at IS NULL",
+        whereArgs: [
+          expectedShopId,
+          originDeviceId,
+          ?expectedOwner,
+          cartSnapshot,
+        ],
+      );
+      await txn.insert('checkout_acceptances', {
+        'attempt_id': attemptId,
+        'shop_id': expectedShopId,
+        'owner': expectedOwner,
+        'request_fingerprint': fingerprint,
+        'bill_id': id,
+        'bill_uuid': bill.uuid,
+      });
+      return id;
+    });
+  }
+
   Future<int> insertBill(Bill bill, List<BillItem> items) async {
     final db = await database;
     return db.transaction((txn) => _insertBillTxn(txn, bill, items));
@@ -1712,4 +1837,12 @@ String? _normaliseCustomerPhone(Object? value) {
   if (digits == null || digits.isEmpty || digits == '91') return null;
   if (digits.length == 10) return '91$digits';
   return digits;
+}
+
+/// Definitive precommit rejection; no invoice effects were attempted.
+class CheckoutReviewChanged implements Exception {
+  const CheckoutReviewChanged();
+  @override
+  String toString() =>
+      'Shop settings changed. Your entries are kept; close checkout and review again before saving.';
 }

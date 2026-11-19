@@ -30,6 +30,7 @@ void main() {
         'purchase_documents',
         'purchase_drafts',
         'supplier_payment_queue',
+        'checkout_acceptances',
       },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
@@ -185,8 +186,34 @@ void main() {
       )).map((c) => c['name']).toSet(),
       paymentFields.keys.toSet(),
     );
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(checkout_acceptances)',
+      )).map((column) => column['name']).toSet(),
+      {
+        'attempt_id',
+        'shop_id',
+        'owner',
+        'request_fingerprint',
+        'bill_id',
+        'bill_uuid',
+      },
+    );
     final result = {
-      'version': 5,
+      'version': 6,
+      'local_checkout_acceptance': {
+        'table': 'checkout_acceptances',
+        'policy':
+            'Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.',
+        'fields': [
+          'attempt_id',
+          'shop_id',
+          'owner',
+          'request_fingerprint',
+          'bill_id',
+          'bill_uuid',
+        ],
+      },
       'local_payment_tables': {
         'supplier_payment_queue': {'fields': paymentFields},
       },
@@ -223,6 +250,7 @@ void main() {
         'cloud_sync_state',
         'purchase_drafts',
         'supplier_payment_queue',
+        'checkout_acceptances',
       ],
       'server_managed_public_tables': {
         'shop_members': 'Membership and roles via authenticated API',
