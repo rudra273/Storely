@@ -95,7 +95,7 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 ### E01 — Shared contracts and financial foundations
 
-**Execution update (19 November 2026):** slices 1–5 are committed and verified; see [current evidence](docs/refactor/evidence/E01/slice-5.md). Durable jobs, negotiated guarded edits, shared posting adapters and multirow settings revisions are implemented. The closing command/default/precision/fixture acceptance audit remains before marking E01 complete and starting E02.
+**Execution update (19 November 2026):** foundation scope accepted; slices 1–5 and the [closing audit](docs/refactor/evidence/E01/closing-audit.md) are verified. The [accepted compatibility contract](docs/refactor/contracts/E01-command-foundations.md) maps existing routes and negotiated versions; no universal replacement endpoint is claimed. Independent money fixtures, recovery safety and existing-data compatibility passed final API/mobile/web, localhost, emulator and Docker checks. E02 is ready to implement.
 
 **Dependency:** E00. **Comparison groups:** P0/P2 foundation; P4 interface only.
 
@@ -111,6 +111,8 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 ### E02 — Current flow parity and recoverable drafts
 
 **Dependency:** E01. **Comparison groups:** P1.
+
+**Next assignment:** [E02.1 settlement and checkout validation](docs/refactor/contracts/E02-slice-1.md). Code inspection confirms paid-default, partial-validation, unassigned-credit and checkout-state differences. Implementation has not started; E02 exit remains open.
 
 - API: expose/validate shared settings and capability responses where necessary; preserve existing account/security and entitlement behavior.
 - Mobile: unified sale steps and explicit payment choice, complete checkout draft persistence, hold/resume/discard, safe child-editor return, validation/focus/error states.

@@ -18,6 +18,11 @@
     {
       "id": "valuation",
       "purpose": "Quantity 10; purchase 100; GST 18%; overhead 5; unregistered; compare current 1000/1230 valuation difference without altering historical invoices."
+    },
+    {
+      "id": "independent-financial-v1",
+      "purpose": "Twelve manually derived decimal examples; identical API/mobile fixture bytes. No expectations generated from application calculators.",
+      "sha256": "f08e95e14feb65800b19065b1ca46b0f3a5e8d41661831e2f7fcc4ee26abbf60"
     }
   ],
   "scenarios": [
@@ -32,9 +37,9 @@
       "id": "E2E-02",
       "name": "cross-client-roundtrip",
       "state": "partially_verified",
-      "description": "Web invoice → mobile pull → mobile payment/return → web.",
+      "description": "Web invoice \u2192 mobile pull \u2192 mobile payment/return \u2192 web.",
       "evidence": "evidence/E01/summary.md",
-      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice → mobile payment/return → browser flow remains open.",
+      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice \u2192 mobile payment/return \u2192 browser flow remains open.",
       "checks": [
         {
           "repository": "storelyapi",
@@ -160,6 +165,25 @@
           "repository": "storelyapi",
           "command": "bash scripts/integration-tests.sh tests/test_posting_adapters.py",
           "prerequisites": "Exclusive scratch database window."
+        }
+      ]
+    },
+    {
+      "id": "E01-FIN-01",
+      "name": "independent-financial-expectations",
+      "state": "verified",
+      "description": "API Decimal and legacy mobile calculator match twelve independent expected totals; public sale rejects signed negative quantity.",
+      "evidence": "evidence/E01/closing-audit.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "pytest tests/test_financial_contract.py",
+          "prerequisites": "Pinned API Docker runtime; no database required."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test test/independent_financial_contract_test.dart",
+          "prerequisites": "Flutter toolchain."
         }
       ]
     }

@@ -1,6 +1,6 @@
 # Mobile financial/defaults audit for E01 closure
 
-Date: 19 November 2026. Scope: inspection and an independent shared-fixture test; no calculator, UI or default behavior changes.
+Date: 19 November 2026. Scope: independent shared-fixture tests and a compatibility-only paper-value preservation fix; no calculator, UI or default behavior changes.
 
 ## Observed defaults
 
@@ -13,7 +13,7 @@ Date: 19 November 2026. Scope: inspection and an independent shared-fixture test
 | Payment choice | Checkout initializes paid-in-full and cash; web initializes payment selection null and asks explicitly. | Known E02 parity decision remains open. Recommended shared target: explicit payment choice, with a deliberate shared default setting if desired. No behavior changed by this audit. |
 | Regular invoice paper | `BillSettings` defaults A4, supports A5. | Existing regular-paper default. |
 | Thermal device paper | `ThermalPrinterService` defaults 58 mm from a device-local preference. | Separate printer capability/configuration from regular document paper; not evidence all print defaults agree. |
-| Thermal settings round trip | Mobile `BillSettings.fromMap` preserves only A5 specially and coerces every other paper value to A4. Web/API also support 80 mm and 58 mm. | Existing E12 adapter gap: a mobile settings save can replace a valid web thermal value with A4. New settings CAS compares persisted rows but does not make a lossy model projection lossless. Must resolve before claiming print/settings parity. |
+| Thermal settings round trip | Commit d68e00b preserves valid persisted 80 mm/58 mm metadata through unrelated copies and saves; existing UI projection remains A4/A5. Explicit paper choice replaces the raw value. | Accidental overwrite fixed; thermal rendering and UI parity remain E12. |
 | Numbering | `INV/{FY}/{SEQ}`, financial-year reset, padding 4; existing per-device allocation semantics. | Preserve identity/history; scope and manual override extensions belong to their implementation phase. |
 | Invoice title/output flags | Model title `TAX INVOICE`; rendering uses registration-specific titles; most visibility flags true, signature false, terms/bank/UPI blank. | Do not confuse a model's title string with authority to issue a tax invoice. Output parity remains separately verified. |
 
@@ -30,3 +30,7 @@ Verification results will be appended after the root-owned fixture is available.
 `flutter test test/independent_financial_contract_test.dart`: **13 passed** (12 cases plus fixture-integrity check). `flutter analyze`: clean, no issues. Logs: `/tmp/storely-mobile-e01-independent-tests.log` and `/tmp/storely-mobile-e01-independent-analyze.log`. Shared fixture bytes were checked equal to the API copy; expected literals were not regenerated or changed.
 
 Affected paper path: `BillSettingsScreen._load` → `DatabaseHelper.getBillSettings` → `BillSettings.fromMap`, with persisted `paper_size` equal to `80mm` or `58mm`, loads an in-memory A4 projection. `_save` copies that model when editing a title/footer and `saveInvoiceSettings` persists its A4 `paper_size`. The frozen baseline still matches the original persisted row, so CAS correctly detects no concurrent writer but cannot detect that the model discarded an existing supported value. Preserve this finding for E12 and fix representation/round-trip behavior explicitly; do not describe the current aggregate guard as solving it. This audit did not change the existing paper behavior.
+
+## Compatibility fix verified
+
+Commit `d68e00b` fixes the data-loss path identified above: valid persisted 80mm/58mm survives load → unrelated title/footer edit → guarded save/reopen. Explicit A4/A5 selection clears preserved metadata, including A4-to-A4; malformed values retain the old fallback. Fifteen focused tests and analyzer pass. This supersedes the earlier unchanged-paper finding; native thermal rendering/UI remains E12.
