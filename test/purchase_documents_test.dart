@@ -114,6 +114,44 @@ class ReceiptServer extends FakeSyncBackend
   }
 }
 
+class RecoveringReceiptServer extends ReceiptServer
+    implements SupplierPaymentRecoveryBackend {
+  int recoveryCalls = 0;
+  int publishCalls = 0;
+  Object? recoveryError;
+  bool unsupported = false;
+
+  @override
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    publishCalls++;
+    return super.publishSupplierPayment(shopId, supplierId, payment);
+  }
+
+  @override
+  Future<SupplierPaymentRecovery> recoverSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    recoveryCalls++;
+    if (recoveryError != null) throw recoveryError!;
+    if (unsupported) return const SupplierPaymentRecovery.unsupported();
+    final stored = paymentRequests[payment['request_key']];
+    if (stored == null) return const SupplierPaymentRecovery.notFound();
+    if (jsonEncode(stored) != jsonEncode(payment)) {
+      throw const SyncRowRejected(
+        'Request identity mismatch',
+        isConflict: true,
+      );
+    }
+    return SupplierPaymentRecovery.committed(payment['request_key'] as String);
+  }
+}
+
 void main() {
   final db = DatabaseHelper.instance;
   const files = ['purchase-a.db', 'purchase-b.db'];
@@ -438,6 +476,172 @@ void main() {
         (await db.pendingSupplierPayments()).single['command_state'],
         'unknown',
       );
+    },
+  );
+
+  for (final fallback in [false, true]) {
+    test(
+      'unknown payment ${fallback ? 'older-backend replay' : 'bound proof'} reconciles exactly once',
+      () async {
+        await purchase();
+        await db.saveSupplierProfile(SupplierProfile(name: 'Recovery vendor'));
+        final supplier = (await db.getSupplierProfiles()).single.uuid;
+        final server = RecoveringReceiptServer()
+          ..memberShopId = await db.currentShopId();
+        final engine = CloudSyncEngine(
+          backend: server,
+          database: db,
+          knownIsAdmin: true,
+        );
+        await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+        final receipt = server.documents.keys.single;
+        server.documents[receipt] = {
+          ...server.documents[receipt]!,
+          'supplier_uuid': supplier,
+          'total': '10.00',
+          'balance_due': '10.00',
+          'payment_status': 'unpaid',
+          'change_sequence': 2,
+        };
+        await engine.sync();
+        await db.queueSupplierPayment(supplier, '4', 'cash', '2026-10-01');
+        final payload = (await db.pendingSupplierPayments()).single['payload'];
+        server.dropPaymentAck = true;
+        await expectLater(engine.sync(), throwsStateError);
+        await db.close();
+        server.recoveryError = StateError('Lookup unavailable');
+        await expectLater(engine.sync(), throwsStateError);
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        expect((await db.supplierAccounting(supplier))['balance'], '6.00');
+        server.recoveryError = const SyncRowRejected('No permission');
+        final denied = await engine.sync();
+        expect(
+          denied.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+          isTrue,
+        );
+        expect(server.publishCalls, 1);
+        expect((await db.pendingSupplierPayments()).single['payload'], payload);
+        // The current receipt feed may include the payment while identity is still unknown.
+        expect((await db.supplierAccounting(supplier))['balance'], '2.00');
+        server.recoveryError = const FormatException(
+          'Malformed recovery proof',
+        );
+        await expectLater(engine.sync(), throwsFormatException);
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        server.recoveryError = const SyncRowRejected(
+          'Request identity conflict',
+          isConflict: true,
+        );
+        final conflict = await engine.sync();
+        expect(
+          conflict.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+          isTrue,
+        );
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        server.recoveryError = null;
+        server.unsupported = fallback;
+        await engine.sync();
+        final row = (await (await db.database).query(
+          'supplier_payment_queue',
+        )).single;
+        expect(row['command_state'], 'accepted');
+        expect(row['payload'], payload);
+        expect(server.publishCalls, fallback ? 2 : 1);
+        expect(server.paymentRequests.length, 1);
+        expect((await db.supplierAccounting(supplier))['balance'], '6.00');
+      },
+    );
+  }
+
+  test(
+    'unknown request with no committed proof retries its original identity',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'No-result vendor'));
+      final supplier = (await db.getSupplierProfiles()).single.uuid;
+      final server = RecoveringReceiptServer()
+        ..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final receipt = server.documents.keys.single;
+      server.documents[receipt] = {
+        ...server.documents[receipt]!,
+        'supplier_uuid': supplier,
+        'total': '10.00',
+        'balance_due': '10.00',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      await db.queueSupplierPayment(supplier, '4', 'cash', '2026-10-01');
+      final queued = (await db.pendingSupplierPayments()).single;
+      final shop = await db.currentShopId();
+      await db.beginSupplierPaymentAttempt(
+        queued['request_key'] as String,
+        shopId: shop,
+      );
+      await db.close(); // Interrupted before the server ever saw the request.
+      final reopened = await db.database;
+      await reopened.update('supplier_payment_queue', {
+        'payload': jsonEncode({
+          ...jsonDecode(queued['payload'] as String) as Map,
+          'request_key': 'wrong-saved-key',
+        }),
+      });
+      await expectLater(engine.sync(), throwsFormatException);
+      expect(server.recoveryCalls, 0);
+      expect(server.publishCalls, 0);
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
+      );
+      await reopened.update('supplier_payment_queue', {
+        'payload': jsonEncode({
+          ...jsonDecode(queued['payload'] as String) as Map,
+          'purchase_uuid': receipt,
+        }),
+      });
+      final legacy = ReceiptServer()..memberShopId = shop;
+      legacy.documents.addAll(server.documents);
+      final legacyEngine = CloudSyncEngine(backend: legacy, database: db, knownIsAdmin: true);
+      await expectLater(legacyEngine.sync(), throwsStateError);
+      expect(legacy.paymentRequests, isEmpty);
+      server.unsupported = true;
+      await expectLater(engine.sync(), throwsStateError);
+      expect(server.publishCalls, 0);
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
+      );
+      await reopened.update('supplier_payment_queue', {
+        'payload': queued['payload'],
+      });
+      server.unsupported = false;
+      await engine.sync();
+      expect(server.recoveryCalls, 2);
+      expect(server.publishCalls, 1);
+      expect(server.paymentRequests.keys.single, queued['request_key']);
+      expect(
+        jsonEncode(server.paymentRequests.values.single),
+        queued['payload'],
+      );
+      expect((await db.supplierAccounting(supplier))['balance'], '6.00');
     },
   );
 

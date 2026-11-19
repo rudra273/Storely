@@ -61,3 +61,11 @@ Unknown/conflict requests continue reserving their amounts so a user cannot issu
 - Contract field inventory classified the new fields as local-only; parent coordinator regenerates/reviews both fixture copies before combined contract acceptance.
 
 Logs: `/tmp/storely-mobile-e01-state-tests.log`, `/tmp/storely-mobile-e01-state-analyze.log`, `/tmp/storely-mobile-e01-v26-migration.log`. No emulator or shared Docker service was used by this lane. Parent owns the premium emulator regression and overall E01 status.
+
+## Slice 3 — exact-attempt recovery proof (19 November 2026)
+
+Unknown supplier-payment attempts can use the optional authenticated exact-body recovery endpoint before replay. A committed proof records the verified UUID without another payment POST; not-found retries the original request. This removes the temporary double reservation once the matching payment is known. The key-only lookup is not accepted as body equivalence.
+
+The adapter validates contract/version/nullability and rejects malformed responses. Permission/network/conflicting intent retain unknown state and the reservation. Older servers lacking the endpoint allow exact unselected legacy replay; a restored selected-purchase attempt fails closed when target binding cannot be verified. Saved queue/body key mismatch prevents dispatch. Backends without this optional capability remain compatible.
+
+Final coordinator check: analyzer clean; 42 tests passed across purchase API parsing, durable purchase/payment recovery, backup and database upgrades. Real-device broad premium regression is recorded centrally; these focused tests exercise the new proof states explicitly. No SQLite schema or money algorithm changed in this slice.

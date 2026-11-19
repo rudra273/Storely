@@ -262,13 +262,50 @@ class CloudSyncEngine {
           continue;
         }
         try {
-          final result = await payments.publishSupplierPayment(
-            shopId,
-            payment['supplier_uuid'] as String,
-            Map<String, dynamic>.from(
-              jsonDecode(payment['payload'] as String) as Map,
-            ),
+          final supplierId = payment['supplier_uuid'] as String;
+          final payload = Map<String, dynamic>.from(
+            jsonDecode(payment['payload'] as String) as Map,
           );
+          if (payment['shop_id'] != shopId ||
+              supplierId.trim().isEmpty ||
+              payload['request_key'] != key) {
+            throw const FormatException(
+              'Saved payment identity does not match its queue record',
+            );
+          }
+          String? recoveredUuid;
+          if (previouslyUnknown && payload['purchase_uuid'] != null &&
+              transport is! SupplierPaymentRecoveryBackend) {
+            throw StateError('This server cannot verify the selected purchase for this saved payment.');
+          }
+          if (previouslyUnknown &&
+              transport is SupplierPaymentRecoveryBackend) {
+            final recovery = await (transport as SupplierPaymentRecoveryBackend)
+                .recoverSupplierPayment(shopId, supplierId, payload);
+            if (recovery.status == SupplierPaymentRecoveryStatus.unsupported &&
+                payload['purchase_uuid'] != null) {
+              throw StateError(
+                'This server cannot verify the selected purchase for this saved payment.',
+              );
+            }
+            if (recovery.status == SupplierPaymentRecoveryStatus.committed) {
+              recoveredUuid = recovery.uuid;
+              if (recoveredUuid == null ||
+                  recoveredUuid.trim().isEmpty ||
+                  recoveredUuid != recoveredUuid.trim()) {
+                throw const FormatException(
+                  'Missing recovered payment identity',
+                );
+              }
+            }
+          }
+          final result = recoveredUuid == null
+              ? await payments.publishSupplierPayment(
+                  shopId,
+                  supplierId,
+                  payload,
+                )
+              : {'uuid': recoveredUuid};
           await database.setSupplierPaymentSync(
             key,
             shopId: shopId,
