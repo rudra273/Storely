@@ -1,6 +1,6 @@
 # E02.1 — explicit settlement and checkout validation
 
-Status: planned; code inspection completed 19 November 2026. Dependency: accepted E01 contracts and closing evidence. Preserve theme, navigation shell and free offline operation. This is the first implementation assignment after E01, not a claim that E02 is implemented.
+Status: implemented and verified, 20 November 2026; [acceptance evidence](../evidence/E02/slice-1.md). Initial code inspection completed 19 November 2026. Dependency: accepted E01 contracts and closing evidence. Preserve theme, navigation shell and free offline operation. This is the first implementation assignment after E01; phase acceptance remains open.
 
 ## Confirmed current differences
 
@@ -26,3 +26,12 @@ Mobile lane owns checkout validation/state handoff and tests in `lib/screens/sca
 - Coordinator runs equivalent fixture on localhost and emulator, capturing actual steps/validation/posted totals. Human UX acceptance remains E18.
 
 Full persisted checkout schema, held-cart lifecycle, relaunch recovery and tenant-scoped draft migration are E02.2. Catalog/account/locale parity is E02.3. Do not mark E02 complete after settlement alone; its phase exit includes paired recovery, tenant/role switching and failed-save preservation.
+
+
+## Accepted implementation decisions
+
+API preview emits an opaque `reviewed_context` with format `br1:<64 lowercase hex>`. New create requests carry both that token and `settlement_choice` (`full`, `partial`, `unpaid`); either field without the other is invalid. The server recomputes the public priced snapshot under its settings/stock transaction guards before financial writes. A different reviewed snapshot returns `409 checkout_changed`; exact settlement mismatch returns `422 settlement_amount`. Committed exact replay resolves before current-context comparison. The fingerprint is a consistency guard, not an authorization credential.
+
+Both fields omitted/null retain historical request hashing and legacy behavior. New clients require a valid preview token, but restored old uncertain commands replay their exact old body. A fresh definitive checkout_changed rejection can release an attempt and request explicit review; a previously uncertain attempt stays frozen even after that error. No historical fingerprints are rewritten.
+
+Mobile uses a device-only SQLite acceptance adapter for checkout: stable identity, captured shop/account, immutable request fingerprint and result identity commit with the invoice. Exact accepted retry resolves before revision comparison; a changed request conflicts. SQLite v27 and generated contract v6 classify this ledger as device-only; migration/restore checks passed. The save sheet stays mounted until acceptance, with fields retained after failure. Context/tenant checks must occur inside the actual save transaction. Acceptance and an exact matching owned item-cart tombstone share one transaction, avoiding automatic restoration of an accepted cart. A changed cart is retained. Full checkout persistence, stable draft revisions and held flows remain E02.2.

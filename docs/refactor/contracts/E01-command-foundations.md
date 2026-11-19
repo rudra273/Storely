@@ -41,3 +41,7 @@ Do not impose one new hash normalizer: billing preserves decimal formatting, pur
 API tests/fixtures/financial_contract_v1.json and mobile test/fixtures/financial_contract_v1.json are byte-identical, SHA-256 f08e95e14feb65800b19065b1ca46b0f3a5e8d41661831e2f7fcc4ee26abbf60. Twelve manually derived decimal examples cover registration, GST split, fractional lines, discounts, odd paise and signed returns/rounding. Both calculators check literal expectations; generated vectors remain additional regression evidence. Public create-sale still rejects negative quantities.
 
 See [closing evidence](../evidence/E01/closing-audit.md) and slices 1–5 for tests, compatibility and practical limits. E01 acceptance covers these foundation contracts; no advanced feature, universal sync atomicity, completed UX parity, physical printer or production deployment is implied.
+
+## Subsequent adoption
+
+E02.1 adds an optional paired sale settlement/review guard while preserving legacy hashes and exact old retry bodies. See [current checkout contract](E02-slice-1.md); its tested behavior supersedes the historical mobile paid-by-default observation above. This does not change E01's compatibility acceptance or imply other domains have adopted guarded commands.

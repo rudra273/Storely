@@ -112,7 +112,7 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 **Dependency:** E01. **Comparison groups:** P1.
 
-**Next assignment:** [E02.1 settlement and checkout validation](docs/refactor/contracts/E02-slice-1.md). Code inspection confirms paid-default, partial-validation, unassigned-credit and checkout-state differences. Implementation has not started; E02 exit remains open.
+**Execution update (20 November 2026):** [E02.1 settlement and checkout validation](docs/refactor/contracts/E02-slice-1.md) implemented and verified across API/mobile/web; [evidence](docs/refactor/evidence/E02/slice-1.md). Explicit choice, exact partial amounts/consent, atomic reviewed-save guard and retained safe retry passed API/web/mobile, paired localhost/offline emulator, premium restore and production Docker checks. Next: E02.2 complete checkout/held draft persistence. E02 phase exit remains open; E02.3 broader parity follows.
 
 - API: expose/validate shared settings and capability responses where necessary; preserve existing account/security and entitlement behavior.
 - Mobile: unified sale steps and explicit payment choice, complete checkout draft persistence, hold/resume/discard, safe child-editor return, validation/focus/error states.

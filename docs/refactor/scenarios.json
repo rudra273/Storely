@@ -29,9 +29,22 @@
     {
       "id": "E2E-01",
       "name": "sale-parity",
-      "state": "planned",
+      "state": "partially_verified",
       "description": "Equivalent seed shops; compare explicit payment choice and steps.",
-      "evidence": null
+      "evidence": "evidence/E02/slice-1.md",
+      "verified_scope": "Deliberate full/partial/unpaid settlement, strict partial validation and consent on actual localhost/Android118 fixture; API review-context atomicity. Full held drafts, broader steps and account/catalog/locale parity remain E02.2/E02.3.",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-settlement.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and exact run-owned premium fixture. Coordinator cleanup required."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_settlement_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Existing unlocked Android emulator; dedicated test DB, no cloud account or network needed."
+        }
+      ]
     },
     {
       "id": "E2E-02",

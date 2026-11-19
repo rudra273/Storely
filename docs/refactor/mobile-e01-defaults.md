@@ -34,3 +34,7 @@ Affected paper path: `BillSettingsScreen._load` → `DatabaseHelper.getBillSetti
 ## Compatibility fix verified
 
 Commit `d68e00b` fixes the data-loss path identified above: valid persisted 80mm/58mm survives load → unrelated title/footer edit → guarded save/reopen. Explicit A4/A5 selection clears preserved metadata, including A4-to-A4; malformed values retain the old fallback. Fifteen focused tests and analyzer pass. This supersedes the earlier unchanged-paper finding; native thermal rendering/UI remains E12.
+
+## E02 follow-up (20 November 2026)
+
+The historical paid-by-default finding is superseded by E02.1: mobile checkout, including duplicated sales, now starts without a settlement choice, matching web. Both validate strict partial amounts and explicit unassigned credit consent. See [E02.1 evidence](evidence/E02/slice-1.md). Full persisted checkout/held flows and payment-method/locale parity remain E02.2/E02.3.
