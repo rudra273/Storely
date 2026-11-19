@@ -56,7 +56,7 @@
       "state": "partially_verified",
       "description": "Lose response after commit; recover same operation.",
       "evidence": "evidence/E01/summary.md",
-      "verified_scope": "Web invoice committed/lost response, reload and identical retry with one stock decrement; API ledger-family authorization/collision checks. Full mobile sales recovery remains open.",
+      "verified_scope": "Web invoice committed/lost response, reload and identical retry with one stock decrement; API ledger-family authorization/collision checks. Full mobile sales recovery remains open. Supplier selected-purchase lost-response/reload/exact retry, one allocation, API v1/v2 intent proof and mobile unknown proof/reservation tests verified in E01 slice 3.",
       "checks": [
         {
           "repository": "storelyweb",
@@ -67,6 +67,11 @@
           "repository": "storelyapi",
           "command": "make test-integration",
           "scope": "tests/test_operation_recovery.py; complete integration command provisions scratch DB exclusively."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-supplier-payment-recovery",
+          "prerequisites": "Current-source localhost server, Chromium and exact run-owned premium fixture with supplier/two unpaid purchases; see script variables and E01/slice-3.md."
         }
       ]
     },
