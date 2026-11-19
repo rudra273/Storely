@@ -2,6 +2,7 @@ import '../sync/purchase_sync_backend.dart';
 import '../sync/sync_backend.dart';
 import 'api_client.dart';
 import 'api_sync_backend.dart';
+import 'server_capabilities.dart';
 
 /// Preserves existing row sync; publishes document metadata only after stock upload.
 class PurchaseApiSyncBackend extends ApiSyncBackend
@@ -17,6 +18,10 @@ class PurchaseApiSyncBackend extends ApiSyncBackend
     String supplierId,
     Map<String, dynamic> payment,
   ) async {
+    final capabilities = await ServerCapabilities.load(api, shopId);
+    if (capabilities != null && !capabilities.supportsSupplierPaymentProof) {
+      return const SupplierPaymentRecovery.unsupported();
+    }
     Map<String, dynamic> result;
     try {
       result = await api.postJson(
