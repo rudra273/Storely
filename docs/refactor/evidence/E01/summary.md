@@ -1,6 +1,6 @@
 # E01 execution evidence
 
-Latest: [slice 4 capabilities, guarded edits and durable jobs](slice-4.md). Earlier: [slice 3 supplier payment intent, proof recovery and shop lifecycle](slice-3.md). Earlier: [slice 2 posting, payment attempts and browser ownership](slice-2.md). The slice 1 results below remain historical evidence; E01 is still implementing.
+Latest: [slice 5 aggregate settings and shared posting](slice-5.md). Earlier: [slice 4 capabilities, guarded edits and durable jobs](slice-4.md). Earlier: [slice 3 supplier payment intent, proof recovery and shop lifecycle](slice-3.md). Earlier: [slice 2 posting, payment attempts and browser ownership](slice-2.md). The slice 1 results below remain historical evidence; E01 is still implementing.
 
 18 November 2026. Coordinator + API/mobile/web agents. Scope contract: `../../contracts/E01-slice-1.md`. This is an incremental E01 slice, not completion of all command/outbox/posting foundations.
 

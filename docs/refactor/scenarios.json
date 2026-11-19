@@ -119,6 +119,49 @@
           "prerequisites": "Docker; isolated production stack only."
         }
       ]
+    },
+    {
+      "id": "E01-SETTINGS",
+      "name": "settings-revision-and-local-atomic-save",
+      "state": "verified-scoped",
+      "description": "Coherent REST settings revision across legacy sync mutations, preserved/rebased web edits, guarded local persisted snapshot and atomic bill/default-series save.",
+      "evidence": "evidence/E01/slice-5.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_settings_revision.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-settings-revision",
+          "prerequisites": "Current-source localhost/Chromium and exact run-owned premium shop fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test test/settings_concurrency_test.dart",
+          "prerequisites": "Flutter tooling; local synthetic SQLite fixtures."
+        }
+      ]
+    },
+    {
+      "id": "E01-POSTING",
+      "name": "shared-posting-transaction-boundary",
+      "state": "verified-scoped",
+      "description": "Typed exact-money/provenance effects, live transaction binding, journal failure/outer rollback, and unchanged payment replay/reversal. Real journal storage remains E06.",
+      "evidence": "evidence/E01/slice-5.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "make test",
+          "scope": "Includes tests/test_posting_unit.py."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_posting_adapters.py",
+          "prerequisites": "Exclusive scratch database window."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

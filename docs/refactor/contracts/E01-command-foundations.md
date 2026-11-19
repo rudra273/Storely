@@ -1,6 +1,6 @@
 # E01 command foundations — draft for implementation
 
-Status: the universal design remains proposed; current implemented boundaries are in [slice 4](E01-slice-4.md) and preceding slices. [Slice 1](E01-slice-1.md) freezes the implemented recovery and decimal boundaries. This document is not a frozen universal wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
+Status: the universal design remains proposed; current implemented boundaries are in [slice 5](E01-slice-5.md) and preceding slices. [Slice 1](E01-slice-1.md) freezes the implemented recovery and decimal boundaries. This document is not a frozen universal wire schema. E00 live baseline must finish before new business commands replace existing sync. Existing routes remain compatible until an additive migration and client negotiation are tested.
 
 ## Initial implementation anchors (before the verified slices)
 
