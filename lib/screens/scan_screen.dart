@@ -23,6 +23,7 @@ import '../models/product.dart';
 import '../utils/money.dart';
 import '../utils/checkout_code.dart';
 import 'products_screen.dart' show showCheckoutQuickAdd;
+import 'shared/bill_quick_sheet.dart' show showBillQuickSheet;
 
 part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
@@ -67,8 +68,12 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isOpeningBillSheet = false;
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
+  bool _duplicateConsumed = false;
   String? _lastScanned;
   DateTime? _lastScannedSeenAt;
+
+  Bill? get _effectiveDuplicateFromBill =>
+      _duplicateConsumed ? null : widget.duplicateFromBill;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
   int get _itemCount =>
@@ -362,9 +367,11 @@ class _ScanScreenState extends State<ScanScreen> {
   List<Product> _matchingCatalogProducts(String normalizedQuery) {
     return _allProducts.where((product) {
       return product.name.toLowerCase().contains(normalizedQuery) ||
-          (product.itemCode?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.itemCode?.toLowerCase().contains(normalizedQuery) ??
+              false) ||
           (product.barcode?.toLowerCase().contains(normalizedQuery) ?? false) ||
-          (product.category?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.category?.toLowerCase().contains(normalizedQuery) ??
+              false) ||
           (product.supplier?.toLowerCase().contains(normalizedQuery) ?? false);
     }).toList();
   }
@@ -838,7 +845,7 @@ class _ScanScreenState extends State<ScanScreen> {
             transactionReference: transactionReference,
             duplicatedFromBillUuid:
                 _checkoutState['source_bill_uuid'] as String? ??
-                widget.duplicateFromBill?.uuid,
+                _effectiveDuplicateFromBill?.uuid,
           );
 
           if (decimalScaledInteger(total.toStringAsFixed(2), scale: 2) !=
@@ -889,6 +896,15 @@ class _ScanScreenState extends State<ScanScreen> {
 
     if (!mounted) return;
     try {
+      await _persistCheckoutState({
+        ..._checkoutState,
+        'version': 1,
+        'source_bill_uuid':
+            _checkoutState['source_bill_uuid'] ??
+            _effectiveDuplicateFromBill?.uuid,
+        'step': 'checkout',
+      });
+      if (!mounted) return;
       final completed =
           await showModalBottomSheet<
             ({_BillDraft draft, int id, BillTotals totals})
@@ -908,9 +924,10 @@ class _ScanScreenState extends State<ScanScreen> {
               onRawChanged: (raw) => _persistCheckoutState({
                 ..._checkoutState,
                 'version': 1,
+                'step': 'checkout',
                 'source_bill_uuid':
                     _checkoutState['source_bill_uuid'] ??
-                    widget.duplicateFromBill?.uuid,
+                    _effectiveDuplicateFromBill?.uuid,
                 'raw': raw,
                 'reviewed_items': HeldBill.encodeItems(cartItems),
                 'reviewed_context': baseline.toLocalMap(),
@@ -945,19 +962,31 @@ class _ScanScreenState extends State<ScanScreen> {
               },
               totalsFor: totalsFor,
               itemCount: _itemCount,
-              initialBill: widget.duplicateFromBill,
+              initialBill: _effectiveDuplicateFromBill,
             ),
           );
-      if (completed == null || !mounted) return;
+      if (completed == null) {
+        await _checkoutWrites;
+        if (mounted && _checkoutCart != null) {
+          await _persistCheckoutState({
+            ..._checkoutState,
+            'version': 1,
+            'step': 'items',
+          });
+        }
+        return;
+      }
+      if (!mounted) return;
       final draft = completed.draft;
       final saved = completed;
       final totalAmount = saved.totals.grandTotal;
       final itemCount = _itemCount;
-      // The bill is saved: empty the cart now so no path back to this screen
-      // (e.g. Android back on the success dialog) can save it a second time.
+      // The bill is saved: empty the cart and consume duplicate lineage now so
+      // no path back to this screen (or New Bill) can carry it forward.
       _checkoutCart = null;
       _checkoutState = const {};
       _savedDraft = HeldBill.encodeItems(const []);
+      _duplicateConsumed = true;
       setState(() => _items.clear());
       final startNewBill = await _showBillCreatedDialog(
         billId: saved.id,
@@ -965,14 +994,19 @@ class _ScanScreenState extends State<ScanScreen> {
             ? 'Walk-in Customer'
             : draft.customerName.trim(),
         totalAmount: totalAmount,
+        paidAmount: draft.paidAmount,
+        expectedBillUuid: frozenBill!.uuid,
+        expectedScope: await _checkoutScope,
         itemCount: itemCount,
-        isPaid: draft.paidAmount >= totalAmount - 0.005,
       );
       if (!mounted) return;
       if (startNewBill) {
+        _duplicateConsumed = true;
         _loadProducts(); // stock changed
-      } else {
+      } else if (Navigator.canPop(context)) {
         Navigator.pop(context);
+      } else {
+        _loadProducts();
       }
     } catch (e) {
       if (!mounted) return;
@@ -988,25 +1022,71 @@ class _ScanScreenState extends State<ScanScreen> {
     required int billId,
     required String customerName,
     required double totalAmount,
+    required double paidAmount,
+    required String expectedBillUuid,
+    required CheckoutScope expectedScope,
     required int itemCount,
-    required bool isPaid,
   }) async {
+    Future<void> assertCompletionOwnership() async {
+      final current = await DatabaseHelper.instance.captureCheckoutScope();
+      if (current.shopId != expectedScope.shopId ||
+          current.owner != expectedScope.owner ||
+          current.deviceId != expectedScope.deviceId) {
+        throw StateError(
+          'Invoice saved. Return to the original shop and account to view it.',
+        );
+      }
+    }
+
+    await assertCompletionOwnership();
     final bill = await DatabaseHelper.instance.getBillById(billId);
+    await assertCompletionOwnership();
+    if (bill != null &&
+        (bill.uuid != expectedBillUuid ||
+            bill.shopId != expectedScope.shopId)) {
+      throw StateError(
+        'The saved invoice identity changed. Reopen it from the original shop history.',
+      );
+    }
     final billLabel = bill?.billNumber.isNotEmpty == true
         ? bill!.billNumber
         : 'Bill #$billId';
+    final effectiveTotal = bill?.totalAmount ?? totalAmount;
+    final effectivePaid = bill?.paidAmount ?? paidAmount;
+    final status =
+        bill?.paymentStatus ??
+        (effectivePaid <= 0.005
+            ? Bill.statusUnpaid
+            : effectivePaid + 0.005 >= effectiveTotal
+            ? Bill.statusPaid
+            : Bill.statusPartial);
+    final statusLabel = switch (status) {
+      Bill.statusPaid => 'Paid',
+      Bill.statusPartial => 'Partial',
+      _ => 'Unpaid',
+    };
+    final methodSuffix = effectivePaid > 0.005 && bill != null
+        ? ' · ${paymentMethodLabel(bill.paymentMethod)}'
+        : '';
     if (!mounted) return false;
-    final newBill = await showDialog<bool>(
+    final action = await showDialog<_BillCreatedAction>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => _BillCreatedDialog(
         bill: bill,
-        totalAmount: totalAmount,
+        totalAmount: effectiveTotal,
+        paidAmount: effectivePaid,
         summary:
-            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • $statusLabel$methodSuffix',
       ),
     );
-    return newBill == true;
+    if (action == _BillCreatedAction.viewInvoice && bill != null && mounted) {
+      await assertCompletionOwnership();
+      if (!mounted) return false;
+      await showBillQuickSheet(context, bill);
+      return false;
+    }
+    return action == _BillCreatedAction.newBill;
   }
 
   void _updateQty(int index, int delta) {
@@ -1296,7 +1376,7 @@ class _ScanScreenState extends State<ScanScreen> {
         backgroundColor: headerSurface,
         appBar: AppBar(
           title: Text(
-            widget.duplicateFromBill != null
+            _effectiveDuplicateFromBill != null
                 ? context.l10n.duplicateBill
                 : _entryMode == BillingEntryMode.scan
                 ? 'Scan & Bill'

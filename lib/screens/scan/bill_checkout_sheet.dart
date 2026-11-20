@@ -38,6 +38,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _stateCodeController = TextEditingController();
   final _discountController = TextEditingController();
   final _paidAmountController = TextEditingController();
+  final _cashReceivedController = TextEditingController();
   final _transactionIdController = TextEditingController();
 
   final _customerFieldLink = LayerLink();
@@ -112,7 +113,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           }.contains(raw['settlement'])
           ? raw['settlement'] as String
           : null;
-      _paymentMethod = raw['method'] == 'online' ? 'online' : 'cash';
+      _paymentMethod = normalizeCheckoutPaymentMethod(raw['method']);
       _allowUnassignedCredit = raw['consent'] == true;
     }
     final pending = widget.initialState['pending'];
@@ -145,6 +146,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     'state': _stateCodeController,
     'discount': _discountController,
     'partial': _paidAmountController,
+    'cash': _cashReceivedController,
     'reference': _transactionIdController,
   };
   String? _lastRaw;
@@ -208,6 +210,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _stateCodeController.dispose();
     _discountController.dispose();
     _paidAmountController.dispose();
+    _cashReceivedController.dispose();
     _transactionIdController.dispose();
     _removeSuggestionOverlay();
     _customerFocusNode.dispose();
@@ -305,6 +308,10 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           allowUnassignedCredit: _allowUnassignedCredit,
         );
         final paidAmount = paise.toDouble() / 100;
+        final normalizedMethod = _paymentStatus == Bill.statusUnpaid
+            ? 'cash'
+            : _paymentMethod;
+        final trimmedReference = _transactionIdController.text.trim();
         _attemptDraft = _BillDraft(
           customerName: _customerController.text,
           customerPhone: _checkoutPhone(),
@@ -318,10 +325,13 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
               : _stateCodeController.text,
           discountPercent: _discountPercent.clamp(0, 100).toDouble(),
           paidAmount: paidAmount,
-          paymentMethod: _paymentMethod,
-          transactionReference: _paymentMethod == 'online'
-              ? _transactionIdController.text
-              : null,
+          paymentMethod: normalizedMethod,
+          transactionReference:
+              (_paymentStatus == Bill.statusUnpaid ||
+                  normalizedMethod == 'cash' ||
+                  trimmedReference.isEmpty)
+              ? null
+              : trimmedReference,
         );
       }
       FocusManager.instance.primaryFocus?.unfocus();
@@ -396,6 +406,14 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     final totals = widget.totalsFor(percent);
     final discount = totals.discountAmount;
     final total = totals.grandTotal;
+    final totalPaise = decimalScaledInteger(total.toStringAsFixed(2), scale: 2);
+    final changePaise =
+        _paymentStatus == Bill.statusPaid && _paymentMethod == 'cash'
+        ? checkoutChangePaise(
+            cashText: _cashReceivedController.text,
+            totalPaise: totalPaise,
+          )
+        : null;
     final parsedPaid = _paymentStatus == Bill.statusPaid
         ? total
         : _paymentStatus == Bill.statusPartial
@@ -651,37 +669,102 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     if (_paymentStatus != null &&
                         _paymentStatus != Bill.statusUnpaid) ...[
                       const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        segments: [
-                          ButtonSegment(
-                            value: 'cash',
-                            icon: Icon(Icons.payments_outlined),
-                            label: Text(context.l10n.cash),
+                      SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final method in checkoutPaymentMethods)
+                              ChoiceChip(
+                                key: ValueKey('checkout-method-$method'),
+                                label: Text(paymentMethodLabel(method)),
+                                selected: _paymentMethod == method,
+                                onSelected: _frozen
+                                    ? null
+                                    : (_) => setState(() {
+                                        _paymentMethod = method;
+                                        _allowUnassignedCredit = false;
+                                      }),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (_paymentStatus == Bill.statusPaid &&
+                          _paymentMethod == 'cash') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          readOnly: _frozen,
+                          key: const ValueKey('checkout-cash-received'),
+                          controller: _cashReceivedController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
                           ),
-                          ButtonSegment(
-                            value: 'online',
-                            icon: Icon(Icons.account_balance_wallet_outlined),
-                            label: Text(context.l10n.online),
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((
+                              oldValue,
+                              newValue,
+                            ) {
+                              final isValid = RegExp(
+                                r'^\d*\.?\d{0,2}$',
+                              ).hasMatch(newValue.text);
+                              return isValid ? newValue : oldValue;
+                            }),
+                          ],
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Cash received',
+                            hintText: 'Optional',
+                            prefixText: '₹ ',
+                          ),
+                        ),
+                        if (changePaise != null &&
+                            changePaise > BigInt.zero) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.softBgOf(context),
+                              borderRadius: AppRadius.smRadius,
+                              border: Border.all(
+                                color: AppColors.borderOf(context),
+                              ),
+                            ),
+                            child: Text(
+                              'Change to return ${rupeesFromPaise(changePaise)}',
+                              key: const ValueKey('checkout-change-due'),
+                              style: AppText.subtitle.copyWith(
+                                color: AppColors.success,
+                              ),
+                            ),
                           ),
                         ],
-                        selected: {_paymentMethod},
-                        onSelectionChanged: (value) => setState(() {
-                          _paymentMethod = value.first;
-                          _allowUnassignedCredit = false;
-                        }),
-                      ),
-                      if (_paymentMethod == 'online') ...[
+                      ],
+                      if (_paymentMethod != 'cash') ...[
                         const SizedBox(height: 12),
                         TextField(
                           readOnly: _frozen,
                           key: const ValueKey('checkout-reference'),
                           controller: _transactionIdController,
+                          maxLength: 100,
                           onChanged: (_) =>
                               setState(() => _allowUnassignedCredit = false),
                           textCapitalization: TextCapitalization.characters,
-                          decoration: InputDecoration(
-                            labelText: context.l10n.txnIdOptional,
+                          decoration: const InputDecoration(
+                            labelText: 'Reference (optional)',
                             prefixIcon: Icon(Icons.receipt_long_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Storely records the payment method and reference on the invoice; it does not collect the payment itself.',
+                            style: AppText.caption,
                           ),
                         ),
                       ],

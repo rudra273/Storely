@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../models/checkout_settlement.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/money.dart';
+import '../../utils/decimal_text.dart';
 import '../../utils/test_keys.dart';
 
-/// Amount + cash/online (+ optional transaction id) for a payment received.
+/// Amount + payment method (+ optional reference) for a payment received.
 /// Validates inline: accepts "1,000", rejects 0 or more than [balanceDue].
 class PaymentEntry {
   final double amount;
@@ -48,22 +50,48 @@ class _RecordPaymentDialogState extends State<RecordPaymentDialog> {
   }
 
   void _save() {
-    final value = double.tryParse(_amountCtrl.text.replaceAll(',', '').trim());
-    final error = value == null || value <= 0
+    BigInt amount;
+    BigInt balance;
+    try {
+      final text = _amountCtrl.text.trim();
+      // Keep established US and Indian grouping while refusing malformed input.
+      final plain = RegExp(r'^\d+(?:\.\d{1,2})?$');
+      final grouped = RegExp(
+        r'^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d{1,2})?$',
+      );
+      if (!plain.hasMatch(text) && !grouped.hasMatch(text)) {
+        throw const FormatException('Invalid payment amount');
+      }
+      amount = decimalScaledInteger(text.replaceAll(',', ''), scale: 2);
+      balance = decimalScaledInteger(
+        widget.balanceDue.toStringAsFixed(2),
+        scale: 2,
+      );
+    } on FormatException {
+      setState(
+        () => _amountError =
+            'Enter a valid amount with at most two decimal places',
+      );
+      return;
+    }
+    final error = amount <= BigInt.zero
         ? 'Enter an amount greater than 0'
-        : value > widget.balanceDue + 0.005
+        : amount > balance
         ? 'Cannot be more than the balance due'
         : null;
     if (error != null) {
       setState(() => _amountError = error);
       return;
     }
+    final trimmedRef = _txnRefCtrl.text.trim();
     Navigator.pop(
       context,
       PaymentEntry(
-        amount: value!,
+        amount: amount.toDouble() / 100,
         method: _method,
-        reference: _method == 'online' ? _txnRefCtrl.text : null,
+        reference: _method == 'cash'
+            ? null
+            : (trimmedRef.isEmpty ? null : trimmedRef),
       ),
     );
   }
@@ -72,49 +100,58 @@ class _RecordPaymentDialogState extends State<RecordPaymentDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _amountCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Amount received',
-              prefixText: '₹ ',
-              helperText: 'Balance: ${rupees(widget.balanceDue)}',
-              errorText: _amountError,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                value: 'cash',
-                icon: Icon(Icons.payments_outlined),
-                label: Text('Cash'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              key: const ValueKey('payment-amount'),
+              controller: _amountCtrl,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
               ),
-              ButtonSegment(
-                value: 'online',
-                icon: Icon(Icons.account_balance_wallet_outlined),
-                label: Text('Online'),
+              decoration: InputDecoration(
+                labelText: 'Amount received',
+                prefixText: '₹ ',
+                helperText: 'Balance: ${rupees(widget.balanceDue)}',
+                errorText: _amountError,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final method in checkoutPaymentMethods)
+                  ChoiceChip(
+                    key: ValueKey('payment-method-$method'),
+                    label: Text(paymentMethodLabel(method)),
+                    selected: _method == method,
+                    onSelected: (_) => setState(() => _method = method),
+                  ),
+              ],
+            ),
+            if (_method != 'cash') ...[
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                key: const ValueKey('payment-reference'),
+                controller: _txnRefCtrl,
+                maxLength: 100,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Reference (optional)',
+                  prefixIcon: Icon(Icons.receipt_long_outlined),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Storely records the payment method and reference on the invoice; it does not collect the payment itself.',
+                style: AppText.caption,
               ),
             ],
-            selected: {_method},
-            onSelectionChanged: (value) =>
-                setState(() => _method = value.first),
-          ),
-          if (_method == 'online') ...[
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _txnRefCtrl,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                labelText: 'Transaction ID (optional)',
-                prefixIcon: Icon(Icons.receipt_long_outlined),
-              ),
-            ),
           ],
-        ],
+        ),
       ),
       actions: [
         TextButton(

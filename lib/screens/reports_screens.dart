@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../db/database_helper.dart';
 import '../models/bill_totals.dart';
+import '../models/checkout_settlement.dart';
 import '../models/shop_profile.dart';
 import '../services/gstr1_export.dart';
 import '../models/product_purchase.dart';
@@ -240,13 +241,7 @@ class _DayBookBody extends StatelessWidget {
 
   const _DayBookBody({required this.book});
 
-  static String _method(String m) => switch (m) {
-    'upi' => 'UPI',
-    'card' => 'Card',
-    'bank' => 'Bank',
-    'cash' => 'Cash',
-    _ => m,
-  };
+  static String _method(String m) => paymentMethodLabel(m);
 
   @override
   Widget build(BuildContext context) {
