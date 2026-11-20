@@ -50,9 +50,9 @@
       "id": "E2E-02",
       "name": "cross-client-roundtrip",
       "state": "partially_verified",
-      "description": "Web invoice \u2192 mobile pull \u2192 mobile payment/return \u2192 web.",
+      "description": "Web invoice → mobile pull → mobile payment/return → web.",
       "evidence": "evidence/E01/summary.md",
-      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice \u2192 mobile payment/return \u2192 browser flow remains open.",
+      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice → mobile payment/return → browser flow remains open.",
       "checks": [
         {
           "repository": "storelyapi",
@@ -225,7 +225,7 @@
       "name": "checkout-product-entry-and-return",
       "state": "verified",
       "description": "Resolve exact code, guard partial-name suggestions and non-barcode payloads, persist draft before product creation, retain work on cancel, and return exact saved UUID even when barcode is edited.",
-      "verified_scope": "API concurrent code/barcode races, ambiguous lookup, staff guard and zero-stock creation; web and offline Android checkout product creation, cancel preservation, edited-barcode exact return, raw field retention and settlement review reset.",
+      "verified_scope": "API concurrent code/barcode races, ambiguous lookup, staff guard and zero-stock creation; web and offline Android checkout product creation, cancel preservation, edited-barcode exact return, raw field retention and settlement review reset. Web also recovers the exact catalog save after a failed cart update and reload.",
       "evidence": "evidence/E02/slice-3-catalog.md",
       "checks": [
         {
@@ -242,6 +242,26 @@
           "repository": "Storely",
           "command": "flutter test integration_test/checkout_product_entry_test.dart --no-uninstall -d emulator-5554",
           "prerequisites": "Unlocked Android emulator and isolated test DB."
+        }
+      ]
+    },
+    {
+      "id": "E02-PAYMENT-01",
+      "name": "checkout-payment-and-completion",
+      "state": "verified",
+      "description": "Review full cash change and partial bank transfer, save, then check the invoice and start another checkout.",
+      "verified_scope": "Localhost and Android verified amounts, reference, clean continuation and view. API replay and legacy sync compatibility passed.",
+      "evidence": "evidence/E02/slice-3-payment-completion.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-payment-completion.cjs",
+          "prerequisites": "Current localhost Vite and Docker API, Chromium and disposable premium shop."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_payment_completion_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
         }
       ]
     }

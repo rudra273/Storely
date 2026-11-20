@@ -13,7 +13,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | A01 | Email/password, verification, reset, sessions, MFA | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A02 | Phone OTP / Google sign-in | N/N/N | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A03 | Local first use versus paid cloud activation | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| A04 | Shop selection / company management | P/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| A04 | Shop selection / company management | P/E/E | E02 | implementing | Web remembers shop per account, opens the newly activated workspace and restores only the selected shop’s draft and role. Mobile company management parity remains open. |
 | A05 | Multiple firms inside one business | N/N/N | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A06 | Warehouses/godowns inside one shop | N/N/N | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A07 | Owner/admin/staff and invitations | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -40,12 +40,12 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | T15 | Repeat/recurring invoices | N/N/N | E14 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T16 | Asset sale/purchase | N/N/N | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T17 | Party-to-party balance transfer | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| T18 | Save / Save and new / post-save preview | P/P/P | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T18 | Save / Save and new / post-save preview | P/P/P | E02 | verified | Localhost and Android verified saved settlement summary, clean New invoice and saved invoice view. Printing transport verification remains E12. See evidence/E02/slice-3-payment-completion.md. |
 | T19 | Editing posted documents | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T20 | Cancellation / dependency guards | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T21 | Recycle bin and restore | N/N/N | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T22 | POS mode | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F01 | Cash/credit and full/partial/unpaid | D/D/E | E02 | implementing | E02.1 explicit settlement, exact partial validation/consent and paired localhost/emulator totals verified; evidence/E02/slice-1.md. E02.2 verified draft recovery. Broader method/workflow parity remains E02.3. |
+| F01 | Cash/credit and full/partial/unpaid | D/D/E | E02 | verified | Explicit settlement, five payment methods, exact paise cash change and invoice payment reference handling verified across API, web and Android. See evidence/E02/slice-3-payment-completion.md. |
 | F02 | Date/time/backdating | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F03 | Prefix/number/series | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F04 | Billing name distinct from party master | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -163,10 +163,10 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | ID | Owner phase | State | Closure evidence |
 |---|---|---|---|
 | D01 | E02 | planned | Not run; paired before/after scenario and regression required. |
-| D02 | E02 | planned | Not run; paired before/after scenario and regression required. |
+| D02 | E02 | verified | Both clients require an explicit settlement decision. A new or duplicated invoice starts unsettled. See evidence/E02/slice-1.md and evidence/E02/slice-3-payment-completion.md. |
 | D03 | E03 | planned | Not run; paired before/after scenario and regression required. |
 | D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
-| D05 | E02 | implementing | Raw checkout and frozen identity recover on browser reload and Android DB reopen. Exact editor step and hard process interruption remain in E02 regression. See evidence/E02/slice-2.md. |
+| D05 | E02 | implementing | Raw checkout and frozen identity recover on browser reload and Android DB reopen. Android records checkout and items steps. Hard process interruption remains in E02 regression. See evidence/E02/slice-2.md. |
 | D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
@@ -184,7 +184,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
-| E02 | implementing | E02.1 settlement (`evidence/E02/slice-1.md`), E02.2 drafts (`evidence/E02/slice-2.md`), and E02.3 Part 1 catalog entry (`evidence/E02/slice-3-catalog.md`) verified. Next: E02.3 Part 2 (payment methods, Save & New, account/shop switch, shared settings registry, onboarding/search/notifications, EN/HI locale/terminology) and E02 phase exit. |
+| E02 | implementing | E02.1 settlement (`evidence/E02/slice-1.md`), E02.2 drafts (`evidence/E02/slice-2.md`), and E02.3 Part 1 catalog entry (`evidence/E02/slice-3-catalog.md`) verified. E02.3 payment and completion, web workspace selection and catalog return recovery verified in evidence/E02/slice-3-payment-completion.md. Next align GST and pricing defaults, then broader account/settings/locale parity and E02 phase exit. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
