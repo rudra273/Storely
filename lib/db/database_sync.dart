@@ -78,13 +78,78 @@ mixin DatabaseSync {
     final db = await database;
     final shop = await _activeShopId(db);
     final device = await localDeviceId();
-    await setCloudSyncState('preference_owner', userId);
-    await db.update(
-      'held_bills',
-      {'owner_user_id': userId, 'updated_at': _nowIso()},
-      where: 'shop_id = ? AND origin_device_id = ? AND owner_user_id IS NULL',
-      whereArgs: [shop, device],
-    );
+    await db.transaction((txn) async {
+      final previousOwner = await _checkoutOwner(txn);
+      final localCarts = await txn.query(
+        'held_bills',
+        where:
+            'shop_id = ? AND origin_device_id = ? AND owner_user_id IS NULL AND deleted_at IS NULL',
+        whereArgs: [shop, device],
+      );
+      if (previousOwner == null) {
+        final other = await txn.rawQuery(
+          "SELECT 1 FROM checkout_draft_state m JOIN held_bills h ON h.uuid = m.cart_uuid WHERE m.owner IS NULL AND m.device_id = ? AND m.shop_id <> ? AND h.deleted_at IS NULL LIMIT 1",
+          [device, shop],
+        );
+        if (other.isNotEmpty) {
+          throw StateError(
+            'Recover local checkout drafts in their original shop before attaching this account.',
+          );
+        }
+        for (final cart in localCarts) {
+          final metadata = await txn.query(
+            'checkout_draft_state',
+            where: 'cart_uuid = ?',
+            whereArgs: [cart['uuid']],
+          );
+          if (metadata.isEmpty) continue;
+          final row = metadata.single;
+          if (row['owner'] != null ||
+              row['shop_id'] != shop ||
+              row['device_id'] != device) {
+            throw StateError(
+              'Checkout ownership must be resolved before attaching this account.',
+            );
+          }
+          final state =
+              jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+          if (state['pending'] != null) {
+            throw StateError(
+              'Recover the pending local checkout before attaching a cloud account.',
+            );
+          }
+          if (state['raw'] is Map) {
+            state['raw'] = {
+              ...Map<String, dynamic>.from(state['raw'] as Map),
+              'settlement': null,
+              'consent': false,
+            };
+          }
+          await txn.update(
+            'checkout_draft_state',
+            {
+              'owner': userId,
+              'revision': (row['revision'] as int) + 1,
+              'payload': jsonEncode(state),
+            },
+            where: 'cart_uuid = ?',
+            whereArgs: [cart['uuid']],
+          );
+        }
+        await txn.update(
+          'held_bills',
+          {'owner_user_id': userId, 'updated_at': _nowIso()},
+          where:
+              'shop_id = ? AND origin_device_id = ? AND owner_user_id IS NULL',
+          whereArgs: [shop, device],
+        );
+      }
+      await txn.insert('cloud_sync_state', {
+        'key': 'preference_owner',
+        'value': userId,
+        'updated_at': _nowIso(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
     if (!bindPreferences) return;
     final pending = await db.query(
       'user_preferences',

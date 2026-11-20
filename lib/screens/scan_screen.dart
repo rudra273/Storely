@@ -51,6 +51,11 @@ class _ScanScreenState extends State<ScanScreen> {
 
   final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
+  late final Future<CheckoutScope> _checkoutScope;
+  CheckoutCart? _checkoutCart;
+  Map<String, dynamic> _checkoutState = const {};
+  Future<void> _checkoutWrites = Future<void>.value();
+
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
   Map<int, int> _saleCounts = const {};
@@ -70,6 +75,7 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
+    _checkoutScope = DatabaseHelper.instance.captureCheckoutScope();
     _entryMode = widget.duplicateFromBill != null
         ? BillingEntryMode.manual
         : widget.initialMode ??
@@ -126,6 +132,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void>? _draftWrite;
+  Object? _lastDraftError;
 
   Future<void> _saveDraftNow() async {
     final pending = _draftWrite;
@@ -145,8 +152,14 @@ class _ScanScreenState extends State<ScanScreen> {
     final previous = _savedDraft;
     _savedDraft = encoded;
     try {
-      await DatabaseHelper.instance.saveCartDraft(List.of(_items));
+      _checkoutCart = await DatabaseHelper.instance.saveCartDraft(
+        List.of(_items),
+        expectedScope: await _checkoutScope,
+        expectedCart: _checkoutCart,
+      );
+      _lastDraftError = null;
     } catch (error, stack) {
+      _lastDraftError = error;
       if (_savedDraft == encoded) _savedDraft = previous;
       AppLog.error('Save cart draft', error, stack);
       if (!mounted) return;
@@ -156,27 +169,84 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _restoreDraft() async {
-    final draft = await DatabaseHelper.instance.loadCartDraft();
-    if (!mounted) return;
-    _savedDraft = HeldBill.encodeItems(draft);
-    _draftReady = true;
-    if (draft.isEmpty || _items.isNotEmpty) return;
-    setState(() => _items.addAll(draft));
+  Future<void> _flushCart() async {
+    await _saveDraftNow();
+    if (_lastDraftError != null) {
+      throw StateError('Could not keep the cart: $_lastDraftError');
+    }
+    await _checkoutWrites;
+  }
+
+  bool _pendingCheckoutBlocksEdit() {
+    if (_checkoutState['pending'] == null) return false;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      const SnackBar(
         content: Text(
-          'Restored your unsaved bill (${draft.length} '
-          'item${draft.length == 1 ? '' : 's'})',
-        ),
-        action: SnackBarAction(
-          label: context.l10n.discard,
-          onPressed: () {
-            if (mounted) setState(() => _items.clear());
-          },
+          'Recover the pending checkout before changing, holding or discarding its cart.',
         ),
       ),
     );
+    return true;
+  }
+
+  Future<void> _restoreDraft() async {
+    try {
+      final cart = await DatabaseHelper.instance.loadCheckoutCart(
+        await _checkoutScope,
+      );
+      _checkoutCart = cart;
+      _checkoutState = cart?.state ?? const {};
+      final draft = cart?.cart.items ?? const <BillItem>[];
+      if (!mounted) return;
+      _savedDraft = HeldBill.encodeItems(draft);
+      _draftReady = true;
+      if (draft.isEmpty || _items.isNotEmpty) return;
+      setState(() => _items.addAll(draft));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Restored your unsaved bill (${draft.length} '
+            'item${draft.length == 1 ? '' : 's'})',
+          ),
+          action: SnackBarAction(
+            label: context.l10n.discard,
+            onPressed: () {
+              if (mounted && !_pendingCheckoutBlocksEdit()) {
+                setState(() => _items.clear());
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      _lastDraftError = error;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not restore checkout: $error')),
+      );
+    }
+  }
+
+  Future<void> _persistCheckoutState(Map<String, dynamic> state) {
+    final snapshot = jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
+    final identity = _checkoutCart?.cart.uuid;
+    final previous = _checkoutWrites;
+    final next = () async {
+      await previous;
+      final cart = _checkoutCart;
+      if (cart == null || cart.cart.uuid != identity) {
+        throw StateError('Checkout cart is no longer active.');
+      }
+      final updated = await DatabaseHelper.instance.writeCheckoutState(
+        cart,
+        snapshot,
+      );
+      _checkoutCart = updated;
+      _checkoutState = snapshot;
+    }();
+    // Keep the sequencing chain usable after an observed failure; callers still receive it.
+    _checkoutWrites = next.catchError((Object _) {});
+    return next;
   }
 
   Future<void> _loadHeldCount() async {
@@ -192,15 +262,31 @@ class _ScanScreenState extends State<ScanScreen> {
     final label =
         '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
         '${items.length > 1 ? ' +${items.length - 1}' : ''}';
-    await DatabaseHelper.instance.holdBill(label, items);
-    if (!mounted) return;
-    setState(() {
-      _items.clear();
-      _heldCount++;
-    });
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('Held: $label')));
+    if (_pendingCheckoutBlocksEdit()) return;
+    try {
+      await _flushCart();
+      final cart = _checkoutCart;
+      if (cart == null) {
+        throw StateError('The current cart is no longer available.');
+      }
+      await DatabaseHelper.instance.parkCheckoutCart(cart, label);
+      _checkoutCart = null;
+      _checkoutState = const {};
+      _savedDraft = HeldBill.encodeItems(const []);
+      if (!mounted) return;
+      setState(() {
+        _items.clear();
+        _heldCount++;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Held: $label')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
   }
 
   Future<void> _openHeldBills() async {
@@ -220,10 +306,16 @@ class _ScanScreenState extends State<ScanScreen> {
     );
     if (chosen == null || !mounted) return;
     // Swap: the cart being billed is held, so nothing is lost.
-    if (_items.isNotEmpty) await _holdCart();
-    HeldBill resumed;
+    if (_pendingCheckoutBlocksEdit()) return;
+    CheckoutCart resumed;
     try {
-      resumed = await DatabaseHelper.instance.takeHeldBill(chosen.id);
+      await _flushCart();
+      final active = _checkoutCart;
+      resumed = await DatabaseHelper.instance.resumeCheckoutCart(
+        await _checkoutScope,
+        chosen.id,
+        active: active,
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -232,7 +324,13 @@ class _ScanScreenState extends State<ScanScreen> {
       return;
     }
     if (!mounted) return;
-    setState(() => _items.addAll(resumed.items));
+    _checkoutCart = resumed;
+    _checkoutState = resumed.state;
+    _savedDraft = HeldBill.encodeItems(resumed.cart.items);
+    setState(() {
+      _items.clear();
+      _items.addAll(resumed.cart.items);
+    });
     await _loadHeldCount();
   }
 
@@ -412,6 +510,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _addBillItem(BillItem item) {
+    if (_pendingCheckoutBlocksEdit()) return;
     final existing = _items.indexWhere(
       (existingItem) =>
           (item.productId != null &&
@@ -494,8 +593,12 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _runBillCheckout() async {
     _draftTimer?.cancel();
-    await _saveDraftNow();
-    final device = await DatabaseHelper.instance.localDeviceId();
+    await _flushCart();
+    if (_checkoutCart == null) {
+      throw StateError('Checkout cart is no longer available.');
+    }
+    _checkoutState = _checkoutCart!.state;
+    final device = (await _checkoutScope).deviceId;
     var baseline = await DatabaseHelper.instance.captureSettingsEditBaseline();
     final owner = await DatabaseHelper.instance.getCloudSyncState(
       'preference_owner',
@@ -505,6 +608,21 @@ class _ScanScreenState extends State<ScanScreen> {
     var settings = await DatabaseHelper.instance.getBillSettings();
     if (!mounted) return;
     final cartItems = List<BillItem>.of(_items);
+    if (_checkoutState['pending'] == null &&
+        _checkoutState['raw'] is Map &&
+        (jsonEncode(_checkoutState['reviewed_context']) !=
+                jsonEncode(baseline.toLocalMap()) ||
+            _checkoutState['reviewed_items'] !=
+                HeldBill.encodeItems(cartItems))) {
+      _checkoutState = {
+        ..._checkoutState,
+        'raw': {
+          ...Map<String, dynamic>.from(_checkoutState['raw'] as Map),
+          'settlement': null,
+          'consent': false,
+        },
+      };
+    }
     // GST-inclusive prices: the payable total does not depend on GST
     // registration or inter-state supply, only on discount and round-off.
     BillTotals totalsFor(double discountPercent) => BillTotals.forCart(
@@ -512,13 +630,43 @@ class _ScanScreenState extends State<ScanScreen> {
       discountPercent: discountPercent,
       gstRegistered: false,
       interState: false,
-      roundOff: settings.roundOffTotal,
+      roundOff:
+          (_checkoutState['pending'] as Map?)?['round_off'] as bool? ??
+          settings.roundOffTotal,
     );
 
     var attemptId = const Uuid().v4();
     Bill? frozenBill;
     List<BillItem>? frozenItems;
     BillTotals? frozenTotals;
+    final pending = _checkoutState['pending'];
+    if (pending != null) {
+      final saved = Map<String, dynamic>.from(pending as Map);
+      attemptId = saved['attempt_id'] as String;
+      baseline = SettingsEditBaseline.fromLocalMap(
+        Map<String, dynamic>.from(saved['baseline'] as Map),
+      );
+      frozenItems = [
+        for (final item in saved['items'] as List)
+          BillItem.fromMap(Map<String, dynamic>.from(item as Map)),
+      ];
+      frozenBill = Bill.fromMap({
+        ...Map<String, dynamic>.from(saved['bill'] as Map),
+        'transaction_reference': saved['reference'],
+      }, frozenItems);
+      frozenTotals = BillTotals.fromTaxedItems(
+        frozenItems,
+        roundOff: saved['round_off'] as bool,
+      );
+      if (attemptId.isEmpty ||
+          frozenBill.uuid.isEmpty ||
+          frozenBill.shopId != baseline.shopId ||
+          baseline.shopId != (await _checkoutScope).shopId) {
+        throw const FormatException(
+          'Unreadable pending checkout identity. Keep a backup before recovery.',
+        );
+      }
+    }
     Future<({int id, BillTotals totals})> save(_BillDraft draft) async {
       if (_isSavingBill) throw StateError('Checkout save already in progress.');
       if (mounted) setState(() => _isSavingBill = true);
@@ -591,7 +739,9 @@ class _ScanScreenState extends State<ScanScreen> {
             paymentMethod: paymentMethod,
             paidAmount: received,
             transactionReference: transactionReference,
-            duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
+            duplicatedFromBillUuid:
+                _checkoutState['source_bill_uuid'] as String? ??
+                widget.duplicateFromBill?.uuid,
           );
 
           if (decimalScaledInteger(total.toStringAsFixed(2), scale: 2) !=
@@ -607,6 +757,22 @@ class _ScanScreenState extends State<ScanScreen> {
           frozenItems = itemCopies;
           frozenTotals = totals;
         }
+        await _checkoutWrites;
+        if (_checkoutState['pending'] == null) {
+          await _persistCheckoutState({
+            ..._checkoutState,
+            'version': 1,
+            'pending': {
+              'attempt_id': attemptId,
+              'baseline': baseline.toLocalMap(),
+              'bill': frozenBill!.toMap(),
+              'reference': frozenBill!.transactionReference,
+              'items': frozenItems!.map((item) => item.toMap(0)).toList(),
+              'round_off': settings.roundOffTotal,
+              'draft': draft.toMap(),
+            },
+          });
+        }
         final id = await DatabaseHelper.instance.insertReviewedCheckout(
           attemptId: attemptId,
           expectedShopId: baseline.shopId,
@@ -616,6 +782,7 @@ class _ScanScreenState extends State<ScanScreen> {
           originDeviceId: device,
           bill: frozenBill!,
           items: frozenItems!,
+          expectedCart: _checkoutCart,
         );
         return (id: id, totals: frozenTotals!);
       } finally {
@@ -623,6 +790,7 @@ class _ScanScreenState extends State<ScanScreen> {
       }
     }
 
+    if (!mounted) return;
     try {
       final completed =
           await showModalBottomSheet<
@@ -630,6 +798,8 @@ class _ScanScreenState extends State<ScanScreen> {
           >(
             context: context,
             isScrollControlled: true,
+            enableDrag: false,
+            isDismissible: false,
             useSafeArea: true,
             backgroundColor: AppColors.surfaceOf(context),
             shape: const RoundedRectangleBorder(
@@ -637,6 +807,17 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
             builder: (_) => _BillCheckoutSheet(
               customers: customers,
+              initialState: _checkoutState,
+              onRawChanged: (raw) => _persistCheckoutState({
+                ..._checkoutState,
+                'version': 1,
+                'source_bill_uuid':
+                    _checkoutState['source_bill_uuid'] ??
+                    widget.duplicateFromBill?.uuid,
+                'raw': raw,
+                'reviewed_items': HeldBill.encodeItems(cartItems),
+                'reviewed_context': baseline.toLocalMap(),
+              }),
               onSave: save,
               onReview: () async {
                 final next = await DatabaseHelper.instance
@@ -656,6 +837,10 @@ class _ScanScreenState extends State<ScanScreen> {
                 baseline = next;
                 shop = nextShop;
                 settings = nextSettings;
+                await _persistCheckoutState({
+                  ..._checkoutState,
+                  'pending': null,
+                });
                 frozenBill = null;
                 frozenItems = null;
                 frozenTotals = null;
@@ -673,6 +858,9 @@ class _ScanScreenState extends State<ScanScreen> {
       final itemCount = _itemCount;
       // The bill is saved: empty the cart now so no path back to this screen
       // (e.g. Android back on the success dialog) can save it a second time.
+      _checkoutCart = null;
+      _checkoutState = const {};
+      _savedDraft = HeldBill.encodeItems(const []);
       setState(() => _items.clear());
       final startNewBill = await _showBillCreatedDialog(
         billId: saved.id,
@@ -725,6 +913,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _updateQty(int index, int delta) {
+    if (_pendingCheckoutBlocksEdit()) return;
     if (delta > 0) {
       final available = _availableStockForItem(_items[index]);
       if (available != null &&
@@ -739,6 +928,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _setQty(int index, double quantity) {
+    if (_pendingCheckoutBlocksEdit()) return;
     if (quantity <= 0) return;
     final available = _availableStockForItem(_items[index]);
     if (available != null && exceedsStock(quantity, available)) {
@@ -963,10 +1153,33 @@ class _ScanScreenState extends State<ScanScreen> {
       canPop: _items.isEmpty,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        final discard = await _confirmDiscard();
-        if (!discard || !context.mounted) return;
-        setState(() => _items.clear());
-        Navigator.pop(context);
+        final action = await _confirmExit();
+        if (action == null || !context.mounted) return;
+        try {
+          if (action == 'discard') {
+            if (_pendingCheckoutBlocksEdit()) return;
+            await _flushCart();
+            await DatabaseHelper.instance.saveCartDraft(
+              const [],
+              expectedScope: await _checkoutScope,
+              expectedCart: _checkoutCart,
+            );
+            _checkoutCart = null;
+            _checkoutState = const {};
+            _savedDraft = HeldBill.encodeItems(const []);
+            if (!mounted) return;
+            setState(() => _items.clear());
+          } else {
+            await _flushCart();
+          }
+          if (!context.mounted) return;
+          Navigator.pop(context);
+        } catch (error) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(error.toString())));
+        }
       },
       child: Scaffold(
         backgroundColor: headerSurface,
@@ -1008,6 +1221,7 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
             if (_heldCount > 0)
               TextButton.icon(
+                key: const ValueKey('checkout-held-list'),
                 onPressed: _openHeldBills,
                 icon: const Icon(
                   Icons.inventory_rounded,
@@ -1020,6 +1234,7 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             if (_items.isNotEmpty)
               IconButton(
+                key: const ValueKey('checkout-hold'),
                 tooltip: context.l10n.holdBill,
                 onPressed: _holdCart,
                 icon: const Icon(
@@ -1125,7 +1340,9 @@ class _ScanScreenState extends State<ScanScreen> {
                             onPressed: _openBillSheet,
                             icon: const Icon(Icons.receipt_long_rounded),
                             label: Text(
-                              context.l10n.bill,
+                              _checkoutState['pending'] != null
+                                  ? 'Recover pending checkout'
+                                  : context.l10n.bill,
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             style: FilledButton.styleFrom(
@@ -1152,32 +1369,37 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Future<bool> _confirmDiscard() async {
-    final discard = await showDialog<bool>(
+  Future<String?> _confirmExit() async {
+    final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(context.l10n.discardBillQ),
+        title: const Text('Keep this bill for later?'),
         content: Text(
-          '${_items.length} item${_items.length == 1 ? '' : 's'} in the cart '
-          'will be removed.',
+          'Keep the cart and checkout entries on this device, or discard them explicitly.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            key: const ValueKey('checkout-keep-exit'),
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: const Text('Keep and exit'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
             child: Text(context.l10n.keepBilling),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'discard'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: Text(context.l10n.discard),
           ),
         ],
       ),
     );
-    return discard == true;
+    return action;
   }
 
   void _clearWithUndo() {
+    if (_pendingCheckoutBlocksEdit()) return;
     final removed = List<BillItem>.of(_items);
     setState(() => _items.clear());
     ScaffoldMessenger.of(context)

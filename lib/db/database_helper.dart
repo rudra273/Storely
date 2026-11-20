@@ -29,6 +29,7 @@ part 'database_products.dart';
 part 'database_purchase_documents.dart';
 part 'database_purchase_drafts.dart';
 part 'database_bills.dart';
+part 'database_checkout_drafts.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
 part 'database_expenses.dart';
@@ -46,6 +47,7 @@ class DatabaseHelper
         DatabasePurchaseDocuments,
         DatabasePurchaseDrafts,
         DatabaseBills,
+        DatabaseCheckoutDrafts,
         DatabaseSync,
         DatabaseKpi,
         DatabaseExpenses,
@@ -53,6 +55,7 @@ class DatabaseHelper
         DatabaseAudit {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+  static Future<Database>? _openingDatabase;
 
   /// Database file name. Tests switch it to simulate several devices.
   @visibleForTesting
@@ -68,11 +71,21 @@ class DatabaseHelper
   @override
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB(databaseFileName);
-    return _database!;
+    if (_openingDatabase != null) return _openingDatabase!;
+    final opening = _initDB(databaseFileName);
+    _openingDatabase = opening;
+    try {
+      final opened = await opening;
+      _database = opened;
+      return opened;
+    } finally {
+      if (identical(_openingDatabase, opening)) _openingDatabase = null;
+    }
   }
 
   Future<void> close() async {
+    final opening = _openingDatabase;
+    if (opening != null) await opening;
     final db = _database;
     if (db == null) return;
     await db.close();
@@ -109,6 +122,15 @@ class DatabaseHelper
     await db.transaction((txn) async {
       final current = await _activeShopId(txn);
       if (current == shopId) return;
+      final checkout = await txn.rawQuery(
+        "SELECT 1 FROM checkout_draft_state m JOIN held_bills h ON h.uuid = m.cart_uuid WHERE m.shop_id = ? AND h.deleted_at IS NULL LIMIT 1",
+        [current],
+      );
+      if (checkout.isNotEmpty) {
+        throw StateError(
+          'Keep or complete the local checkout in its original shop before joining another shop.',
+        );
+      }
       for (final table in const [
         'app_settings',
         'bill_settings',

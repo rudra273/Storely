@@ -26,6 +26,7 @@ mixin DatabaseBills {
     required String originDeviceId,
     required Bill bill,
     required List<BillItem> items,
+    CheckoutCart? expectedCart,
   }) async {
     if (attemptId.isEmpty || bill.uuid.isEmpty) {
       throw ArgumentError('Missing checkout identity');
@@ -104,6 +105,31 @@ mixin DatabaseBills {
         }
         return row['bill_id'] as int;
       }
+      if (expectedCart != null) {
+        if (expectedCart.scope.shopId != expectedShopId ||
+            expectedCart.scope.owner != expectedOwner ||
+            expectedCart.scope.deviceId != originDeviceId) {
+          throw StateError('Checkout request and draft ownership differ.');
+        }
+        await _assertCheckoutScope(txn, expectedCart.scope);
+        final live = await txn.query(
+          'held_bills',
+          where: "uuid = ? AND kind = 'draft' AND deleted_at IS NULL",
+          whereArgs: [expectedCart.cart.uuid],
+        );
+        if (live.isEmpty) {
+          throw StateError('The reviewed cart was already consumed or moved.');
+        }
+        final current = await _checkoutCart(
+          txn,
+          live.single,
+          expectedCart.scope,
+        );
+        if (current.revision != expectedCart.revision ||
+            HeldBill.encodeItems(current.cart.items) != cartSnapshot) {
+          throw StateError('The reviewed cart changed before saving.');
+        }
+      }
       try {
         await _assertSettingsBaseline(txn, baseline);
       } on StateError {
@@ -111,16 +137,37 @@ mixin DatabaseBills {
       }
       final id = await _insertBillTxn(txn, bill, items);
       final now = _nowIso();
-      await txn.update(
+      final consumed = await txn.query(
         'held_bills',
-        {'deleted_at': now, 'updated_at': now},
+        columns: ['uuid'],
         where:
-            "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND ${expectedOwner == null ? 'owner_user_id IS NULL' : 'owner_user_id = ?'} AND items_json = ? AND deleted_at IS NULL",
+            "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND ${expectedOwner == null ? 'owner_user_id IS NULL' : 'owner_user_id = ?'} AND items_json = ? AND deleted_at IS NULL${expectedCart == null ? '' : ' AND uuid = ?'}",
         whereArgs: [
           expectedShopId,
           originDeviceId,
           ?expectedOwner,
           cartSnapshot,
+          if (expectedCart != null) expectedCart.cart.uuid,
+        ],
+      );
+      for (final cart in consumed) {
+        await txn.delete(
+          'checkout_draft_state',
+          where: 'cart_uuid = ?',
+          whereArgs: [cart['uuid']],
+        );
+      }
+      await txn.update(
+        'held_bills',
+        {'deleted_at': now, 'updated_at': now},
+        where:
+            "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND ${expectedOwner == null ? 'owner_user_id IS NULL' : 'owner_user_id = ?'} AND items_json = ? AND deleted_at IS NULL${expectedCart == null ? '' : ' AND uuid = ?'}",
+        whereArgs: [
+          expectedShopId,
+          originDeviceId,
+          ?expectedOwner,
+          cartSnapshot,
+          if (expectedCart != null) expectedCart.cart.uuid,
         ],
       );
       await txn.insert('checkout_acceptances', {
@@ -360,14 +407,21 @@ mixin DatabaseBills {
     notifyDatabaseChanged();
   }
 
-  Future<void> saveCartDraft(List<BillItem> items) async {
+  Future<CheckoutCart?> saveCartDraft(
+    List<BillItem> items, {
+    CheckoutScope? expectedScope,
+    CheckoutCart? expectedCart,
+  }) async {
     final db = await database;
-    final shopId = await _activeShopId(db);
-    final device = await DatabaseHelper.instance.localDeviceId();
-    final owner = await DatabaseHelper.instance.getCloudSyncState(
-      'preference_owner',
-    );
-    await db.transaction((txn) async {
+    final shopId = expectedScope?.shopId ?? await _activeShopId(db);
+    final device =
+        expectedScope?.deviceId ??
+        await DatabaseHelper.instance.localDeviceId();
+    final owner =
+        expectedScope?.owner ??
+        await DatabaseHelper.instance.getCloudSyncState('preference_owner');
+    final result = await db.transaction<CheckoutCart?>((txn) async {
+      if (expectedScope != null) await _assertCheckoutScope(txn, expectedScope);
       final rows = await txn.query(
         'held_bills',
         where:
@@ -375,9 +429,45 @@ mixin DatabaseBills {
         whereArgs: [shopId, device, owner ?? 'local'],
         limit: 1,
       );
+      if (expectedScope != null) {
+        if (rows.isNotEmpty) {
+          final actual = await _checkoutCart(txn, rows.single, expectedScope);
+          if (expectedCart == null ||
+              actual.cart.uuid != expectedCart.cart.uuid ||
+              actual.revision != expectedCart.revision ||
+              HeldBill.encodeItems(actual.cart.items) !=
+                  HeldBill.encodeItems(expectedCart.cart.items)) {
+            throw StateError(
+              'The active cart changed in another editor. Reopen it before saving.',
+            );
+          }
+        } else if (expectedCart != null) {
+          throw StateError('The active cart was consumed or moved.');
+        }
+      }
+      if (rows.isNotEmpty) {
+        final saved = await txn.query(
+          'checkout_draft_state',
+          where: 'cart_uuid = ?',
+          whereArgs: [rows.single['uuid']],
+        );
+        if (saved.isNotEmpty &&
+            (jsonDecode(saved.single['payload'] as String) as Map)['pending'] !=
+                null &&
+            rows.single['items_json'] != HeldBill.encodeItems(items)) {
+          throw StateError(
+            'Recover the pending checkout before changing or discarding its cart.',
+          );
+        }
+      }
       final now = _nowIso();
       if (items.isEmpty) {
         if (rows.isNotEmpty) {
+          await txn.delete(
+            'checkout_draft_state',
+            where: 'cart_uuid = ?',
+            whereArgs: [rows.single['uuid']],
+          );
           await txn.update(
             'held_bills',
             {'deleted_at': now, 'updated_at': now},
@@ -405,8 +495,50 @@ mixin DatabaseBills {
           'updated_at': now,
         });
       }
+      if (expectedScope != null &&
+          rows.isNotEmpty &&
+          items.isNotEmpty &&
+          rows.single['items_json'] != HeldBill.encodeItems(items)) {
+        final saved = await txn.query(
+          'checkout_draft_state',
+          where: 'cart_uuid = ?',
+          whereArgs: [rows.single['uuid']],
+        );
+        if (saved.isEmpty) {
+          await txn.insert('checkout_draft_state', {
+            'cart_uuid': rows.single['uuid'],
+            'shop_id': expectedScope.shopId,
+            'owner': expectedScope.owner,
+            'device_id': expectedScope.deviceId,
+            'revision': 1,
+            'payload': jsonEncode({'version': 1}),
+          });
+        } else {
+          await txn.update(
+            'checkout_draft_state',
+            {'revision': (saved.single['revision'] as int) + 1},
+            where: 'cart_uuid = ?',
+            whereArgs: [rows.single['uuid']],
+          );
+        }
+      }
+      if (expectedScope != null && items.isNotEmpty) {
+        final updated = await txn.query(
+          'held_bills',
+          where:
+              "kind = 'draft' AND shop_id = ? AND origin_device_id = ? AND deleted_at IS NULL AND (owner_user_id IS NULL OR owner_user_id = ?)",
+          whereArgs: [
+            expectedScope.shopId,
+            expectedScope.deviceId,
+            expectedScope.owner ?? 'local',
+          ],
+        );
+        return _checkoutCart(txn, updated.single, expectedScope);
+      }
+      return null;
     });
     notifyDatabaseChanged();
+    return result;
   }
 
   Future<List<BillItem>> loadCartDraft() async {

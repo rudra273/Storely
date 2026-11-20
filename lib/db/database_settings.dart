@@ -564,4 +564,17 @@ class SettingsEditBaseline {
   final String shopId;
   final String _snapshot;
   const SettingsEditBaseline._(this.shopId, this._snapshot);
+  Map<String, dynamic> toLocalMap() => {
+    'shop_id': shopId,
+    'snapshot': _snapshot,
+  };
+  factory SettingsEditBaseline.fromLocalMap(Map<String, dynamic> map) {
+    if (map['shop_id'] is! String || map['snapshot'] is! String) {
+      throw const FormatException('Unreadable checkout settings baseline.');
+    }
+    return SettingsEditBaseline._(
+      map['shop_id'] as String,
+      map['snapshot'] as String,
+    );
+  }
 }

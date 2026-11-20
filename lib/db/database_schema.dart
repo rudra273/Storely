@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 27,
+      version: 28,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -211,6 +211,13 @@ mixin DatabaseSchema {
         attempt_id TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
         owner TEXT, request_fingerprint TEXT NOT NULL,
         bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL
+      )
+    ''');
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS checkout_draft_state(
+        cart_uuid TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
+        owner TEXT, device_id TEXT NOT NULL, revision INTEGER NOT NULL,
+        payload TEXT NOT NULL
       )
     ''');
     await _createShopTables(executor);

@@ -31,6 +31,7 @@ void main() {
         'purchase_drafts',
         'supplier_payment_queue',
         'checkout_acceptances',
+        'checkout_draft_state',
       },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
@@ -199,8 +200,27 @@ void main() {
         'bill_uuid',
       },
     );
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(checkout_draft_state)',
+      )).map((column) => column['name']).toSet(),
+      {'cart_uuid', 'shop_id', 'owner', 'device_id', 'revision', 'payload'},
+    );
     final result = {
-      'version': 6,
+      'version': 7,
+      'local_checkout_drafts': {
+        'table': 'checkout_draft_state',
+        'policy':
+            'Device-only owner-scoped raw checkout and frozen local request; never row-sync. SQLite backups retain it with the exact original cart. Atomic park/swap transfers identity; acceptance or discard removes it.',
+        'fields': [
+          'cart_uuid',
+          'shop_id',
+          'owner',
+          'device_id',
+          'revision',
+          'payload',
+        ],
+      },
       'local_checkout_acceptance': {
         'table': 'checkout_acceptances',
         'policy':
@@ -251,6 +271,7 @@ void main() {
         'purchase_drafts',
         'supplier_payment_queue',
         'checkout_acceptances',
+        'checkout_draft_state',
       ],
       'server_managed_public_tables': {
         'shop_members': 'Membership and roles via authenticated API',

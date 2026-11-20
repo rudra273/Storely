@@ -2,6 +2,8 @@ part of '../scan_screen.dart';
 
 class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
+  final Map<String, dynamic> initialState;
+  final Future<void> Function(Map<String, dynamic>) onRawChanged;
 
   /// Payable totals for a discount %, from the same calculator used to save
   /// the bill, so the preview always matches the saved invoice.
@@ -13,6 +15,8 @@ class _BillCheckoutSheet extends StatefulWidget {
 
   const _BillCheckoutSheet({
     required this.customers,
+    required this.initialState,
+    required this.onRawChanged,
     required this.onSave,
     required this.onReview,
     required this.totalsFor,
@@ -56,44 +60,145 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   void initState() {
     super.initState();
     final bill = widget.initialBill;
-    if (bill == null) return;
-    _setCheckoutControllerText(_customerController, bill.customerName);
-    _setCheckoutControllerText(
-      _phoneController,
-      _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
-    );
-    _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
-    _setCheckoutControllerText(
-      _legalNameController,
-      bill.customerGstLegalName ?? '',
-    );
-    _setCheckoutControllerText(
-      _tradeNameController,
-      bill.customerGstTradeName ?? '',
-    );
-    _setCheckoutControllerText(
-      _addressController,
-      bill.customerAddressSnapshot ?? '',
-    );
-    _setCheckoutControllerText(
-      _stateCodeController,
-      bill.placeOfSupplyStateCode ?? '',
-    );
-    if (bill.discountPercent > 0) {
-      _discountPercent = bill.discountPercent;
+    if (bill != null) {
+      _setCheckoutControllerText(_customerController, bill.customerName);
       _setCheckoutControllerText(
-        _discountController,
-        bill.discountPercent.toStringAsFixed(2),
+        _phoneController,
+        _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
       );
+      _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
+      _setCheckoutControllerText(
+        _legalNameController,
+        bill.customerGstLegalName ?? '',
+      );
+      _setCheckoutControllerText(
+        _tradeNameController,
+        bill.customerGstTradeName ?? '',
+      );
+      _setCheckoutControllerText(
+        _addressController,
+        bill.customerAddressSnapshot ?? '',
+      );
+      _setCheckoutControllerText(
+        _stateCodeController,
+        bill.placeOfSupplyStateCode ?? '',
+      );
+      if (bill.discountPercent > 0) {
+        _discountPercent = bill.discountPercent;
+        _setCheckoutControllerText(
+          _discountController,
+          bill.discountPercent.toStringAsFixed(2),
+        );
+      }
+      _billType = bill.billType;
+      _paymentStatus = null;
+      _paymentMethod = 'cash';
+      _hideCustomerSuggestions = true;
     }
-    _billType = bill.billType;
-    _paymentStatus = null;
-    _paymentMethod = 'cash';
-    _hideCustomerSuggestions = true;
+    final raw = widget.initialState['raw'];
+    if (raw is Map) {
+      for (final entry in _rawControllers.entries) {
+        if (raw[entry.key] is String) {
+          entry.value.text = raw[entry.key] as String;
+        }
+      }
+      _discountPercent = double.tryParse(_discountController.text) ?? 0;
+      _billType = raw['billType'] == Bill.typeB2b ? Bill.typeB2b : Bill.typeB2c;
+      _paymentStatus =
+          {
+            Bill.statusPaid,
+            Bill.statusPartial,
+            Bill.statusUnpaid,
+          }.contains(raw['settlement'])
+          ? raw['settlement'] as String
+          : null;
+      _paymentMethod = raw['method'] == 'online' ? 'online' : 'cash';
+      _allowUnassignedCredit = raw['consent'] == true;
+    }
+    final pending = widget.initialState['pending'];
+    if (pending is Map) {
+      _attemptDraft = _BillDraft.fromMap(
+        Map<String, dynamic>.from(pending['draft'] as Map),
+      );
+      _frozen = true;
+    }
+    for (final controller in _rawControllers.values) {
+      controller.addListener(_rawChanged);
+    }
+    _lastRaw = jsonEncode(_raw());
+    if (!_frozen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _lastRaw = null;
+        _rawChanged();
+      });
+    }
+  }
+
+  Map<String, TextEditingController> get _rawControllers => {
+    'name': _customerController,
+    'phone': _phoneController,
+    'gstin': _gstinController,
+    'legal': _legalNameController,
+    'trade': _tradeNameController,
+    'address': _addressController,
+    'state': _stateCodeController,
+    'discount': _discountController,
+    'partial': _paidAmountController,
+    'reference': _transactionIdController,
+  };
+  String? _lastRaw;
+  String? _draftError;
+  bool _persisting = false;
+  int _rawWrites = 0;
+  Map<String, dynamic> _raw() => {
+    for (final entry in _rawControllers.entries) entry.key: entry.value.text,
+    'billType': _billType,
+    'settlement': _paymentStatus,
+    'method': _paymentMethod,
+    'consent': _allowUnassignedCredit,
+  };
+  void _rawChanged() {
+    if (_frozen) return;
+    final raw = _raw();
+    final encoded = jsonEncode(raw);
+    if (_lastRaw == encoded) return;
+    _lastRaw = encoded;
+    _rawWrites++;
+    _persisting = true;
+    widget
+        .onRawChanged(raw)
+        .then(
+          (_) {
+            if (!mounted) return;
+            setState(() {
+              _rawWrites--;
+              _persisting = _rawWrites > 0;
+              _draftError = null;
+            });
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _rawWrites--;
+              _persisting = _rawWrites > 0;
+              _draftError = 'Could not keep checkout entries: $error';
+            });
+          },
+        );
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _rawChanged();
   }
 
   @override
   void dispose() {
+    for (final controller in _rawControllers.values) {
+      controller.removeListener(_rawChanged);
+    }
     _customerController.dispose();
     _phoneController.dispose();
     _gstinController.dispose();
@@ -184,7 +289,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   }
 
   Future<void> _submit(double total) async {
-    if (_saving || _reviewRequired) return;
+    if (_saving || _reviewRequired || _draftError != null) return;
     if (!_frozen && _billType == Bill.typeB2b && !_validateB2bFields()) return;
     try {
       if (_attemptDraft == null) {
@@ -309,7 +414,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     });
 
     return PopScope(
-      canPop: !_frozen,
+      canPop: !_frozen && !_persisting && _draftError == null,
       onPopInvokedWithResult: (_, _) =>
           FocusManager.instance.primaryFocus?.unfocus(),
       child: SingleChildScrollView(
@@ -334,7 +439,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                         ),
                         const Spacer(),
                         IconButton(
-                          onPressed: _frozen
+                          key: const ValueKey('checkout-close'),
+                          onPressed:
+                              _frozen || _persisting || _draftError != null
                               ? null
                               : () => Navigator.pop(context),
                           icon: const Icon(Icons.close_rounded),
@@ -346,6 +453,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       link: _customerFieldLink,
                       child: TextField(
                         readOnly: _frozen,
+                        key: const ValueKey('checkout-customer'),
                         controller: _customerController,
                         focusNode: _customerFocusNode,
                         textCapitalization: TextCapitalization.words,
@@ -362,6 +470,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       readOnly: _frozen,
+                      key: const ValueKey('checkout-phone'),
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
@@ -464,6 +573,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       readOnly: _frozen,
+                      key: const ValueKey('checkout-discount'),
                       controller: _discountController,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
@@ -564,6 +674,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                         const SizedBox(height: 12),
                         TextField(
                           readOnly: _frozen,
+                          key: const ValueKey('checkout-reference'),
                           controller: _transactionIdController,
                           onChanged: (_) =>
                               setState(() => _allowUnassignedCredit = false),
@@ -635,6 +746,16 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                 ),
               ),
               const SizedBox(height: 18),
+              if (_draftError != null) ...[
+                Text(_draftError!),
+                TextButton(
+                  onPressed: () {
+                    _lastRaw = null;
+                    _rawChanged();
+                  },
+                  child: const Text('Retry keeping checkout entries'),
+                ),
+              ],
               if (_reviewRequired)
                 TextButton(
                   key: const ValueKey('checkout-review-latest'),
