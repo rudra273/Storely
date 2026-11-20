@@ -219,6 +219,31 @@
           "prerequisites": "Unlocked Android emulator and isolated test DB."
         }
       ]
+    },
+    {
+      "id": "E02-CATALOG-01",
+      "name": "checkout-product-entry-and-return",
+      "state": "verified",
+      "description": "Resolve exact code, guard partial-name suggestions and non-barcode payloads, persist draft before product creation, retain work on cancel, and return exact saved UUID even when barcode is edited.",
+      "verified_scope": "API concurrent code/barcode races, ambiguous lookup, staff guard and zero-stock creation; web and offline Android checkout product creation, cancel preservation, edited-barcode exact return, raw field retention and settlement review reset.",
+      "evidence": "evidence/E02/slice-3-catalog.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_product_entry.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-product-entry.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_product_entry_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Unlocked Android emulator and isolated test DB."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

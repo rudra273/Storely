@@ -73,7 +73,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | F26 | Terms and conditions by document type | P/P/P | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F27 | Transport fields and delivery acknowledgement | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F28 | Loyalty earning/redemption | N/N/N | E15 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| I01 | Product catalog, category, unit and codes | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| I01 | Product catalog, category, unit and codes | E/E/E | E02 | implementing | E02.3 catalog entry from checkout verified (exact code lookup, concurrent race mapping, zero-stock save, staff guard); evidence/E02/slice-3-catalog.md. Broader E02.3 account/settings/locale parity remains open. |
 | I02 | Service/non-stock items | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I03 | HSN/SAC metadata | P/P/P | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I04 | Product photos / description | P/P/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -90,7 +90,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | I15 | Manufacturing/BOM | N/N/N | E09 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I16 | Product import/export | E/E/E | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I17 | Import catalog without posting stock | P/P/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| I18 | Barcode/QR scan and labels | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| I18 | Barcode/QR scan and labels | E/E/E | E02 | implementing | E02.3 checkout scan/search/unmatched-code creation and edited-barcode UUID return verified on localhost and Android; evidence/E02/slice-3-catalog.md. E02.3 non-checkout parity and E08 serial scan remain open. |
 | I19 | Customer/supplier master and balances | E/E/E | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I20 | Party opening balance/date/direction | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I21 | Party groups | N/N/N | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -184,7 +184,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
-| E02 | implementing | E02.1 verified: explicit settlement, strict amounts/consent, reviewed-save guard and local exact acceptance; evidence/E02/slice-1.md. E02.2 draft persistence and held swaps verified; evidence/E02/slice-2.md. Next E02.3 broader parity. No full E02 phase exit has passed. |
+| E02 | implementing | E02.1 settlement (`evidence/E02/slice-1.md`), E02.2 drafts (`evidence/E02/slice-2.md`), and E02.3 Part 1 catalog entry (`evidence/E02/slice-3-catalog.md`) verified. Next: E02.3 Part 2 (payment methods, Save & New, account/shop switch, shared settings registry, onboarding/search/notifications, EN/HI locale/terminology) and E02 phase exit. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
