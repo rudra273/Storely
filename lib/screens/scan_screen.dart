@@ -21,6 +21,8 @@ import '../models/customer.dart';
 import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../utils/money.dart';
+import '../utils/checkout_code.dart';
+import 'products_screen.dart' show showCheckoutQuickAdd;
 
 part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
@@ -107,6 +109,7 @@ class _ScanScreenState extends State<ScanScreen> {
     // screen; the app-wide messenger would otherwise keep showing them.
     _messenger?.removeCurrentSnackBar();
     _draftTimer?.cancel();
+    _scanCooldownTimer?.cancel();
     if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
     _productSearchCtrl.dispose();
@@ -119,6 +122,7 @@ class _ScanScreenState extends State<ScanScreen> {
   // (debounced) so an app kill or a call mid-bill never loses the cart.
 
   Timer? _draftTimer;
+  Timer? _scanCooldownTimer;
   bool _draftReady = false;
   String _savedDraft = HeldBill.encodeItems(const []);
   int _heldCount = 0;
@@ -177,14 +181,16 @@ class _ScanScreenState extends State<ScanScreen> {
     await _checkoutWrites;
   }
 
+  void _showCheckoutSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   bool _pendingCheckoutBlocksEdit() {
     if (_checkoutState['pending'] == null) return false;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Recover the pending checkout before changing, holding or discarding its cart.',
-        ),
-      ),
+    _showCheckoutSnackBar(
+      'Recover the pending checkout before changing, holding or discarding its cart.',
     );
     return true;
   }
@@ -353,19 +359,23 @@ class _ScanScreenState extends State<ScanScreen> {
     _applyProductSearch();
   }
 
+  List<Product> _matchingCatalogProducts(String normalizedQuery) {
+    return _allProducts.where((product) {
+      return product.name.toLowerCase().contains(normalizedQuery) ||
+          (product.itemCode?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.barcode?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.category?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.supplier?.toLowerCase().contains(normalizedQuery) ?? false);
+    }).toList();
+  }
+
   void _applyProductSearch() {
     final query = _productSearchCtrl.text.trim().toLowerCase();
     if (!mounted) return;
     setState(() {
       final products = query.isEmpty
           ? _allProducts
-          : _allProducts.where((product) {
-              return product.name.toLowerCase().contains(query) ||
-                  (product.itemCode?.toLowerCase().contains(query) ?? false) ||
-                  (product.barcode?.toLowerCase().contains(query) ?? false) ||
-                  (product.category?.toLowerCase().contains(query) ?? false) ||
-                  (product.supplier?.toLowerCase().contains(query) ?? false);
-            }).toList();
+          : _matchingCatalogProducts(query);
       _filteredProducts = products.take(40).toList();
     });
   }
@@ -405,72 +415,157 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _handleScannedCode(String raw) async {
+  bool _recoveringCode = false;
+
+  void _scheduleScanCooldown(bool fromManualSearch, Duration duration) {
+    if (!fromManualSearch) _allowNextScanAfter(duration);
+  }
+
+  Future<void> _submitExactCode(String raw) async {
+    if (_isProcessing ||
+        _recoveringCode ||
+        _isSavingBill ||
+        _isOpeningBillSheet) {
+      return;
+    }
+    _scanCooldownTimer?.cancel();
+    setState(() => _isProcessing = true);
     try {
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final name = data['name'] as String? ?? 'Unknown';
-      final id = (data['id'] as num?)?.toInt();
-      final uuid = data['uuid'] as String?;
-      final code = data['code'] as String?;
-      final barcode = data['barcode'] as String?;
-      final product = await DatabaseHelper.instance.findProductForBilling(
-        id: id,
-        productUuid: uuid,
-        itemCode: code,
-        barcode: barcode,
-        name: name,
-      );
-      if (product == null) {
-        if (!mounted) return;
-        setState(() => _showAddedStatus = false);
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text('Product not found for this QR code'),
-              duration: _invalidScanCooldown,
-            ),
-          );
-        _allowNextScanAfter(_invalidScanCooldown);
-        return;
-      }
-      final scannedItem = await DatabaseHelper.instance.buildBillItemForProduct(
-        product,
-      );
+      await _handleScannedCode(raw, fromManualSearch: true);
+    } catch (error) {
       if (!mounted) return;
+      final message = error is FormatException
+          ? 'Product not found. Search the catalog for this label.'
+          : error.toString().replaceFirst('Bad state: ', '');
+      _showCheckoutSnackBar(message);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
 
-      _addBillItem(scannedItem);
-
+  Future<void> _handleScannedCode(
+    String raw, {
+    bool fromManualSearch = false,
+  }) async {
+    if (_pendingCheckoutBlocksEdit()) {
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    final scope = await _checkoutScope;
+    final db = DatabaseHelper.instance;
+    final Product? product;
+    try {
+      product = await db.resolveCheckoutProduct(raw, scope);
+    } on FormatException {
+      if (!mounted) return;
+      _showCheckoutSnackBar(
+        'Product not found. Search the catalog for this label.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    if (!mounted) return;
+    if (product != null) {
+      final item = await db.buildBillItemForProduct(product);
+      await db.captureCheckoutScope().then((current) {
+        if (current.shopId != scope.shopId ||
+            current.owner != scope.owner ||
+            current.deviceId != scope.deviceId) {
+          throw StateError('Checkout shop or account changed.');
+        }
+      });
+      if (!mounted) return;
+      _addBillItem(item);
       HapticFeedback.mediumImpact();
-      _allowNextScanAfter(_scanCooldown);
-    } catch (_) {
-      final product = await DatabaseHelper.instance.findProductForBilling(
-        productUuid: raw,
-        barcode: raw,
-        itemCode: raw,
-        name: raw,
-      );
-      if (product != null) {
-        final item = await DatabaseHelper.instance.buildBillItemForProduct(
-          product,
+      _scheduleScanCooldown(fromManualSearch, _scanCooldown);
+      return;
+    }
+    if (fromManualSearch) {
+      final trimmed = raw.trim();
+      final query = trimmed.toLowerCase();
+      final matches = query.isEmpty
+          ? const <Product>[]
+          : _matchingCatalogProducts(query);
+      if (matches.isNotEmpty) {
+        _showCheckoutSnackBar(
+          '${matches.length} products match "$trimmed". Choose one from the list.',
         );
-        if (!mounted) return;
-        _addBillItem(item);
-        HapticFeedback.mediumImpact();
-        _allowNextScanAfter(_scanCooldown);
+        _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
         return;
       }
+    }
+    final code = checkoutBarcodeCandidate(raw);
+    if (code == null) {
+      _showCheckoutSnackBar(
+        'Product not found. Search the catalog for this label.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    final canCreate =
+        DatabaseHelper.instance.isAdminMutationAllowed == null ||
+        DatabaseHelper.instance.isAdminMutationAllowed!();
+    if (!canCreate) {
+      _showCheckoutSnackBar(
+        'No product matches "$code". Only a shop owner or admin can add new products.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    if (_recoveringCode) return;
+    _recoveringCode = true;
+    try {
+      await _flushCart();
       if (!mounted) return;
-      setState(() => _showAddedStatus = false);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Invalid QR code'),
-            duration: _invalidScanCooldown,
+      final add = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Product not found'),
+          content: Text(
+            'No product matches "$code". Add it without losing the current bill?',
           ),
+          actions: [
+            TextButton(
+              key: const ValueKey('checkout-code-cancel'),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep billing'),
+            ),
+            FilledButton(
+              key: const ValueKey('checkout-create-product'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Add product'),
+            ),
+          ],
+        ),
+      );
+      if (add != true || !mounted) return;
+      final saved = await showCheckoutQuickAdd(
+        context,
+        barcode: code,
+        scope: scope,
+      );
+      if (saved == null || !mounted) return;
+      final current = await db.productForCheckoutReturn(saved.uuid, scope);
+      if (!mounted) return;
+      if (current.trackStock && current.quantity <= 0) {
+        await _loadProducts();
+        if (!mounted) return;
+        _showCheckoutSnackBar(
+          'Product saved. Add stock before adding it to this bill.',
         );
-      _allowNextScanAfter(_invalidScanCooldown);
+        return;
+      }
+      final item = await db.buildBillItemForProduct(current);
+      await db.productForCheckoutReturn(saved.uuid, scope);
+      if (!mounted) return;
+      _addBillItem(item);
+      await _flushCart();
+      if (!mounted) return;
+      _productSearchCtrl.clear();
+      await _loadProducts();
+    } finally {
+      _recoveringCode = false;
+      _scheduleScanCooldown(fromManualSearch, _scanCooldown);
     }
   }
 
@@ -567,7 +662,9 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _allowNextScanAfter(Duration duration) {
-    Future.delayed(duration, () {
+    if (!mounted) return;
+    _scanCooldownTimer?.cancel();
+    _scanCooldownTimer = Timer(duration, () {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
@@ -1084,13 +1181,27 @@ class _ScanScreenState extends State<ScanScreen> {
       child: Column(
         children: [
           TextField(
+            key: const ValueKey('checkout-product-search'),
             controller: _productSearchCtrl,
+            onSubmitted: _submitExactCode,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               labelText: context.l10n.searchProducts,
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
+          if (checkoutBarcodeCandidate(_productSearchCtrl.text) != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('checkout-use-exact-code'),
+                onPressed: _isProcessing || _recoveringCode
+                    ? null
+                    : () => _submitExactCode(_productSearchCtrl.text),
+                icon: const Icon(Icons.qr_code_scanner_rounded),
+                label: const Text('Use exact code'),
+              ),
+            ),
           if (_productSearchCtrl.text.isEmpty && _saleCounts.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: AppSpacing.sm),

@@ -36,6 +36,26 @@ part 'products/product_cards.dart';
 part 'products/stock_adjust_sheet.dart';
 part 'products/quick_add_sheet.dart';
 
+/// Billing reuses the catalog's form but returns the committed UUID-bearing row.
+Future<Product?> showCheckoutQuickAdd(
+  BuildContext context, {
+  required String barcode,
+  required CheckoutScope scope,
+}) async {
+  final units = await DatabaseHelper.instance.getUnits();
+  if (!context.mounted) return null;
+  return showModalBottomSheet<Product>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => _QuickAddSheet(
+      units: units,
+      scanBarcode: (_) async => null,
+      initialBarcode: barcode,
+      checkoutScope: scope,
+    ),
+  );
+}
+
 class ProductsScreen extends StatefulWidget {
   final int refreshToken;
   final bool isActiveMainTab;
