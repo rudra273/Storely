@@ -45,7 +45,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | T20 | Cancellation / dependency guards | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T21 | Recycle bin and restore | N/N/N | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T22 | POS mode | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F01 | Cash/credit and full/partial/unpaid | D/D/E | E02 | implementing | E02.1 explicit settlement, exact partial validation/consent and paired localhost/emulator totals verified; evidence/E02/slice-1.md. Full draft and broader method/workflow parity remain E02.2/E02.3. |
+| F01 | Cash/credit and full/partial/unpaid | D/D/E | E02 | implementing | E02.1 explicit settlement, exact partial validation/consent and paired localhost/emulator totals verified; evidence/E02/slice-1.md. E02.2 verified draft recovery. Broader method/workflow parity remains E02.3. |
 | F02 | Date/time/backdating | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F03 | Prefix/number/series | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F04 | Billing name distinct from party master | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -165,8 +165,8 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D01 | E02 | planned | Not run; paired before/after scenario and regression required. |
 | D02 | E02 | planned | Not run; paired before/after scenario and regression required. |
 | D03 | E03 | planned | Not run; paired before/after scenario and regression required. |
-| D04 | E02 | planned | Not run; paired before/after scenario and regression required. |
-| D05 | E02 | planned | Not run; paired before/after scenario and regression required. |
+| D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
+| D05 | E02 | implementing | Raw checkout and frozen identity recover on browser reload and Android DB reopen. Exact editor step and hard process interruption remain in E02 regression. See evidence/E02/slice-2.md. |
 | D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
@@ -184,7 +184,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
-| E02 | implementing | E02.1 verified: explicit settlement, strict amounts/consent, reviewed-save guard and local exact acceptance; evidence/E02/slice-1.md. Next E02.2 full checkout/held drafts, then E02.3 broader parity. No full E02 phase exit has passed. |
+| E02 | implementing | E02.1 verified: explicit settlement, strict amounts/consent, reviewed-save guard and local exact acceptance; evidence/E02/slice-1.md. E02.2 draft persistence and held swaps verified; evidence/E02/slice-2.md. Next E02.3 broader parity. No full E02 phase exit has passed. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |

@@ -199,6 +199,26 @@
           "prerequisites": "Flutter toolchain."
         }
       ]
+    },
+    {
+      "id": "E02-DRAFT-01",
+      "name": "checkout-draft-hold-and-recovery",
+      "state": "verified",
+      "description": "Restore raw checkout, retain work after failed storage, atomically hold and swap, then post resumed invoice once.",
+      "verified_scope": "Browser reload/storage failure and Android screen/SQLite reopen, aligned hold/swap and single posting. Legacy cloud backup compatibility passed.",
+      "evidence": "evidence/E02/slice-2.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-drafts.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_drafts_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Unlocked Android emulator and isolated test DB."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
