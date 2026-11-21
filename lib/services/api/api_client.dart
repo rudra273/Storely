@@ -285,6 +285,9 @@ class ApiClient {
   Future<Map<String, dynamic>> patchJson(String path, Object? body) =>
       _authed('PATCH', path, body);
 
+  Future<Map<String, dynamic>> putJson(String path, Object? body) =>
+      _authed('PUT', path, body);
+
   Future<Map<String, dynamic>> deleteJson(String path, [Object? body]) =>
       _authed('DELETE', path, body);
 
