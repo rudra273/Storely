@@ -97,6 +97,15 @@ mixin DatabaseSettings {
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
+  /// The seeded "My Shop" row is a placeholder; saving that exact name is
+  /// nevertheless a valid setup choice, proven by the existing explicit key.
+  Future<bool> hasCompletedShopSetup() async {
+    final name = (await getShopProfile())?.name.trim();
+    if (name == null || name.isEmpty) return false;
+    if (name != 'My Shop') return true;
+    return await _getLegacyShopName(await database) != null;
+  }
+
   Future<void> saveShopName(String name) async {
     await _requireAdminMutation();
     final current = await getShopProfile();

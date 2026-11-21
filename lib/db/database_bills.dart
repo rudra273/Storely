@@ -257,6 +257,24 @@ mixin DatabaseBills {
     }
   }
 
+  /// Saved milestones are tenant-scoped and independent of today's totals.
+  /// Cancelled originals still count; draft carts and credit notes do not.
+  Future<({bool hasProducts, bool hasInvoice})>
+  getFirstInvoiceProgress() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final shop = await _activeShopId(txn);
+      final row = (await txn.rawQuery(
+        "SELECT EXISTS(SELECT 1 FROM products WHERE shop_id = ? AND deleted_at IS NULL) AS products, EXISTS(SELECT 1 FROM bills WHERE shop_id = ? AND COALESCE(document_type, 'invoice') = 'invoice') AS invoice",
+        [shop, shop],
+      )).single;
+      return (
+        hasProducts: row['products'] == 1,
+        hasInvoice: row['invoice'] == 1,
+      );
+    });
+  }
+
   Future<List<Bill>> getAllBills() async {
     final db = await database;
     final billMaps = await db.query(

@@ -112,7 +112,10 @@ class _ScanScreenState extends State<ScanScreen> {
   void dispose() {
     // Billing snackbars (e.g. "Restored your unsaved bill") belong to this
     // screen; the app-wide messenger would otherwise keep showing them.
-    _messenger?.removeCurrentSnackBar();
+    final messenger = _messenger;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (messenger?.mounted ?? false) messenger!.removeCurrentSnackBar();
+    });
     _draftTimer?.cancel();
     _scanCooldownTimer?.cancel();
     if (_draftReady) _saveDraftNow();

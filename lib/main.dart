@@ -111,9 +111,7 @@ class _AppGateState extends State<AppGate> {
   }
 
   Future<void> _checkFirstLaunch() async {
-    final profile = await DatabaseHelper.instance.getShopProfile();
-    final name = profile?.name.trim();
-    final needsSetup = name == null || name.isEmpty || name == 'My Shop';
+    final needsSetup = !await DatabaseHelper.instance.hasCompletedShopSetup();
     // A returning user who is already signed in to cloud has onboarded, even if
     // their local shop name hasn't synced yet (newly-invited staff). At cold
     // start membership isn't resolved, so use signed-in as the durable signal.
@@ -135,9 +133,7 @@ class _AppGateState extends State<AppGate> {
     final joinedCloudShop =
         cloudState.isSignedIn &&
         cloudState.membership == CloudMembership.member;
-    final profile = await DatabaseHelper.instance.getShopProfile();
-    final name = profile?.name.trim();
-    final needsSetup = name == null || name.isEmpty || name == 'My Shop';
+    final needsSetup = !await DatabaseHelper.instance.hasCompletedShopSetup();
     if (mounted) {
       setState(() {
         _isFirstLaunch = needsSetup && !joinedCloudShop;
@@ -183,11 +179,12 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  void _openScanner() {
+  void _openScanner({BillingEntryMode? initialMode}) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const ScanScreen()),
+      MaterialPageRoute(builder: (_) => ScanScreen(initialMode: initialMode)),
     ).then((_) {
+      if (!mounted) return;
       setState(() {
         _homeRefreshToken++;
         _productsRefreshToken++;
@@ -222,6 +219,8 @@ class _AppShellState extends State<AppShell> {
         refreshToken: _homeRefreshToken,
         onNavigate: _switchTab,
         onScan: _openScanner,
+        onFirstInvoice: () =>
+            _openScanner(initialMode: BillingEntryMode.manual),
         onAddProduct: _openProductPurchaseFlow,
       ),
       ProductsScreen(

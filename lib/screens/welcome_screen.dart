@@ -40,11 +40,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Future<void> _saveShopName() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_isSaving || !_formKey.currentState!.validate()) return;
+    final addSamples = _addSampleData;
     setState(() => _isSaving = true);
     try {
       await DatabaseHelper.instance.saveShopName(_shopNameCtrl.text);
-      if (_addSampleData) await SampleData.addProducts();
+      if (addSamples) await SampleData.addProducts();
       if (!mounted) return;
       widget.onComplete();
     } catch (e) {
@@ -270,6 +271,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           child: TestKeys.tag(
             TestKeys.welcomeShopNameField,
             TextFormField(
+              enabled: !_isSaving,
               controller: _shopNameCtrl,
               autofocus: true,
               textCapitalization: TextCapitalization.words,

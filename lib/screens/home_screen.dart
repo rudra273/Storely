@@ -24,6 +24,7 @@ class HomeScreen extends StatefulWidget {
   final int refreshToken;
   final ValueChanged<int> onNavigate;
   final VoidCallback onScan;
+  final VoidCallback? onFirstInvoice;
   final VoidCallback onAddProduct;
 
   const HomeScreen({
@@ -31,6 +32,7 @@ class HomeScreen extends StatefulWidget {
     this.refreshToken = 0,
     required this.onNavigate,
     required this.onScan,
+    this.onFirstInvoice,
     required this.onAddProduct,
   });
 
@@ -52,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<int, double> _pendingByCustomerId = {};
   Map<String, double> _pendingByPhone = {};
   int _productCount = 0;
+  bool _hasFirstProduct = false;
+  bool _hasSavedOriginalInvoice = false;
+  int _loadGeneration = 0;
   int _supplierCount = 0;
   int _todayBillCount = 0;
   double _todaySales = 0;
@@ -130,7 +135,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
+    final generation = ++_loadGeneration;
     final db = DatabaseHelper.instance;
+    final shop = await db.currentShopId();
+    final progress = await db.getFirstInvoiceProgress();
     final products = await db.getAllProducts();
     final customers = await db.getAllCustomers();
     final suppliers = await db.getSupplierProfiles();
@@ -143,12 +151,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final needsAction = await NeedsAction.load();
     final unpaidBills = bills.where((bill) => bill.balanceDue > 0).toList();
     final pending = _buildCustomerPendingMaps(bills);
-    if (!mounted) return;
+    if (!mounted || generation != _loadGeneration) return;
+    if (await db.currentShopId() != shop) return;
+    if (!mounted || generation != _loadGeneration) return;
     setState(() {
       _loaded = true;
       _needsActionCount = needsAction.length;
       _products = products;
       _productCount = products.length;
+      _hasFirstProduct = progress.hasProducts;
+      _hasSavedOriginalInvoice = progress.hasInvoice;
       _supplierCount = suppliers.length;
       _todaySales = todaySales;
       _todayCollected = todayCollected;
@@ -266,6 +278,18 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ]
                         : [
+                            if (!_hasSavedOriginalInvoice &&
+                                (DatabaseHelper.instance.isAdminMutationAllowed
+                                        ?.call() ??
+                                    true)) ...[
+                              _FirstInvoiceGuide(
+                                hasProduct: _hasFirstProduct,
+                                onAddProduct: widget.onAddProduct,
+                                onInvoice:
+                                    widget.onFirstInvoice ?? widget.onScan,
+                              ),
+                              const SizedBox(height: AppSpacing.lg),
+                            ],
                             _SalesHero(
                               sales: _todaySales,
                               collected: _todayCollected,
@@ -923,6 +947,48 @@ class _StatTile extends StatelessWidget {
 }
 
 // ── Quick Actions ────────────────────────────────────────────────────────────
+
+class _FirstInvoiceGuide extends StatelessWidget {
+  final bool hasProduct;
+  final VoidCallback onAddProduct;
+  final VoidCallback onInvoice;
+  const _FirstInvoiceGuide({
+    required this.hasProduct,
+    required this.onAddProduct,
+    required this.onInvoice,
+  });
+
+  @override
+  Widget build(BuildContext context) => AppCard(
+    key: const ValueKey('onboarding-guidance'),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Get your shop ready', style: AppText.subtitle),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          hasProduct
+              ? 'Pick products, choose payment and review the invoice before saving.'
+              : 'Start with a name, selling price and opening stock. You can bill offline.',
+          style: AppText.caption,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        FilledButton.icon(
+          key: ValueKey(
+            hasProduct ? 'onboarding-first-invoice' : 'onboarding-add-product',
+          ),
+          onPressed: hasProduct ? onInvoice : onAddProduct,
+          icon: Icon(
+            hasProduct ? Icons.receipt_long_outlined : Icons.add_rounded,
+          ),
+          label: Text(
+            hasProduct ? 'Create your first invoice' : 'Add your first product',
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
 class _QuickActionsSection extends StatelessWidget {
   final VoidCallback onScan;
