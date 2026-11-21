@@ -173,42 +173,138 @@ mixin DatabaseSync {
     }
   }
 
-  Future<void> savePortablePreference(
+  Future<void> savePortablePreferenceForScope(
     String key,
     String value, {
+    required String shopId,
+    required String userId,
     bool onlyIfMissing = false,
   }) async {
     final db = await database;
-    final shop = await _activeShopId(db);
-    final user = await getCloudSyncState('preference_owner') ?? 'local';
-    final rows = await db.query(
-      'user_preferences',
-      where: 'shop_id = ? AND owner_user_id = ? AND key = ?',
-      whereArgs: [shop, user, key],
-    );
-    if (rows.isNotEmpty && (onlyIfMissing || rows.single['value'] == value)) {
-      return;
-    }
-    final now = _nowIso();
-    if (rows.isEmpty) {
-      await db.insert('user_preferences', {
-        'uuid': '$shop:$user:$key',
-        'shop_id': shop,
-        'owner_user_id': user,
-        'key': key,
-        'value': value,
-        'created_at': now,
-        'updated_at': now,
-      });
-    } else {
-      await db.update(
+    await db.transaction((txn) async {
+      if (await _activeShopId(txn) != shopId ||
+          await _checkoutOwner(txn) != userId) {
+        throw StateError('Preference shop or account changed before saving.');
+      }
+      final rows = await txn.query(
         'user_preferences',
-        {'value': value, 'updated_at': now},
-        where: 'id = ?',
-        whereArgs: [rows.single['id']],
+        where: 'shop_id = ? AND owner_user_id = ? AND key = ?',
+        whereArgs: [shopId, userId, key],
       );
-    }
+      if (rows.isNotEmpty &&
+          (onlyIfMissing ||
+              (rows.single['value'] == value &&
+                  rows.single['deleted_at'] == null))) {
+        return;
+      }
+      final now = _nowIso();
+      if (rows.isEmpty) {
+        await txn.insert('user_preferences', {
+          'uuid': '$shopId:$userId:$key',
+          'shop_id': shopId,
+          'owner_user_id': userId,
+          'key': key,
+          'value': value,
+          'created_at': now,
+          'updated_at': now,
+        });
+      } else {
+        await txn.update(
+          'user_preferences',
+          {
+            'value': value,
+            'deleted_at': key == 'app_theme_preference'
+                ? null
+                : rows.single['deleted_at'],
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [rows.single['id']],
+        );
+      }
+    });
     notifyDatabaseChanged();
+  }
+
+  Future<List<Map<String, Object?>>> portablePreferencesForScope({
+    required String shopId,
+    required String userId,
+  }) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      if (await _activeShopId(txn) != shopId ||
+          await _checkoutOwner(txn) != userId) {
+        throw StateError(
+          'Preference shop or account changed before restoring.',
+        );
+      }
+      return txn.query(
+        'user_preferences',
+        where: 'shop_id = ? AND owner_user_id = ? AND deleted_at IS NULL',
+        whereArgs: [shopId, userId],
+      );
+    });
+  }
+
+  Future<String> ensurePortablePreferenceCursorScope(String shopId) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      if (await _activeShopId(txn) != shopId) {
+        throw StateError('Preference shop changed during sync.');
+      }
+      final scope = jsonEncode([shopId, await _checkoutOwner(txn)]);
+      final rows = await txn.query(
+        'cloud_sync_state',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: ['user_preferences_cursor_scope'],
+      );
+      if (rows.isEmpty || rows.single['value'] != scope) {
+        await txn.delete(
+          'cloud_sync_state',
+          where: 'key = ?',
+          whereArgs: ['pull_cursor:user_preferences'],
+        );
+        await txn.insert('cloud_sync_state', {
+          'key': 'user_preferences_cursor_scope',
+          'value': scope,
+          'updated_at': _nowIso(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      return scope;
+    });
+  }
+
+  Future<void> savePortablePreferenceCursor(
+    String expected,
+    String timestamp, {
+    bool Function()? isTransportCurrent,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      if (isTransportCurrent?.call() == false) {
+        throw StateError('Account changed during preference sync.');
+      }
+      if (jsonEncode([await _activeShopId(txn), await _checkoutOwner(txn)]) !=
+          expected) {
+        throw StateError('Preference scope changed during sync.');
+      }
+      await txn.insert('cloud_sync_state', {
+        'key': 'pull_cursor:user_preferences',
+        'value': timestamp,
+        'updated_at': _nowIso(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  Future<void> assertPortablePreferenceCursorScope(String expected) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      if (jsonEncode([await _activeShopId(txn), await _checkoutOwner(txn)]) !=
+          expected) {
+        throw StateError('Preference scope changed during sync.');
+      }
+    });
   }
 
   /// Permanent id of this install, used to register its bill-number letter.
@@ -826,6 +922,22 @@ mixin DatabaseSync {
 
     // bill_settings is unique per shop (partial index on shop_id where not
     // deleted), so the colliding row is the shop's single live settings row.
+    if (table == 'user_preferences') {
+      final owner = map['owner_user_id'];
+      final key = map['key'];
+      if (owner is! String || key is! String || owner.isEmpty || key.isEmpty) {
+        throw StateError('Invalid private preference identity.');
+      }
+      await _mergeMatchingRow(
+        executor,
+        table,
+        map,
+        where: 'shop_id = ? AND owner_user_id = ? AND key = ?',
+        whereArgs: [shopId, owner, key],
+      );
+      return;
+    }
+
     if (table == 'bill_settings') {
       await _mergeMatchingRow(
         executor,
@@ -918,7 +1030,7 @@ mixin DatabaseSync {
     final localUpdatedAt = matches.single['updated_at']?.toString();
     final cloudUpdatedAt = map['updated_at']?.toString();
     if (!_cloudIsNewer(localUpdatedAt, cloudUpdatedAt)) {
-      if (table == 'customers') {
+      if (table == 'customers' || table == 'user_preferences') {
         // The cloud owns the UUID for an existing phone number. Keep newer
         // local details dirty, but upload them against that canonical identity.
         await executor.update(

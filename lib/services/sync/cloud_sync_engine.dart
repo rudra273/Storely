@@ -60,6 +60,7 @@ class CloudSyncEngine {
   final int pageSize;
   final Future<void> Function(bool restoring)? prepareUserData;
   final Future<void> Function()? applyUserData;
+  final bool Function()? isUserDataScopeCurrent;
 
   CloudSyncEngine({
     required this.backend,
@@ -68,6 +69,7 @@ class CloudSyncEngine {
     this.pageSize = defaultPageSize,
     this.prepareUserData,
     this.applyUserData,
+    this.isUserDataScopeCurrent,
   });
 
   static const purchaseCursorStateKey = 'purchase_document_sequence';
@@ -274,9 +276,12 @@ class CloudSyncEngine {
             );
           }
           String? recoveredUuid;
-          if (previouslyUnknown && payload['purchase_uuid'] != null &&
+          if (previouslyUnknown &&
+              payload['purchase_uuid'] != null &&
               transport is! SupplierPaymentRecoveryBackend) {
-            throw StateError('This server cannot verify the selected purchase for this saved payment.');
+            throw StateError(
+              'This server cannot verify the selected purchase for this saved payment.',
+            );
           }
           if (previouslyUnknown &&
               transport is SupplierPaymentRecoveryBackend) {
@@ -368,8 +373,18 @@ class CloudSyncEngine {
     return conflicts;
   }
 
+  void _assertPreferenceTransport() {
+    if (isUserDataScopeCurrent?.call() == false) {
+      throw StateError('Account changed during preference sync.');
+    }
+  }
+
   Future<List<SyncConflict>> _pull(String table, String shopId) async {
     final conflicts = <SyncConflict>[];
+    if (table == 'user_preferences') _assertPreferenceTransport();
+    final preferenceScope = table == 'user_preferences'
+        ? await database.ensurePortablePreferenceCursorScope(shopId)
+        : null;
     final stored = DateTime.tryParse(
       await database.getCloudSyncState(_cursorKey(table)) ?? '',
     );
@@ -381,6 +396,7 @@ class CloudSyncEngine {
     final keyColumn = table == 'app_settings' ? 'key' : 'uuid';
 
     while (true) {
+      if (preferenceScope != null) _assertPreferenceTransport();
       final page = await backend.pullPage(
         table,
         shopId: shopId,
@@ -388,7 +404,11 @@ class CloudSyncEngine {
         afterKey: afterKey,
         limit: pageSize,
       );
+      if (preferenceScope != null) _assertPreferenceTransport();
       if (page.isEmpty) break;
+      if (preferenceScope != null) {
+        await database.assertPortablePreferenceCursorScope(preferenceScope);
+      }
       conflicts.addAll(await database.cloudImportRows(table, page));
       final last = page.last;
       afterTs = DateTime.parse(last['server_updated_at'].toString());
@@ -398,18 +418,31 @@ class CloudSyncEngine {
     }
 
     if (newest != null && newest != stored) {
-      await database.setCloudSyncState(
-        _cursorKey(table),
-        newest.toUtc().toIso8601String(),
-      );
+      if (preferenceScope != null) {
+        await database.assertPortablePreferenceCursorScope(preferenceScope);
+      }
+      if (preferenceScope != null) {
+        await database.savePortablePreferenceCursor(
+          preferenceScope,
+          newest.toUtc().toIso8601String(),
+          isTransportCurrent: isUserDataScopeCurrent,
+        );
+      } else {
+        await database.setCloudSyncState(
+          _cursorKey(table),
+          newest.toUtc().toIso8601String(),
+        );
+      }
     }
     return conflicts;
   }
 
   Future<List<SyncConflict>> _push(String table) async {
+    if (table == 'user_preferences') _assertPreferenceTransport();
     final conflicts = <SyncConflict>[];
     final rows = await database.cloudDirtyRows(table);
     for (var start = 0; start < rows.length; start += pushChunkSize) {
+      if (table == 'user_preferences') _assertPreferenceTransport();
       final chunk = rows.sublist(
         start,
         start + pushChunkSize < rows.length

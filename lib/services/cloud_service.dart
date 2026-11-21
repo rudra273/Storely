@@ -174,7 +174,10 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
   bool get supportsEmailCodes => _backend?.supportsEmailCodes ?? false;
 
   Future<void> initialize() async {
-    PortablePreferencesService.install();
+    PortablePreferencesService.install(
+      authUser: () => _backend?.currentUser?.id,
+    );
+    await PortablePreferencesService.ready();
     DatabaseHelper.instance.assertAdminMutation = () async {
       if (!state.value.isAdmin) {
         throw StateError(
@@ -199,6 +202,8 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     );
     if (config != null) {
       await _startBackend(config, mode);
+    } else {
+      await _updatePreferenceAuth(null);
     }
     _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen((
       results,
@@ -293,6 +298,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
       }
     }
     await _stopBackend();
+    await _updatePreferenceAuth(null);
     state.value = const CloudState(message: 'Cloud sync disabled');
   }
 
@@ -303,14 +309,14 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     bool syncAfterAuth = true,
   }) async {
     final user = await _requireBackend().signIn(email, password);
-    _signedIn(user, 'Signed in', syncAfterAuth);
+    await _signedIn(user, 'Signed in', syncAfterAuth);
   }
 
   /// Second step of signing in, after [CloudMfaRequired].
   @override
   Future<void> completeMfa(String code, {bool syncAfterAuth = true}) async {
     final user = await _requireBackend().completeMfa(code);
-    _signedIn(user, 'Signed in', syncAfterAuth);
+    await _signedIn(user, 'Signed in', syncAfterAuth);
   }
 
   Future<SignUpOutcome> signUp(
@@ -319,6 +325,9 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     bool syncAfterAuth = true,
   }) async {
     final result = await _requireBackend().signUp(email, password);
+    if (result.outcome == SignUpOutcome.signedIn) {
+      await _updatePreferenceAuth(result.user?.id);
+    }
     state.value = state.value.copyWith(
       user: result.user,
       message: switch (result.outcome) {
@@ -352,7 +361,23 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
   Future<void> resetPassword(String email, String code, String newPassword) =>
       _requireBackend().resetPassword(email, code, newPassword);
 
-  void _signedIn(CloudUser user, String message, bool syncAfterAuth) {
+  Future<void> _updatePreferenceAuth(String? userId) async {
+    try {
+      await PortablePreferencesService.onAuthChanged(userId);
+    } catch (error, stack) {
+      AppLog.error('Restore private preferences', error, stack);
+      await PortablePreferencesService.clearVisibleProjection(
+        expectedUser: userId,
+      );
+    }
+  }
+
+  Future<void> _signedIn(
+    CloudUser user,
+    String message,
+    bool syncAfterAuth,
+  ) async {
+    await _updatePreferenceAuth(user.id);
     state.value = state.value.copyWith(
       user: user,
       message: message,
@@ -478,6 +503,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_apiUserKey);
+    await _updatePreferenceAuth(null);
     state.value = state.value.copyWith(
       clearUser: true,
       clearShopRole: true,
@@ -590,6 +616,7 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         _activationInProgress) {
       return;
     }
+    final preferenceUser = backend.currentUser!.id;
     // A request never authorizes upload. Even auth-restoration/background events
     // must wait for the approved account, local backup and explicit consent.
     if (CloudDefaults.apiAvailable) {
@@ -635,11 +662,22 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
         backend: backend.sync,
         database: DatabaseHelper.instance,
         knownIsAdmin: knownIsAdmin,
-        prepareUserData: (restoring) => PortablePreferencesService.prepare(
-          backend.currentUser!.id,
-          restoring: restoring,
-        ),
-        applyUserData: PortablePreferencesService.apply,
+        prepareUserData: (restoring) async {
+          if (backend.currentUser?.id != preferenceUser) {
+            throw StateError('Account changed during preference sync.');
+          }
+          await PortablePreferencesService.prepare(
+            preferenceUser,
+            restoring: restoring,
+          );
+        },
+        isUserDataScopeCurrent: () =>
+            _backend == backend && backend.currentUser?.id == preferenceUser,
+        applyUserData: () async {
+          if (backend.currentUser?.id == preferenceUser) {
+            await PortablePreferencesService.apply();
+          }
+        },
       ).sync(firstSyncMode: firstSyncMode);
 
       if (result.needsRegistration) {
@@ -751,11 +789,14 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
     _backend ??= await _createBackend(config, mode);
     final backend = _backend!;
     if (backend is ApiCloudBackend) await _restoreApiSession(backend);
+    await _updatePreferenceAuth(backend.currentUser?.id);
     state.value = state.value.copyWith(
       user: backend.currentUser,
       clearUser: backend.currentUser == null,
     );
-    _userSubscription ??= backend.userChanges.listen((user) {
+    _userSubscription ??= backend.userChanges.listen((user) async {
+      await _updatePreferenceAuth(user?.id);
+      if (_backend != backend || backend.currentUser?.id != user?.id) return;
       state.value = user == null
           ? state.value.copyWith(clearUser: true)
           : state.value.copyWith(user: user);

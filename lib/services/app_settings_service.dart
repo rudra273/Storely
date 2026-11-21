@@ -80,32 +80,35 @@ class AppSettingsService extends ChangeNotifier {
   /// Remembered quietly (no rebuild of the app).
   Future<void> setBillingSearchFirst(bool value) async {
     if (_billingSearchFirst == value) return;
+    final persisted = PortablePreferenceChanges.record(
+      _billingSearchFirstKey,
+      value,
+    );
     _billingSearchFirst = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_billingSearchFirstKey, value);
-    await PortablePreferenceChanges.record(_billingSearchFirstKey, value);
+    await persisted;
   }
 
   Future<void> setThemePreference(AppThemePreference value) async {
     if (_themePreference == value) return;
-    _themePreference = value;
-    notifyListeners();
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themePreferenceKey, value.storageValue);
-    await PortablePreferenceChanges.record(
+    final persisted = PortablePreferenceChanges.record(
       _themePreferenceKey,
       value.storageValue,
     );
+    _themePreference = value;
+    notifyListeners();
+
+    await persisted;
   }
 
   Future<void> setLanguage(AppLanguage value) async {
+    final persisted = PortablePreferenceChanges.record(
+      _languageKey,
+      value.storageValue,
+    );
     _languageChosen = true;
     _language = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_languageKey, value.storageValue);
-    await PortablePreferenceChanges.record(_languageKey, value.storageValue);
+    await persisted;
   }
 
   Future<void> setAppLockEnabled(bool value) async {

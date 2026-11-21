@@ -315,18 +315,22 @@ class KpiPrefs extends ChangeNotifier {
   Future<void> setEnabled(String id, bool value) async {
     final changed = value ? _enabled.add(id) : _enabled.remove(id);
     if (!changed) return;
+    final persisted = PortablePreferenceChanges.record(
+      _enabledKey,
+      _enabled.toList(),
+    );
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_enabledKey, _enabled.toList());
-    await PortablePreferenceChanges.record(_enabledKey, _enabled.toList());
+    await persisted;
   }
 
   Future<void> resetToDefaults() async {
     _enabled = _defaultEnabled();
+    final persisted = PortablePreferenceChanges.record(
+      _enabledKey,
+      _enabled.toList(),
+    );
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_enabledKey, _enabled.toList());
-    await PortablePreferenceChanges.record(_enabledKey, _enabled.toList());
+    await persisted;
   }
 
   Future<void> reload() async {
