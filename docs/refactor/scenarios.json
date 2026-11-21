@@ -264,6 +264,31 @@
           "prerequisites": "Android emulator and dedicated offline test database."
         }
       ]
+    },
+    {
+      "id": "E02-PRICING-01",
+      "name": "gst-scheme-and-pricing-defaults",
+      "state": "verified",
+      "description": "Correct an invalid pricing edit, persist a three-decimal margin, and compare regular and composition product pricing with stale registration flags.",
+      "verified_scope": "PostgreSQL settings, legacy sync, product previews and issued invoices. Localhost pricing editor and API previews. Offline Android pricing editor, current price resolution and product insert transaction.",
+      "evidence": "evidence/E02/slice-3-pricing-settings.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_pricing_settings_integration.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/gst-pricing-settings.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/pricing_settings_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
