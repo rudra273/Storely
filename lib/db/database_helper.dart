@@ -20,6 +20,7 @@ import '../models/purchase_composer_draft.dart';
 import '../utils/money.dart';
 import '../utils/decimal_text.dart';
 import '../models/pricing.dart';
+import '../models/low_stock_threshold.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
 

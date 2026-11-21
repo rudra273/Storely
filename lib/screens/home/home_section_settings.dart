@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/home_section_prefs.dart';
+import '../../models/low_stock_threshold.dart';
 
 const _countChoices = [3, 5, 10, HomeSectionPrefs.showAll];
 
@@ -171,8 +172,8 @@ Future<void> showUnpaidBillsSettings(BuildContext context) {
 /// value (DB-backed) and may throw if the user lacks permission.
 Future<void> showNeedsAttentionSettings(
   BuildContext context, {
-  required int threshold,
-  required Future<void> Function(int) onThreshold,
+  required double threshold,
+  required Future<void> Function(double) onThreshold,
 }) {
   return showDialog(
     context: context,
@@ -182,8 +183,8 @@ Future<void> showNeedsAttentionSettings(
 }
 
 class _NeedsAttentionSheet extends StatefulWidget {
-  final int threshold;
-  final Future<void> Function(int) onThreshold;
+  final double threshold;
+  final Future<void> Function(double) onThreshold;
 
   const _NeedsAttentionSheet({
     required this.threshold,
@@ -196,11 +197,17 @@ class _NeedsAttentionSheet extends StatefulWidget {
 
 class _NeedsAttentionSheetState extends State<_NeedsAttentionSheet> {
   late final TextEditingController _thresholdCtrl;
+  late double _savedThreshold;
+  bool _saving = false;
+  String? _thresholdError;
 
   @override
   void initState() {
     super.initState();
-    _thresholdCtrl = TextEditingController(text: '${widget.threshold}');
+    _savedThreshold = widget.threshold;
+    _thresholdCtrl = TextEditingController(
+      text: lowStockThresholdText(widget.threshold),
+    );
   }
 
   @override
@@ -210,20 +217,37 @@ class _NeedsAttentionSheetState extends State<_NeedsAttentionSheet> {
   }
 
   Future<void> _saveThreshold() async {
-    final value = int.tryParse(_thresholdCtrl.text.trim());
-    if (value == null || value < 0 || value == widget.threshold) {
-      _thresholdCtrl.text = '${widget.threshold}';
+    if (_saving) return;
+    final threshold = LowStockThreshold.parse(_thresholdCtrl.text);
+    if (threshold == null) {
+      setState(() => _thresholdError = 'Use 0–999999999, up to 4 decimals');
       return;
     }
+    if (threshold.value == _savedThreshold) {
+      setState(() => _thresholdError = null);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _thresholdError = null;
+    });
     try {
-      await widget.onThreshold(value);
-    } catch (_) {
-      _thresholdCtrl.text = '${widget.threshold}';
+      await widget.onThreshold(threshold.value);
+      if (!mounted) return;
+      setState(() {
+        _savedThreshold = threshold.value;
+        _thresholdCtrl.text = threshold.text;
+      });
+    } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't update threshold")),
+        setState(
+          () => _thresholdError = error is FormatException
+              ? error.message
+              : friendlyError(error),
         );
       }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -249,23 +273,31 @@ class _NeedsAttentionSheetState extends State<_NeedsAttentionSheet> {
               SizedBox(
                 width: 88,
                 child: TextField(
+                  key: const ValueKey('low-stock-threshold-input'),
+                  enabled: !_saving,
                   controller: _thresholdCtrl,
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   textAlign: TextAlign.center,
                   textInputAction: TextInputAction.done,
                   style: AppText.subtitle.copyWith(
                     color: AppColors.inkOf(context),
                   ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    suffixText: 'qty',
-                  ),
+                  decoration: InputDecoration(isDense: true, suffixText: 'qty'),
                   onTapOutside: (_) => _saveThreshold(),
                   onSubmitted: (_) => _saveThreshold(),
                 ),
               ),
             ],
           ),
+          if (_thresholdError != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _thresholdError!,
+              style: AppText.caption.copyWith(color: AppColors.error),
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           const _SettingLabel('SHOW ON HOME'),
           _ChoiceChips<int>(

@@ -218,7 +218,7 @@ mixin DatabaseSettings {
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
-  Future<int> getLowStockThreshold() async {
+  Future<double> getLowStockThreshold() async {
     final db = await database;
     final shopId = await _activeShopId(db);
     final rows = await db.query(
@@ -229,24 +229,49 @@ mixin DatabaseSettings {
       limit: 1,
     );
     if (rows.isEmpty) return 5;
-    final value = int.tryParse(rows.first['value']?.toString() ?? '');
-    return value == null || value < 0 ? 5 : value;
+    return LowStockThreshold.parse(rows.first['value']?.toString())?.value ?? 5;
   }
 
-  Future<void> saveLowStockThreshold(int value) async {
+  Future<void> saveLowStockThreshold(
+    num value, {
+    SettingsEditBaseline? baseline,
+  }) async {
+    await _persistLowStockThreshold(value, baseline);
+  }
+
+  Future<SettingsEditBaseline> saveLowStockThresholdWithBaseline(
+    num value, {
+    required SettingsEditBaseline baseline,
+  }) => _persistLowStockThreshold(value, baseline);
+
+  Future<SettingsEditBaseline> _persistLowStockThreshold(
+    num value,
+    SettingsEditBaseline? baseline,
+  ) async {
     await _requireAdminMutation();
-    if (value < 0) {
-      throw ArgumentError('Minimum stock cannot be negative');
+    final threshold = LowStockThreshold.parse(value.toString());
+    if (threshold == null) {
+      throw const FormatException(
+        'Minimum stock must be between 0 and 999999999 with at most 4 decimal places.',
+      );
     }
     final db = await database;
-    final shopId = await _activeShopId(db);
-    await db.insert('app_settings', {
-      'key': _lowStockThresholdKey,
-      'shop_id': shopId,
-      'value': value.toString(),
-      'updated_at': _nowIso(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final saved = await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
+      if (!_canMutateAsAdmin()) {
+        throw StateError(
+          'Only a shop owner/admin can change the minimum stock.',
+        );
+      }
+      await _saveSetting(txn, _lowStockThresholdKey, threshold.text);
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
+      );
+    });
     notifyDatabaseChanged();
+    return saved;
   }
 
   Future<List<String>> getUnits() async {

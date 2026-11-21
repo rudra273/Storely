@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 /// Stock quantities are doubles (kg, litre, ...). Summing decimal movements
 /// drifts by tiny amounts (0.3 - 0.1 - 0.1 = 0.0999...), so stock checks
@@ -126,10 +127,16 @@ class Product {
 
   /// Tracked stock at or below this product's reorder level (or the shop
   /// default [shopThreshold] when it has none).
-  bool isLowStock(num shopThreshold) =>
-      trackStock &&
-      quantity <=
-          (reorderLevel ?? shopThreshold.toDouble()) + stockQuantityEpsilon;
+  bool isLowStock(num shopThreshold) {
+    if (!trackStock) return false;
+    final threshold = reorderLevel ?? shopThreshold.toDouble();
+    if (!quantity.isFinite || !threshold.isFinite) return quantity <= threshold;
+    // Warning classification only: a few binary rounding bits cover SQLite REAL
+    // sums and near-zero cancellation, without stock movement's broad 1e-6.
+    final magnitude = math.max(1.0, math.max(quantity.abs(), threshold.abs()));
+    final roundoff = 2 * 2.220446049250313e-16 * magnitude;
+    return quantity <= threshold + roundoff;
+  }
 
   double get mrp => sellingPrice;
   bool get isImported => source == ProductSource.imported;

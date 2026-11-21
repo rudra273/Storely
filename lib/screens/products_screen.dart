@@ -92,7 +92,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   bool _searchOpen = false;
   bool _isUpdatingPrices = false;
   bool _isOpeningRequestedPurchaseFlow = false;
-  int _lowStockThreshold = 5;
+  double _lowStockThreshold = 5;
   DateTime? _selectedPurchaseDate;
   _ProductSortMode _sortMode = _ProductSortMode.lastAdded;
 

@@ -387,6 +387,22 @@ Future<void> verifyCleanRestore(
         ),
         isTrue,
       );
+
+      // The shop setting uses the same synced row in the web editor and SQLite.
+      final settingsPath = '/v1/shops/$sourceShop/invoice-settings';
+      await helper.saveLowStockThreshold(23.5012);
+      await service.syncNow(reason: 'Push Android low-stock threshold');
+      expect(service.state.value.error, isNull);
+      final fromAndroid = await web.getJson(settingsPath);
+      expect(fromAndroid['low_stock_threshold'], '23.5012');
+      final fromWeb = await web.patchJson(settingsPath, {
+        'low_stock_threshold': '18.2501',
+        'expected_revision': fromAndroid['revision'],
+      });
+      expect(fromWeb['low_stock_threshold'], '18.2501');
+      await service.syncNow(reason: 'Pull web low-stock threshold');
+      expect(service.state.value.error, isNull);
+      expect(await helper.getLowStockThreshold(), 18.2501);
     } finally {
       web.dispose();
     }
@@ -403,4 +419,5 @@ Future<void> verifyCleanRestore(
     (await helper.getAllProducts()).any((p) => p.name == 'Parity Rice Web'),
     isTrue,
   );
+  expect(await helper.getLowStockThreshold(), 18.2501);
 }

@@ -56,7 +56,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _todayBillCount = 0;
   double _todaySales = 0;
   double _todayCollected = 0;
-  int _lowStockThreshold = 5;
   String? _shopName;
   final _homeSearchCtrl = TextEditingController();
   String _homeSearchQuery = '';
@@ -112,6 +111,24 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Product> get _displayedLowStock =>
       _lowStockProducts.take(HomeSectionPrefs.instance.attentionCount).toList();
 
+  Future<void> _editLowStockThreshold() async {
+    final db = DatabaseHelper.instance;
+    var baseline = await db.captureSettingsEditBaseline();
+    final threshold = await db.getLowStockThreshold();
+    if (!mounted) return;
+    await showNeedsAttentionSettings(
+      context,
+      threshold: threshold,
+      onThreshold: (value) async {
+        baseline = await db.saveLowStockThresholdWithBaseline(
+          value,
+          baseline: baseline,
+        );
+        await _loadData();
+      },
+    );
+  }
+
   Future<void> _loadData() async {
     final db = DatabaseHelper.instance;
     final products = await db.getAllProducts();
@@ -142,7 +159,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _pendingByCustomerId = pending.byCustomerId;
       _pendingByPhone = pending.byPhone;
       _shopName = shopName;
-      _lowStockThreshold = lowStockThreshold;
       _lowStockProducts = products
           .where((p) => p.isLowStock(lowStockThreshold))
           .toList();
@@ -310,15 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: context.l10n.needsAttention,
                                 actionLabel: context.l10n.viewAll,
                                 onAction: () => widget.onNavigate(1),
-                                onMenu: () => showNeedsAttentionSettings(
-                                  context,
-                                  threshold: _lowStockThreshold,
-                                  onThreshold: (v) async {
-                                    await DatabaseHelper.instance
-                                        .saveLowStockThreshold(v);
-                                    await _loadData();
-                                  },
-                                ),
+                                onMenu: _editLowStockThreshold,
                               ),
                               const SizedBox(height: AppSpacing.md),
                               _NeedsAttentionSection(

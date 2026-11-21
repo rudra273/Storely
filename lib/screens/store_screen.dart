@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../models/bill_settings.dart';
 import '../models/product.dart';
+import '../models/low_stock_threshold.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
@@ -55,7 +56,7 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _units = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
   InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
-  int _lowStockThreshold = 5;
+  double _lowStockThreshold = 5;
   bool _isLoading = true;
   String? _appVersion;
 
@@ -177,18 +178,21 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _editLowStockThreshold() async {
-    final value = await showDialog<int>(
+    final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
+    final current = await db.getLowStockThreshold();
+    if (!mounted) return;
+    final value = await showDialog<double>(
       context: context,
       builder: (_) => _NumberDialog(
         title: 'Needs Attention',
         label: 'Minimum Stock',
-        initialValue: _lowStockThreshold,
+        initialValue: current,
+        onSave: (value) => db.saveLowStockThreshold(value, baseline: baseline),
       ),
     );
     if (value == null) return;
-    await _runStoreAction(
-      () => DatabaseHelper.instance.saveLowStockThreshold(value),
-    );
+    await _loadStoreData();
   }
 
   void _openPrivacyPolicy() {
@@ -586,7 +590,8 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Low-stock alert',
-                    subtitle: 'Show stock at $_lowStockThreshold or below',
+                    subtitle:
+                        'Show stock at ${lowStockThresholdText(_lowStockThreshold)} or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
