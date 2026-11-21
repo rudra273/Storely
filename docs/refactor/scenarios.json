@@ -289,6 +289,36 @@
           "prerequisites": "Android emulator and dedicated offline test database."
         }
       ]
+    },
+    {
+      "id": "E02-STOCK-01",
+      "name": "shop-wide-low-stock-threshold",
+      "state": "verified",
+      "description": "Edit one shop default from existing screens and use it consistently for tracked stock warnings, filters, and counts.",
+      "verified_scope": "Effective fallback, exact boundary, invalid draft retention, settings revision, product override, dashboard and catalog behavior, offline Android and browser persistence, and native app settings sync.",
+      "evidence": "evidence/E02/slice-3-low-stock-threshold.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_low_stock_settings.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/low-stock-settings.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture with ten units in stock."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/low_stock_threshold_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-device-premium DEVICE=emulator-5554",
+          "prerequisites": "Android emulator and local Docker API. Run in an exclusive device and API window with a synthetic Premium fixture."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

@@ -184,7 +184,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
-| E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Next align low-stock threshold settings and complete broader account, settings, locale and phase-exit checks. |
+| E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Next isolate portable preferences by account and shop, then complete broader account, locale and phase-exit checks. |
 | E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
