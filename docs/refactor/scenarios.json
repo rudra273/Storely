@@ -319,6 +319,30 @@
           "prerequisites": "Android emulator and local Docker API. Run in an exclusive device and API window with a synthetic Premium fixture."
         }
       ]
+    },
+    {
+      "id": "E02-PREFS-01",
+      "name": "portable-workspace-appearance-and-account-handoff",
+      "state": "verified",
+      "description": "Restore one account and shop's private appearance, isolate preferences on a switch, and sync theme changes between web and Android.",
+      "evidence": "evidence/E02/slice-3-portable-preferences.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_theme_preferences.py tests/test_complete_sync.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/workspace-theme.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and synthetic accounts with two paid workspace scopes."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test --no-pub integration_test/portable_theme_on_device_test.dart --no-uninstall -d emulator-5556",
+          "prerequisites": "Dedicated Android emulator, local API runtime defines, and run-owned owner and staff credentials for the same paid shop supplied as secure Dart defines."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

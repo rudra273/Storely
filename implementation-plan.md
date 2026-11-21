@@ -118,7 +118,9 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 **Execution update (21 November 2026).** The shop-wide [low-stock threshold](docs/refactor/contracts/E02-slice-3-low-stock-threshold.md) now uses the same decimal settings contract across API, web and Android. Catalog and dashboard consume the same effective setting, with product reorder levels taking precedence. Android Store and Home and web Shop details passed runtime checks, including live Android and REST sync in both directions. [Low-stock evidence](docs/refactor/evidence/E02/slice-3-low-stock-threshold.md).
 
-Next isolate portable preferences by account and shop. Verify that an account whose cloud preference rows are absent receives defaults after switching. Check EN/HI and theme parity across clients, then onboarding, search and notifications before E02 phase exit.
+**Execution update (21 November 2026).** [Portable preferences](docs/refactor/contracts/E02-slice-3-portable-preferences.md) now follow the active Android account and shop, including defaults for absent settings. The web Appearance picker syncs with Android for the active paid workspace. [Preference verification](docs/refactor/evidence/E02/slice-3-portable-preferences.md).
+
+Next align English and Hindi on the existing web flows and connect web language selection to the portable preference contract. Then review onboarding, search and notifications before E02 phase exit.
 
 - API: expose/validate shared settings and capability responses where necessary; preserve existing account/security and entitlement behavior.
 - Mobile: unified sale steps and explicit payment choice, complete checkout draft persistence, hold/resume/discard, safe child-editor return, validation/focus/error states.
