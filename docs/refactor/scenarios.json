@@ -343,6 +343,31 @@
           "prerequisites": "Dedicated Android emulator, local API runtime defines, and run-owned owner and staff credentials for the same paid shop supplied as secure Dart defines."
         }
       ]
+    },
+    {
+      "id": "E02-ONBOARD-01",
+      "name": "first-invoice-onboarding",
+      "state": "verified",
+      "description": "Use Home guidance in a fresh shop to add a tracked product, recover checkout, choose partial settlement and save one invoice.",
+      "verified_scope": "Normal UI on localhost against Docker and on offline Android, matching total, partial payment, balance and stock. Recovery and retry produce one invoice on both. API and browser verify that cancellation preserves completion.",
+      "evidence": "evidence/E02/first-invoice-onboarding.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_first_invoice_onboarding.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/first-invoice-onboarding.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and a disposable empty paid owner shop."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test --no-pub integration_test/first_invoice_onboarding_test.dart --no-uninstall -d emulator-5556",
+          "prerequisites": "Dedicated Android emulator and isolated offline test database."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

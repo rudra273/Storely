@@ -120,7 +120,9 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 **Execution update (21 November 2026).** [Portable preferences](docs/refactor/contracts/E02-slice-3-portable-preferences.md) now follow the active Android account and shop, including defaults for absent settings. The web Appearance picker syncs with Android for the active paid workspace. [Preference verification](docs/refactor/evidence/E02/slice-3-portable-preferences.md).
 
-Next align English and Hindi on the existing web flows and connect web language selection to the portable preference contract. Then review onboarding, search and notifications before E02 phase exit.
+**Execution update (21 November 2026).** [First-invoice onboarding](docs/refactor/contracts/E02-first-invoice-onboarding.md) now guides owners from Home to their first product and saved invoice. The [paired tests](docs/refactor/evidence/E02/first-invoice-onboarding.md) verified recovery and a single stock movement on localhost and offline Android.
+
+Web Hindi localization and portable web language selection are deferred by the owner. Continue with search and notifications before E02 phase exit.
 
 - API: expose/validate shared settings and capability responses where necessary; preserve existing account/security and entitlement behavior.
 - Mobile: unified sale steps and explicit payment choice, complete checkout draft persistence, hold/resume/discard, safe child-editor return, validation/focus/error states.
