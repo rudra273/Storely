@@ -1,18 +1,27 @@
 part of '../scan_screen.dart';
 
+enum _BillCreatedAction { newBill, done, viewInvoice }
+
 class _BillSummaryRow extends StatelessWidget {
   final String label;
   final String value;
   final bool isTotal;
+  final Key? valueKey;
+  final Color? valueColor;
 
   const _BillSummaryRow({
     required this.label,
     required this.value,
     this.isTotal = false,
+    this.valueKey,
+    this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final labelColor = isTotal
+        ? AppColors.inkOf(context)
+        : AppColors.inkMutedOf(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -20,7 +29,7 @@ class _BillSummaryRow extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: isTotal ? AppColors.textDark : AppColors.textMuted,
+              color: labelColor,
               fontSize: isTotal ? 16 : 14,
               fontWeight: isTotal ? FontWeight.w800 : FontWeight.w500,
             ),
@@ -28,8 +37,9 @@ class _BillSummaryRow extends StatelessWidget {
           const Spacer(),
           Text(
             value,
+            key: valueKey,
             style: TextStyle(
-              color: isTotal ? AppColors.textDark : AppColors.textMuted,
+              color: valueColor ?? labelColor,
               fontSize: isTotal ? 20 : 14,
               fontWeight: isTotal ? FontWeight.w800 : FontWeight.w700,
             ),
@@ -41,15 +51,17 @@ class _BillSummaryRow extends StatelessWidget {
 }
 
 /// "Bill Created!" with the next steps: share the PDF (WhatsApp, print...),
-/// start a new bill, or finish. Android back counts as Done.
+/// view the saved invoice, start a new bill, or finish.
 class _BillCreatedDialog extends StatefulWidget {
   final Bill? bill;
   final double totalAmount;
+  final double paidAmount;
   final String summary;
 
   const _BillCreatedDialog({
     required this.bill,
     required this.totalAmount,
+    required this.paidAmount,
     required this.summary,
   });
 
@@ -102,63 +114,120 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final total = widget.bill?.totalAmount ?? widget.totalAmount;
+    final received = widget.bill?.paidAmount ?? widget.paidAmount;
+    final balanceDue =
+        widget.bill?.balanceDue ??
+        (total - received).clamp(0.0, total).toDouble();
     return AlertDialog(
       icon: const Icon(Icons.check_circle, color: AppColors.success, size: 48),
       title: Text(context.l10n.billCreated),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            rupees(widget.totalAmount),
-            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            widget.summary,
-            style: TextStyle(color: AppColors.inkMutedOf(context)),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: widget.bill == null || _sharing ? null : _share,
-              icon: _sharing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.share_rounded),
-              label: Text(context.l10n.sharePdf),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              rupees(total),
+              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
             ),
-          ),
-          if (ThermalPrinterService.instance.isConfigured) ...[
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              widget.summary,
+              style: TextStyle(color: AppColors.inkMutedOf(context)),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.softBgOf(context),
+                borderRadius: AppRadius.mdRadius,
+                border: Border.all(color: AppColors.borderOf(context)),
+              ),
+              child: Column(
+                children: [
+                  _BillSummaryRow(
+                    label: context.l10n.total,
+                    value: rupees(total),
+                    valueKey: const ValueKey('checkout-completion-total'),
+                  ),
+                  _BillSummaryRow(
+                    label: context.l10n.received,
+                    value: rupees(received),
+                    valueKey: const ValueKey('checkout-completion-received'),
+                  ),
+                  _BillSummaryRow(
+                    label: 'Balance due',
+                    value: rupees(balanceDue),
+                    valueKey: const ValueKey('checkout-completion-balance'),
+                    valueColor: balanceDue > 0.005 ? AppColors.error : null,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: widget.bill == null || _printing ? null : _print,
-                icon: _printing
+                onPressed: widget.bill == null || _sharing ? null : _share,
+                icon: _sharing
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.print_rounded),
-                label: Text(context.l10n.printReceipt),
+                    : const Icon(Icons.share_rounded),
+                label: Text(context.l10n.sharePdf),
+              ),
+            ),
+            if (ThermalPrinterService.instance.isConfigured) ...[
+              const SizedBox(height: AppSpacing.sm),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: widget.bill == null || _printing ? null : _print,
+                  icon: _printing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.print_rounded),
+                  label: Text(context.l10n.printReceipt),
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('checkout-completion-view'),
+                onPressed: widget.bill == null
+                    ? null
+                    : () => Navigator.pop(
+                        context,
+                        _BillCreatedAction.viewInvoice,
+                      ),
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('View invoice'),
               ),
             ),
           ],
-        ],
+        ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, true),
+          key: const ValueKey('checkout-completion-new'),
+          onPressed: () => Navigator.pop(context, _BillCreatedAction.newBill),
           child: Text(context.l10n.newBill),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, false),
+          key: const ValueKey('checkout-completion-done'),
+          onPressed: () => Navigator.pop(context, _BillCreatedAction.done),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.brandOf(context),
             foregroundColor: AppColors.isDark(context)

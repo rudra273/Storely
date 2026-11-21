@@ -2,15 +2,23 @@ part of '../scan_screen.dart';
 
 class _BillCheckoutSheet extends StatefulWidget {
   final List<Customer> customers;
+  final Map<String, dynamic> initialState;
+  final Future<void> Function(Map<String, dynamic>) onRawChanged;
 
   /// Payable totals for a discount %, from the same calculator used to save
   /// the bill, so the preview always matches the saved invoice.
   final BillTotals Function(double discountPercent) totalsFor;
   final int itemCount;
   final Bill? initialBill;
+  final Future<void> Function() onReview;
+  final Future<({int id, BillTotals totals})> Function(_BillDraft) onSave;
 
   const _BillCheckoutSheet({
     required this.customers,
+    required this.initialState,
+    required this.onRawChanged,
+    required this.onSave,
+    required this.onReview,
     required this.totalsFor,
     required this.itemCount,
     this.initialBill,
@@ -30,6 +38,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _stateCodeController = TextEditingController();
   final _discountController = TextEditingController();
   final _paidAmountController = TextEditingController();
+  final _cashReceivedController = TextEditingController();
   final _transactionIdController = TextEditingController();
 
   final _customerFieldLink = LayerLink();
@@ -39,8 +48,12 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
 
   var _discountPercent = 0.0;
   var _billType = Bill.typeB2c;
-  // Most counter sales are paid on the spot.
-  var _paymentStatus = Bill.statusPaid;
+  String? _paymentStatus;
+  bool _allowUnassignedCredit = false;
+  bool _saving = false;
+  bool _reviewRequired = false;
+  bool _frozen = false;
+  _BillDraft? _attemptDraft;
   var _paymentMethod = 'cash';
   var _hideCustomerSuggestions = false;
 
@@ -48,44 +61,146 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   void initState() {
     super.initState();
     final bill = widget.initialBill;
-    if (bill == null) return;
-    _setCheckoutControllerText(_customerController, bill.customerName);
-    _setCheckoutControllerText(
-      _phoneController,
-      _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
-    );
-    _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
-    _setCheckoutControllerText(
-      _legalNameController,
-      bill.customerGstLegalName ?? '',
-    );
-    _setCheckoutControllerText(
-      _tradeNameController,
-      bill.customerGstTradeName ?? '',
-    );
-    _setCheckoutControllerText(
-      _addressController,
-      bill.customerAddressSnapshot ?? '',
-    );
-    _setCheckoutControllerText(
-      _stateCodeController,
-      bill.placeOfSupplyStateCode ?? '',
-    );
-    if (bill.discountPercent > 0) {
-      _discountPercent = bill.discountPercent;
+    if (bill != null) {
+      _setCheckoutControllerText(_customerController, bill.customerName);
       _setCheckoutControllerText(
-        _discountController,
-        bill.discountPercent.toStringAsFixed(2),
+        _phoneController,
+        _formatCheckoutCustomerPhoneInput(bill.customerPhone ?? ''),
       );
+      _setCheckoutControllerText(_gstinController, bill.customerGstin ?? '');
+      _setCheckoutControllerText(
+        _legalNameController,
+        bill.customerGstLegalName ?? '',
+      );
+      _setCheckoutControllerText(
+        _tradeNameController,
+        bill.customerGstTradeName ?? '',
+      );
+      _setCheckoutControllerText(
+        _addressController,
+        bill.customerAddressSnapshot ?? '',
+      );
+      _setCheckoutControllerText(
+        _stateCodeController,
+        bill.placeOfSupplyStateCode ?? '',
+      );
+      if (bill.discountPercent > 0) {
+        _discountPercent = bill.discountPercent;
+        _setCheckoutControllerText(
+          _discountController,
+          bill.discountPercent.toStringAsFixed(2),
+        );
+      }
+      _billType = bill.billType;
+      _paymentStatus = null;
+      _paymentMethod = 'cash';
+      _hideCustomerSuggestions = true;
     }
-    _billType = bill.billType;
-    _paymentStatus = Bill.statusPaid;
-    _paymentMethod = 'cash';
-    _hideCustomerSuggestions = true;
+    final raw = widget.initialState['raw'];
+    if (raw is Map) {
+      for (final entry in _rawControllers.entries) {
+        if (raw[entry.key] is String) {
+          entry.value.text = raw[entry.key] as String;
+        }
+      }
+      _discountPercent = double.tryParse(_discountController.text) ?? 0;
+      _billType = raw['billType'] == Bill.typeB2b ? Bill.typeB2b : Bill.typeB2c;
+      _paymentStatus =
+          {
+            Bill.statusPaid,
+            Bill.statusPartial,
+            Bill.statusUnpaid,
+          }.contains(raw['settlement'])
+          ? raw['settlement'] as String
+          : null;
+      _paymentMethod = normalizeCheckoutPaymentMethod(raw['method']);
+      _allowUnassignedCredit = raw['consent'] == true;
+    }
+    final pending = widget.initialState['pending'];
+    if (pending is Map) {
+      _attemptDraft = _BillDraft.fromMap(
+        Map<String, dynamic>.from(pending['draft'] as Map),
+      );
+      _frozen = true;
+    }
+    for (final controller in _rawControllers.values) {
+      controller.addListener(_rawChanged);
+    }
+    _lastRaw = jsonEncode(_raw());
+    if (!_frozen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _lastRaw = null;
+        _rawChanged();
+      });
+    }
+  }
+
+  Map<String, TextEditingController> get _rawControllers => {
+    'name': _customerController,
+    'phone': _phoneController,
+    'gstin': _gstinController,
+    'legal': _legalNameController,
+    'trade': _tradeNameController,
+    'address': _addressController,
+    'state': _stateCodeController,
+    'discount': _discountController,
+    'partial': _paidAmountController,
+    'cash': _cashReceivedController,
+    'reference': _transactionIdController,
+  };
+  String? _lastRaw;
+  String? _draftError;
+  bool _persisting = false;
+  int _rawWrites = 0;
+  Map<String, dynamic> _raw() => {
+    for (final entry in _rawControllers.entries) entry.key: entry.value.text,
+    'billType': _billType,
+    'settlement': _paymentStatus,
+    'method': _paymentMethod,
+    'consent': _allowUnassignedCredit,
+  };
+  void _rawChanged() {
+    if (_frozen) return;
+    final raw = _raw();
+    final encoded = jsonEncode(raw);
+    if (_lastRaw == encoded) return;
+    _lastRaw = encoded;
+    _rawWrites++;
+    _persisting = true;
+    widget
+        .onRawChanged(raw)
+        .then(
+          (_) {
+            if (!mounted) return;
+            setState(() {
+              _rawWrites--;
+              _persisting = _rawWrites > 0;
+              _draftError = null;
+            });
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _rawWrites--;
+              _persisting = _rawWrites > 0;
+              _draftError = 'Could not keep checkout entries: $error';
+            });
+          },
+        );
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _rawChanged();
   }
 
   @override
   void dispose() {
+    for (final controller in _rawControllers.values) {
+      controller.removeListener(_rawChanged);
+    }
     _customerController.dispose();
     _phoneController.dispose();
     _gstinController.dispose();
@@ -95,6 +210,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _stateCodeController.dispose();
     _discountController.dispose();
     _paidAmountController.dispose();
+    _cashReceivedController.dispose();
     _transactionIdController.dispose();
     _removeSuggestionOverlay();
     _customerFocusNode.dispose();
@@ -170,29 +286,81 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _suggestionOverlay = null;
   }
 
-  void _submit(double total, double paidAmount) {
-    if (_billType == Bill.typeB2b && !_validateB2bFields()) return;
-    Navigator.pop(
-      context,
-      _BillDraft(
-        customerName: _customerController.text,
-        customerPhone: _phoneController.text,
-        billType: _billType,
-        customerGstin: _gstinController.text,
-        customerGstLegalName: _legalNameController.text,
-        customerGstTradeName: _tradeNameController.text,
-        customerAddress: _addressController.text,
-        placeOfSupplyStateCode: _stateCodeController.text.trim().isEmpty
-            ? _gstinController.text.trim()
-            : _stateCodeController.text,
-        discountPercent: _discountPercent.clamp(0, 100).toDouble(),
-        paidAmount: paidAmount.clamp(0, total).toDouble(),
-        paymentMethod: _paymentMethod,
-        transactionReference: _paymentMethod == 'online'
-            ? _transactionIdController.text
-            : null,
-      ),
-    );
+  String? _checkoutPhone() {
+    final digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.isEmpty || digits == '91' ? null : digits;
+  }
+
+  Future<void> _submit(double total) async {
+    if (_saving || _reviewRequired || _draftError != null) return;
+    if (!_frozen && _billType == Bill.typeB2b && !_validateB2bFields()) return;
+    try {
+      if (_attemptDraft == null) {
+        final phone = _checkoutPhone();
+        if (phone != null && (phone.length < 10 || phone.length > 12)) {
+          throw const FormatException('Enter a valid customer phone number.');
+        }
+        final paise = checkoutPaidPaise(
+          settlement: _paymentStatus,
+          partialText: _paidAmountController.text,
+          totalPaise: decimalScaledInteger(total.toStringAsFixed(2), scale: 2),
+          hasCustomer: phone != null,
+          allowUnassignedCredit: _allowUnassignedCredit,
+        );
+        final paidAmount = paise.toDouble() / 100;
+        final normalizedMethod = _paymentStatus == Bill.statusUnpaid
+            ? 'cash'
+            : _paymentMethod;
+        final trimmedReference = _transactionIdController.text.trim();
+        _attemptDraft = _BillDraft(
+          customerName: _customerController.text,
+          customerPhone: _checkoutPhone(),
+          billType: _billType,
+          customerGstin: _gstinController.text,
+          customerGstLegalName: _legalNameController.text,
+          customerGstTradeName: _tradeNameController.text,
+          customerAddress: _addressController.text,
+          placeOfSupplyStateCode: _stateCodeController.text.trim().isEmpty
+              ? _gstinController.text.trim()
+              : _stateCodeController.text,
+          discountPercent: _discountPercent.clamp(0, 100).toDouble(),
+          paidAmount: paidAmount,
+          paymentMethod: normalizedMethod,
+          transactionReference:
+              (_paymentStatus == Bill.statusUnpaid ||
+                  normalizedMethod == 'cash' ||
+                  trimmedReference.isEmpty)
+              ? null
+              : trimmedReference,
+        );
+      }
+      FocusManager.instance.primaryFocus?.unfocus();
+      setState(() {
+        _saving = true;
+        _frozen = true;
+      });
+      final saved = await widget.onSave(_attemptDraft!);
+      if (!mounted) return;
+      Navigator.pop(context, (
+        draft: _attemptDraft!,
+        id: saved.id,
+        totals: saved.totals,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      if (error is CheckoutReviewChanged) {
+        _frozen = false;
+        _reviewRequired = true;
+      }
+      _showCheckoutError(
+        error
+            .toString()
+            .replaceFirst('FormatException: ', '')
+            .replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   bool _validateB2bFields() {
@@ -238,6 +406,14 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     final totals = widget.totalsFor(percent);
     final discount = totals.discountAmount;
     final total = totals.grandTotal;
+    final totalPaise = decimalScaledInteger(total.toStringAsFixed(2), scale: 2);
+    final changePaise =
+        _paymentStatus == Bill.statusPaid && _paymentMethod == 'cash'
+        ? checkoutChangePaise(
+            cashText: _cashReceivedController.text,
+            totalPaise: totalPaise,
+          )
+        : null;
     final parsedPaid = _paymentStatus == Bill.statusPaid
         ? total
         : _paymentStatus == Bill.statusPartial
@@ -256,7 +432,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     });
 
     return PopScope(
-      canPop: true,
+      canPop: !_frozen && !_persisting && _draftError == null,
       onPopInvokedWithResult: (_, _) =>
           FocusManager.instance.primaryFocus?.unfocus(),
       child: SingleChildScrollView(
@@ -266,282 +442,439 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Text(
-                    'Create Bill',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              CompositedTransformTarget(
-                link: _customerFieldLink,
-                child: TextField(
-                  controller: _customerController,
-                  focusNode: _customerFocusNode,
-                  textCapitalization: TextCapitalization.words,
-                  onChanged: (_) =>
-                      setState(() => _hideCustomerSuggestions = false),
-                  decoration: InputDecoration(
-                    labelText: context.l10n.customerName,
-                    prefixIcon: Icon(Icons.person_outline_rounded),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                ],
-                onChanged: (_) =>
-                    setState(() => _hideCustomerSuggestions = false),
-                decoration: InputDecoration(
-                  labelText: context.l10n.phoneOptional,
-                  prefixIcon: Icon(Icons.phone_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: Bill.typeB2c,
-                    icon: Icon(Icons.person_outline_rounded),
-                    label: Text('B2C'),
-                  ),
-                  ButtonSegment(
-                    value: Bill.typeB2b,
-                    icon: Icon(Icons.business_outlined),
-                    label: Text('B2B'),
-                  ),
-                ],
-                selected: {_billType},
-                onSelectionChanged: (value) =>
-                    setState(() => _billType = value.first),
-              ),
-              if (_billType == Bill.typeB2b) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _gstinController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.customerGstin,
-                    prefixIcon: Icon(Icons.badge_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _legalNameController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.legalName,
-                    prefixIcon: Icon(Icons.business_center_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _tradeNameController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.tradeNameOpt,
-                    prefixIcon: Icon(Icons.storefront_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _addressController,
-                  minLines: 2,
-                  maxLines: 3,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.businessAddress,
-                    prefixIcon: Icon(Icons.location_on_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _stateCodeController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(2),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: context.l10n.placeOfSupplyCode,
-                    prefixIcon: Icon(Icons.map_outlined),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              _BillSummaryRow(
-                label: context.l10n.subtotal,
-                value: rupees(totals.subtotal),
-              ),
-              _BillSummaryRow(
-                label: context.l10n.items,
-                value: '${widget.itemCount}',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _discountController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: [
-                  TextInputFormatter.withFunction((oldValue, newValue) {
-                    final isValid = RegExp(
-                      r'^\d*\.?\d{0,2}$',
-                    ).hasMatch(newValue.text);
-                    return isValid ? newValue : oldValue;
-                  }),
-                ],
-                decoration: InputDecoration(
-                  labelText: context.l10n.discountPercent,
-                  suffixText: '%',
-                ),
-                onChanged: (value) {
-                  setState(
-                    () => _discountPercent = double.tryParse(value) ?? 0,
-                  );
-                },
-              ),
-              const SizedBox(height: 14),
-              SegmentedButton<String>(
-                segments: [
-                  ButtonSegment(
-                    value: Bill.statusPaid,
-                    icon: Icon(Icons.check_circle_outline),
-                    label: Text(context.l10n.paidFull),
-                  ),
-                  ButtonSegment(
-                    value: Bill.statusPartial,
-                    icon: Icon(Icons.payments_outlined),
-                    label: Text(context.l10n.partial),
-                  ),
-                  ButtonSegment(
-                    value: Bill.statusUnpaid,
-                    icon: Icon(Icons.pending_actions_outlined),
-                    label: Text(context.l10n.unpaid),
-                  ),
-                ],
-                selected: {_paymentStatus},
-                onSelectionChanged: (value) => setState(() {
-                  _paymentStatus = value.first;
-                  if (_paymentStatus == Bill.statusPaid) {
-                    _setCheckoutControllerText(
-                      _paidAmountController,
-                      total.toStringAsFixed(2),
-                    );
-                  } else if (_paymentStatus == Bill.statusUnpaid) {
-                    _setCheckoutControllerText(_paidAmountController, '');
-                  }
-                }),
-              ),
-              if (_paymentStatus == Bill.statusPartial) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _paidAmountController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    TextInputFormatter.withFunction((oldValue, newValue) {
-                      final isValid = RegExp(
-                        r'^\d*\.?\d{0,2}$',
-                      ).hasMatch(newValue.text);
-                      return isValid ? newValue : oldValue;
-                    }),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: context.l10n.amountReceived,
-                    prefixText: '₹ ',
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ],
-              if (_paymentStatus != Bill.statusUnpaid) ...[
-                const SizedBox(height: 12),
-                SegmentedButton<String>(
-                  segments: [
-                    ButtonSegment(
-                      value: 'cash',
-                      icon: Icon(Icons.payments_outlined),
-                      label: Text(context.l10n.cash),
-                    ),
-                    ButtonSegment(
-                      value: 'online',
-                      icon: Icon(Icons.account_balance_wallet_outlined),
-                      label: Text(context.l10n.online),
-                    ),
-                  ],
-                  selected: {_paymentMethod},
-                  onSelectionChanged: (value) =>
-                      setState(() => _paymentMethod = value.first),
-                ),
-                if (_paymentMethod == 'online') ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _transactionIdController,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.txnIdOptional,
-                      prefixIcon: Icon(Icons.receipt_long_outlined),
-                    ),
-                  ),
-                ],
-              ],
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                decoration: BoxDecoration(
-                  color: AppColors.softBgOf(context),
-                  borderRadius: AppRadius.mdRadius,
-                  border: Border.all(color: AppColors.borderOf(context)),
-                ),
+              IgnorePointer(
+                ignoring: _frozen,
                 child: Column(
                   children: [
-                    _BillSummaryRow(
-                      label: 'Discount (${percent.toStringAsFixed(2)}%)',
-                      value: '- ${rupees(discount)}',
+                    Row(
+                      children: [
+                        const Text(
+                          'Create Bill',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          key: const ValueKey('checkout-close'),
+                          onPressed:
+                              _frozen || _persisting || _draftError != null
+                              ? null
+                              : () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
                     ),
-                    if (totals.roundOffAmount != 0)
-                      _BillSummaryRow(
-                        label: context.l10n.roundOff,
-                        value:
-                            '${totals.roundOffAmount > 0 ? '+' : '-'} ${rupees(totals.roundOffAmount.abs())}',
+                    const SizedBox(height: 12),
+                    CompositedTransformTarget(
+                      link: _customerFieldLink,
+                      child: TextField(
+                        readOnly: _frozen,
+                        key: const ValueKey('checkout-customer'),
+                        controller: _customerController,
+                        focusNode: _customerFocusNode,
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => setState(() {
+                          _hideCustomerSuggestions = false;
+                          _allowUnassignedCredit = false;
+                        }),
+                        decoration: InputDecoration(
+                          labelText: context.l10n.customerName,
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
                       ),
-                    const Divider(height: 20),
-                    _BillSummaryRow(
-                      label: context.l10n.grandTotal,
-                      value: rupees(total),
-                      isTotal: true,
                     ),
-                    if (paidAmount > 0) ...[
-                      const Divider(height: 20),
-                      _BillSummaryRow(
-                        label: context.l10n.received,
-                        value: rupees(paidAmount),
+                    const SizedBox(height: 12),
+                    TextField(
+                      readOnly: _frozen,
+                      key: const ValueKey('checkout-phone'),
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+                      ],
+                      onChanged: (_) => setState(() {
+                        _hideCustomerSuggestions = false;
+                        _allowUnassignedCredit = false;
+                      }),
+                      decoration: InputDecoration(
+                        labelText: context.l10n.phoneOptional,
+                        prefixIcon: Icon(Icons.phone_outlined),
                       ),
-                      _BillSummaryRow(
-                        label: context.l10n.balance,
-                        value: rupees((total - paidAmount).clamp(0, total)),
+                    ),
+                    const SizedBox(height: 12),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: Bill.typeB2c,
+                          icon: Icon(Icons.person_outline_rounded),
+                          label: Text('B2C'),
+                        ),
+                        ButtonSegment(
+                          value: Bill.typeB2b,
+                          icon: Icon(Icons.business_outlined),
+                          label: Text('B2B'),
+                        ),
+                      ],
+                      selected: {_billType},
+                      onSelectionChanged: (value) =>
+                          setState(() => _billType = value.first),
+                    ),
+                    if (_billType == Bill.typeB2b) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        controller: _gstinController,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.customerGstin,
+                          prefixIcon: Icon(Icons.badge_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        controller: _legalNameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.legalName,
+                          prefixIcon: Icon(Icons.business_center_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        controller: _tradeNameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.tradeNameOpt,
+                          prefixIcon: Icon(Icons.storefront_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        controller: _addressController,
+                        minLines: 2,
+                        maxLines: 3,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.businessAddress,
+                          prefixIcon: Icon(Icons.location_on_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        controller: _stateCodeController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(2),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: context.l10n.placeOfSupplyCode,
+                          prefixIcon: Icon(Icons.map_outlined),
+                        ),
                       ),
                     ],
+                    const SizedBox(height: 12),
+                    _BillSummaryRow(
+                      label: context.l10n.subtotal,
+                      value: rupees(totals.subtotal),
+                    ),
+                    _BillSummaryRow(
+                      label: context.l10n.items,
+                      value: '${widget.itemCount}',
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      readOnly: _frozen,
+                      key: const ValueKey('checkout-discount'),
+                      controller: _discountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [
+                        TextInputFormatter.withFunction((oldValue, newValue) {
+                          final isValid = RegExp(
+                            r'^\d*\.?\d{0,2}$',
+                          ).hasMatch(newValue.text);
+                          return isValid ? newValue : oldValue;
+                        }),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: context.l10n.discountPercent,
+                        suffixText: '%',
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _discountPercent = double.tryParse(value) ?? 0;
+                          _allowUnassignedCredit = false;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: Bill.statusPaid,
+                          icon: Icon(Icons.check_circle_outline),
+                          label: Text(context.l10n.paidFull),
+                        ),
+                        ButtonSegment(
+                          value: Bill.statusPartial,
+                          icon: Icon(Icons.payments_outlined),
+                          label: Text(context.l10n.partial),
+                        ),
+                        ButtonSegment(
+                          value: Bill.statusUnpaid,
+                          icon: Icon(Icons.pending_actions_outlined),
+                          label: Text(context.l10n.unpaid),
+                        ),
+                      ],
+                      emptySelectionAllowed: true,
+                      selected: {?_paymentStatus},
+                      onSelectionChanged: (value) => setState(() {
+                        _paymentStatus = value.firstOrNull;
+                        _allowUnassignedCredit = false;
+                        if (_paymentStatus == Bill.statusPaid) {
+                          _setCheckoutControllerText(
+                            _paidAmountController,
+                            total.toStringAsFixed(2),
+                          );
+                        } else if (_paymentStatus == Bill.statusUnpaid) {
+                          _setCheckoutControllerText(_paidAmountController, '');
+                        }
+                      }),
+                    ),
+                    if (_paymentStatus == Bill.statusPartial) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        readOnly: _frozen,
+                        key: const ValueKey('checkout-partial-amount'),
+                        controller: _paidAmountController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: context.l10n.amountReceived,
+                          prefixText: '₹ ',
+                        ),
+                        onChanged: (_) =>
+                            setState(() => _allowUnassignedCredit = false),
+                      ),
+                    ],
+                    if (_paymentStatus != null &&
+                        _paymentStatus != Bill.statusUnpaid) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final method in checkoutPaymentMethods)
+                              ChoiceChip(
+                                key: ValueKey('checkout-method-$method'),
+                                label: Text(paymentMethodLabel(method)),
+                                selected: _paymentMethod == method,
+                                onSelected: _frozen
+                                    ? null
+                                    : (_) => setState(() {
+                                        _paymentMethod = method;
+                                        _allowUnassignedCredit = false;
+                                      }),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (_paymentStatus == Bill.statusPaid &&
+                          _paymentMethod == 'cash') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          readOnly: _frozen,
+                          key: const ValueKey('checkout-cash-received'),
+                          controller: _cashReceivedController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            TextInputFormatter.withFunction((
+                              oldValue,
+                              newValue,
+                            ) {
+                              final isValid = RegExp(
+                                r'^\d*\.?\d{0,2}$',
+                              ).hasMatch(newValue.text);
+                              return isValid ? newValue : oldValue;
+                            }),
+                          ],
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Cash received',
+                            hintText: 'Optional',
+                            prefixText: '₹ ',
+                          ),
+                        ),
+                        if (changePaise != null &&
+                            changePaise > BigInt.zero) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.softBgOf(context),
+                              borderRadius: AppRadius.smRadius,
+                              border: Border.all(
+                                color: AppColors.borderOf(context),
+                              ),
+                            ),
+                            child: Text(
+                              'Change to return ${rupeesFromPaise(changePaise)}',
+                              key: const ValueKey('checkout-change-due'),
+                              style: AppText.subtitle.copyWith(
+                                color: AppColors.success,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                      if (_paymentMethod != 'cash') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          readOnly: _frozen,
+                          key: const ValueKey('checkout-reference'),
+                          controller: _transactionIdController,
+                          maxLength: 100,
+                          onChanged: (_) =>
+                              setState(() => _allowUnassignedCredit = false),
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Reference (optional)',
+                            prefixIcon: Icon(Icons.receipt_long_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Storely records the payment method and reference on the invoice; it does not collect the payment itself.',
+                            style: AppText.caption,
+                          ),
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      decoration: BoxDecoration(
+                        color: AppColors.softBgOf(context),
+                        borderRadius: AppRadius.mdRadius,
+                        border: Border.all(color: AppColors.borderOf(context)),
+                      ),
+                      child: Column(
+                        children: [
+                          _BillSummaryRow(
+                            label: 'Discount (${percent.toStringAsFixed(2)}%)',
+                            value: '- ${rupees(discount)}',
+                          ),
+                          if (totals.roundOffAmount != 0)
+                            _BillSummaryRow(
+                              label: context.l10n.roundOff,
+                              value:
+                                  '${totals.roundOffAmount > 0 ? '+' : '-'} ${rupees(totals.roundOffAmount.abs())}',
+                            ),
+                          const Divider(height: 20),
+                          _BillSummaryRow(
+                            label: context.l10n.grandTotal,
+                            value: rupees(total),
+                            isTotal: true,
+                          ),
+                          if (paidAmount > 0) ...[
+                            const Divider(height: 20),
+                            _BillSummaryRow(
+                              label: context.l10n.received,
+                              value: rupees(paidAmount),
+                            ),
+                            _BillSummaryRow(
+                              label: context.l10n.balance,
+                              value: rupees(
+                                (total - paidAmount).clamp(0, total),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if ((_paymentStatus == Bill.statusPartial ||
+                            _paymentStatus == Bill.statusUnpaid) &&
+                        _checkoutPhone() == null)
+                      CheckboxListTile(
+                        key: const ValueKey('checkout-unassigned-consent'),
+                        title: const Text('Keep this balance unassigned'),
+                        subtitle: const Text(
+                          'Add a customer with a phone number to put this balance on their account. Unassigned balances can be collected from the invoice.',
+                        ),
+                        value: _allowUnassignedCredit,
+                        onChanged: (value) => setState(
+                          () => _allowUnassignedCredit = value ?? false,
+                        ),
+                      ),
                   ],
                 ),
               ),
               const SizedBox(height: 18),
+              if (_draftError != null) ...[
+                Text(_draftError!),
+                TextButton(
+                  onPressed: () {
+                    _lastRaw = null;
+                    _rawChanged();
+                  },
+                  child: const Text('Retry keeping checkout entries'),
+                ),
+              ],
+              if (_reviewRequired)
+                TextButton(
+                  key: const ValueKey('checkout-review-latest'),
+                  onPressed: _saving
+                      ? null
+                      : () async {
+                          setState(() => _saving = true);
+                          try {
+                            await widget.onReview();
+                            if (!mounted) return;
+                            setState(() {
+                              _reviewRequired = false;
+                              _attemptDraft = null;
+                              _paymentStatus = null;
+                              _allowUnassignedCredit = false;
+                              _paidAmountController.clear();
+                            });
+                          } catch (error) {
+                            if (mounted) _showCheckoutError(error.toString());
+                          } finally {
+                            if (mounted) setState(() => _saving = false);
+                          }
+                        },
+                  child: const Text('Review latest settings and total'),
+                ),
+              if (_frozen)
+                const Text(
+                  'Checkout details are kept. Retry this same save to recover its result.',
+                ),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () => _submit(total, paidAmount),
+                  key: const ValueKey('checkout-save'),
+                  onPressed: _saving || _reviewRequired
+                      ? null
+                      : () => _submit(total),
                   icon: const Icon(Icons.receipt_long_rounded),
                   label: Text(context.l10n.generateBill),
                   style: FilledButton.styleFrom(

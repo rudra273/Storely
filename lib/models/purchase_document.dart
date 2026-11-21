@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../utils/decimal_text.dart';
+
 /// Four-place stock decimals, allowing only insignificant double representation drift.
 String purchaseDecimal(num value) {
   if (!value.isFinite || value < 0 || value > 9999999999.9999) {
@@ -21,27 +23,24 @@ String normalizePurchaseDecimal(String value) {
   if (!RegExp(r'^\d+(\.\d{1,4})?$').hasMatch(value)) {
     throw const FormatException('Invalid purchase decimal');
   }
-  final parts = value.split('.');
-  final whole = BigInt.parse(parts[0]).toString();
-  final fraction = parts.length == 1
-      ? ''
-      : parts[1].replaceFirst(RegExp(r'0+$'), '');
-  return fraction.isEmpty ? whole : '$whole.$fraction';
+  return normalizeDecimalText(value, scale: 4);
 }
 
 BigInt purchaseLineCents(String quantity, String cost) {
-  BigInt scaled(String text) {
-    final parts = normalizePurchaseDecimal(text).split('.');
-    return BigInt.parse(parts[0]) * BigInt.from(10000) +
-        BigInt.parse((parts.length == 1 ? '' : parts[1]).padRight(4, '0'));
-  }
-
-  return (scaled(quantity) * scaled(cost) + BigInt.from(500000)) ~/
+  final scaledQuantity = decimalScaledInteger(
+    normalizePurchaseDecimal(quantity),
+    scale: 4,
+  );
+  final scaledCost = decimalScaledInteger(
+    normalizePurchaseDecimal(cost),
+    scale: 4,
+  );
+  return (scaledQuantity * scaledCost + BigInt.from(500000)) ~/
       BigInt.from(1000000);
 }
 
 String purchaseCentsText(BigInt value) =>
-    '${value ~/ BigInt.from(100)}.${(value % BigInt.from(100)).toString().padLeft(2, '0')}';
+    decimalTextFromScaled(value, scale: 2, fixed: true);
 
 String purchaseMoney(String value) {
   final normalized = normalizePurchaseDecimal(value).split('.');
@@ -101,6 +100,17 @@ class PurchaseDocument {
   String get date => _json['purchase_date'] as String;
   String get createdAt => _json['created_at'] as String;
   String get subtotal => _json['subtotal'] as String;
+  String get paymentStatus =>
+      _json['payment_status'] as String? ?? 'not_recorded';
+  String? get total => _json['total'] as String?;
+  String? get balanceDue => _json['balance_due'] as String?;
+  String get taxAmount => _json['tax_amount'] as String? ?? '0';
+  String get chargesAmount => _json['charges_amount'] as String? ?? '0';
+  String get discountAmount => _json['discount_amount'] as String? ?? '0';
+  List<Map<String, dynamic>> get payments => [
+    for (final row in _json['payments'] as List? ?? [])
+      Map<String, dynamic>.from(row as Map),
+  ];
   String get origin => _json['origin']?.toString() ?? 'web';
   String? get supplier => _json['supplier_name'] as String?;
   int get sequence => (_json['change_sequence'] as num?)?.toInt() ?? 0;

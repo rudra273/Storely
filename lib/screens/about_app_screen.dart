@@ -2,8 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../theme/app_theme.dart';
 
-class AboutAppScreen extends StatelessWidget {
+class AboutAppScreen extends StatefulWidget {
   const AboutAppScreen({super.key});
+
+  @override
+  State<AboutAppScreen> createState() => _AboutAppScreenState();
+}
+
+class _AboutAppScreenState extends State<AboutAppScreen> {
+  late final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
@@ -47,13 +54,11 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Version', style: AppText.subtitle),
                 const Spacer(),
                 FutureBuilder<PackageInfo>(
-                  future: PackageInfo.fromPlatform(),
+                  future: _packageInfo,
                   builder: (context, snapshot) {
                     final info = snapshot.data;
                     return Text(
-                      info == null
-                          ? '1.0.4'
-                          : '${info.version}+${info.buildNumber}',
+                      info == null ? '' : '${info.version}+${info.buildNumber}',
                       style: AppText.body.copyWith(color: AppColors.inkMuted),
                     );
                   },
@@ -134,7 +139,7 @@ class AboutAppScreen extends StatelessWidget {
                 Text('Release Notes', style: AppText.subtitle),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Version 1.0.4 brings refinements to the billing flow, a redesigned full bill page, quick navigation improvements, GST display fixes, the account section, and bug fixes for a smoother experience.',
+                  'Storely 1.0.0 — first release. Manage products, create bills, track sales and stock, with optional cloud sync.',
                   style: AppText.body.copyWith(height: 1.5),
                 ),
               ],

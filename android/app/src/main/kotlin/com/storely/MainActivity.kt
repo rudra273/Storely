@@ -1,4 +1,4 @@
-package com.rudra.storely
+package com.storely
 
 import android.os.Build
 import android.view.WindowManager

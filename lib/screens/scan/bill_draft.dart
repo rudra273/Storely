@@ -22,6 +22,35 @@ class _BillDraft {
   final String paymentMethod;
   final String? transactionReference;
 
+  Map<String, dynamic> toMap() => {
+    'customerName': customerName,
+    'customerPhone': customerPhone,
+    'billType': billType,
+    'customerGstin': customerGstin,
+    'customerGstLegalName': customerGstLegalName,
+    'customerGstTradeName': customerGstTradeName,
+    'customerAddress': customerAddress,
+    'placeOfSupplyStateCode': placeOfSupplyStateCode,
+    'discountPercent': discountPercent,
+    'paidAmount': paidAmount,
+    'paymentMethod': paymentMethod,
+    'transactionReference': transactionReference,
+  };
+  factory _BillDraft.fromMap(Map<String, dynamic> map) => _BillDraft(
+    customerName: map['customerName'] as String,
+    customerPhone: map['customerPhone'] as String?,
+    billType: map['billType'] as String,
+    customerGstin: map['customerGstin'] as String?,
+    customerGstLegalName: map['customerGstLegalName'] as String?,
+    customerGstTradeName: map['customerGstTradeName'] as String?,
+    customerAddress: map['customerAddress'] as String?,
+    placeOfSupplyStateCode: map['placeOfSupplyStateCode'] as String?,
+    discountPercent: (map['discountPercent'] as num).toDouble(),
+    paidAmount: (map['paidAmount'] as num).toDouble(),
+    paymentMethod: map['paymentMethod'] as String,
+    transactionReference: map['transactionReference'] as String?,
+  );
+
   const _BillDraft({
     required this.customerName,
     required this.customerPhone,

@@ -13,11 +13,17 @@ import '../services/app_log.dart';
 import '../services/bill_share.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
+import '../models/checkout_settlement.dart';
+import '../utils/decimal_text.dart';
+import 'package:uuid/uuid.dart';
 import '../models/bill_totals.dart';
 import '../models/customer.dart';
 import '../models/held_bill.dart';
 import '../models/product.dart';
 import '../utils/money.dart';
+import '../utils/checkout_code.dart';
+import 'products_screen.dart' show showCheckoutQuickAdd;
+import 'shared/bill_quick_sheet.dart' show showBillQuickSheet;
 
 part 'scan/manual_product_widgets.dart';
 part 'scan/customer_suggestion_list.dart';
@@ -48,6 +54,11 @@ class _ScanScreenState extends State<ScanScreen> {
 
   final _productSearchCtrl = TextEditingController();
   final List<BillItem> _items = [];
+  late final Future<CheckoutScope> _checkoutScope;
+  CheckoutCart? _checkoutCart;
+  Map<String, dynamic> _checkoutState = const {};
+  Future<void> _checkoutWrites = Future<void>.value();
+
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
   Map<int, int> _saleCounts = const {};
@@ -57,8 +68,12 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isOpeningBillSheet = false;
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
+  bool _duplicateConsumed = false;
   String? _lastScanned;
   DateTime? _lastScannedSeenAt;
+
+  Bill? get _effectiveDuplicateFromBill =>
+      _duplicateConsumed ? null : widget.duplicateFromBill;
 
   double get _subtotal => _items.fold(0, (sum, i) => sum + i.subtotal);
   int get _itemCount =>
@@ -67,6 +82,7 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
+    _checkoutScope = DatabaseHelper.instance.captureCheckoutScope();
     _entryMode = widget.duplicateFromBill != null
         ? BillingEntryMode.manual
         : widget.initialMode ??
@@ -98,6 +114,7 @@ class _ScanScreenState extends State<ScanScreen> {
     // screen; the app-wide messenger would otherwise keep showing them.
     _messenger?.removeCurrentSnackBar();
     _draftTimer?.cancel();
+    _scanCooldownTimer?.cancel();
     if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
     _productSearchCtrl.dispose();
@@ -110,6 +127,7 @@ class _ScanScreenState extends State<ScanScreen> {
   // (debounced) so an app kill or a call mid-bill never loses the cart.
 
   Timer? _draftTimer;
+  Timer? _scanCooldownTimer;
   bool _draftReady = false;
   String _savedDraft = HeldBill.encodeItems(const []);
   int _heldCount = 0;
@@ -122,14 +140,35 @@ class _ScanScreenState extends State<ScanScreen> {
     _draftTimer = Timer(const Duration(milliseconds: 400), _saveDraftNow);
   }
 
+  Future<void>? _draftWrite;
+  Object? _lastDraftError;
+
   Future<void> _saveDraftNow() async {
+    final pending = _draftWrite;
+    if (pending != null) await pending;
+    final write = _writeDraftNow();
+    _draftWrite = write;
+    try {
+      await write;
+    } finally {
+      if (identical(_draftWrite, write)) _draftWrite = null;
+    }
+  }
+
+  Future<void> _writeDraftNow() async {
     final encoded = HeldBill.encodeItems(_items);
     if (encoded == _savedDraft) return;
     final previous = _savedDraft;
     _savedDraft = encoded;
     try {
-      await DatabaseHelper.instance.saveCartDraft(List.of(_items));
+      _checkoutCart = await DatabaseHelper.instance.saveCartDraft(
+        List.of(_items),
+        expectedScope: await _checkoutScope,
+        expectedCart: _checkoutCart,
+      );
+      _lastDraftError = null;
     } catch (error, stack) {
+      _lastDraftError = error;
       if (_savedDraft == encoded) _savedDraft = previous;
       AppLog.error('Save cart draft', error, stack);
       if (!mounted) return;
@@ -139,27 +178,86 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _restoreDraft() async {
-    final draft = await DatabaseHelper.instance.loadCartDraft();
-    if (!mounted) return;
-    _savedDraft = HeldBill.encodeItems(draft);
-    _draftReady = true;
-    if (draft.isEmpty || _items.isNotEmpty) return;
-    setState(() => _items.addAll(draft));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Restored your unsaved bill (${draft.length} '
-          'item${draft.length == 1 ? '' : 's'})',
-        ),
-        action: SnackBarAction(
-          label: context.l10n.discard,
-          onPressed: () {
-            if (mounted) setState(() => _items.clear());
-          },
-        ),
-      ),
+  Future<void> _flushCart() async {
+    await _saveDraftNow();
+    if (_lastDraftError != null) {
+      throw StateError('Could not keep the cart: $_lastDraftError');
+    }
+    await _checkoutWrites;
+  }
+
+  void _showCheckoutSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _pendingCheckoutBlocksEdit() {
+    if (_checkoutState['pending'] == null) return false;
+    _showCheckoutSnackBar(
+      'Recover the pending checkout before changing, holding or discarding its cart.',
     );
+    return true;
+  }
+
+  Future<void> _restoreDraft() async {
+    try {
+      final cart = await DatabaseHelper.instance.loadCheckoutCart(
+        await _checkoutScope,
+      );
+      _checkoutCart = cart;
+      _checkoutState = cart?.state ?? const {};
+      final draft = cart?.cart.items ?? const <BillItem>[];
+      if (!mounted) return;
+      _savedDraft = HeldBill.encodeItems(draft);
+      _draftReady = true;
+      if (draft.isEmpty || _items.isNotEmpty) return;
+      setState(() => _items.addAll(draft));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Restored your unsaved bill (${draft.length} '
+            'item${draft.length == 1 ? '' : 's'})',
+          ),
+          action: SnackBarAction(
+            label: context.l10n.discard,
+            onPressed: () {
+              if (mounted && !_pendingCheckoutBlocksEdit()) {
+                setState(() => _items.clear());
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      _lastDraftError = error;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not restore checkout: $error')),
+      );
+    }
+  }
+
+  Future<void> _persistCheckoutState(Map<String, dynamic> state) {
+    final snapshot = jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
+    final identity = _checkoutCart?.cart.uuid;
+    final previous = _checkoutWrites;
+    final next = () async {
+      await previous;
+      final cart = _checkoutCart;
+      if (cart == null || cart.cart.uuid != identity) {
+        throw StateError('Checkout cart is no longer active.');
+      }
+      final updated = await DatabaseHelper.instance.writeCheckoutState(
+        cart,
+        snapshot,
+      );
+      _checkoutCart = updated;
+      _checkoutState = snapshot;
+    }();
+    // Keep the sequencing chain usable after an observed failure; callers still receive it.
+    _checkoutWrites = next.catchError((Object _) {});
+    return next;
   }
 
   Future<void> _loadHeldCount() async {
@@ -175,15 +273,31 @@ class _ScanScreenState extends State<ScanScreen> {
     final label =
         '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
         '${items.length > 1 ? ' +${items.length - 1}' : ''}';
-    await DatabaseHelper.instance.holdBill(label, items);
-    if (!mounted) return;
-    setState(() {
-      _items.clear();
-      _heldCount++;
-    });
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('Held: $label')));
+    if (_pendingCheckoutBlocksEdit()) return;
+    try {
+      await _flushCart();
+      final cart = _checkoutCart;
+      if (cart == null) {
+        throw StateError('The current cart is no longer available.');
+      }
+      await DatabaseHelper.instance.parkCheckoutCart(cart, label);
+      _checkoutCart = null;
+      _checkoutState = const {};
+      _savedDraft = HeldBill.encodeItems(const []);
+      if (!mounted) return;
+      setState(() {
+        _items.clear();
+        _heldCount++;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Held: $label')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
   }
 
   Future<void> _openHeldBills() async {
@@ -203,10 +317,16 @@ class _ScanScreenState extends State<ScanScreen> {
     );
     if (chosen == null || !mounted) return;
     // Swap: the cart being billed is held, so nothing is lost.
-    if (_items.isNotEmpty) await _holdCart();
-    HeldBill resumed;
+    if (_pendingCheckoutBlocksEdit()) return;
+    CheckoutCart resumed;
     try {
-      resumed = await DatabaseHelper.instance.takeHeldBill(chosen.id);
+      await _flushCart();
+      final active = _checkoutCart;
+      resumed = await DatabaseHelper.instance.resumeCheckoutCart(
+        await _checkoutScope,
+        chosen.id,
+        active: active,
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -215,7 +335,13 @@ class _ScanScreenState extends State<ScanScreen> {
       return;
     }
     if (!mounted) return;
-    setState(() => _items.addAll(resumed.items));
+    _checkoutCart = resumed;
+    _checkoutState = resumed.state;
+    _savedDraft = HeldBill.encodeItems(resumed.cart.items);
+    setState(() {
+      _items.clear();
+      _items.addAll(resumed.cart.items);
+    });
     await _loadHeldCount();
   }
 
@@ -238,19 +364,25 @@ class _ScanScreenState extends State<ScanScreen> {
     _applyProductSearch();
   }
 
+  List<Product> _matchingCatalogProducts(String normalizedQuery) {
+    return _allProducts.where((product) {
+      return product.name.toLowerCase().contains(normalizedQuery) ||
+          (product.itemCode?.toLowerCase().contains(normalizedQuery) ??
+              false) ||
+          (product.barcode?.toLowerCase().contains(normalizedQuery) ?? false) ||
+          (product.category?.toLowerCase().contains(normalizedQuery) ??
+              false) ||
+          (product.supplier?.toLowerCase().contains(normalizedQuery) ?? false);
+    }).toList();
+  }
+
   void _applyProductSearch() {
     final query = _productSearchCtrl.text.trim().toLowerCase();
     if (!mounted) return;
     setState(() {
       final products = query.isEmpty
           ? _allProducts
-          : _allProducts.where((product) {
-              return product.name.toLowerCase().contains(query) ||
-                  (product.itemCode?.toLowerCase().contains(query) ?? false) ||
-                  (product.barcode?.toLowerCase().contains(query) ?? false) ||
-                  (product.category?.toLowerCase().contains(query) ?? false) ||
-                  (product.supplier?.toLowerCase().contains(query) ?? false);
-            }).toList();
+          : _matchingCatalogProducts(query);
       _filteredProducts = products.take(40).toList();
     });
   }
@@ -290,72 +422,157 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _handleScannedCode(String raw) async {
+  bool _recoveringCode = false;
+
+  void _scheduleScanCooldown(bool fromManualSearch, Duration duration) {
+    if (!fromManualSearch) _allowNextScanAfter(duration);
+  }
+
+  Future<void> _submitExactCode(String raw) async {
+    if (_isProcessing ||
+        _recoveringCode ||
+        _isSavingBill ||
+        _isOpeningBillSheet) {
+      return;
+    }
+    _scanCooldownTimer?.cancel();
+    setState(() => _isProcessing = true);
     try {
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final name = data['name'] as String? ?? 'Unknown';
-      final id = (data['id'] as num?)?.toInt();
-      final uuid = data['uuid'] as String?;
-      final code = data['code'] as String?;
-      final barcode = data['barcode'] as String?;
-      final product = await DatabaseHelper.instance.findProductForBilling(
-        id: id,
-        productUuid: uuid,
-        itemCode: code,
-        barcode: barcode,
-        name: name,
-      );
-      if (product == null) {
-        if (!mounted) return;
-        setState(() => _showAddedStatus = false);
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text('Product not found for this QR code'),
-              duration: _invalidScanCooldown,
-            ),
-          );
-        _allowNextScanAfter(_invalidScanCooldown);
-        return;
-      }
-      final scannedItem = await DatabaseHelper.instance.buildBillItemForProduct(
-        product,
-      );
+      await _handleScannedCode(raw, fromManualSearch: true);
+    } catch (error) {
       if (!mounted) return;
+      final message = error is FormatException
+          ? 'Product not found. Search the catalog for this label.'
+          : error.toString().replaceFirst('Bad state: ', '');
+      _showCheckoutSnackBar(message);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
 
-      _addBillItem(scannedItem);
-
+  Future<void> _handleScannedCode(
+    String raw, {
+    bool fromManualSearch = false,
+  }) async {
+    if (_pendingCheckoutBlocksEdit()) {
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    final scope = await _checkoutScope;
+    final db = DatabaseHelper.instance;
+    final Product? product;
+    try {
+      product = await db.resolveCheckoutProduct(raw, scope);
+    } on FormatException {
+      if (!mounted) return;
+      _showCheckoutSnackBar(
+        'Product not found. Search the catalog for this label.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    if (!mounted) return;
+    if (product != null) {
+      final item = await db.buildBillItemForProduct(product);
+      await db.captureCheckoutScope().then((current) {
+        if (current.shopId != scope.shopId ||
+            current.owner != scope.owner ||
+            current.deviceId != scope.deviceId) {
+          throw StateError('Checkout shop or account changed.');
+        }
+      });
+      if (!mounted) return;
+      _addBillItem(item);
       HapticFeedback.mediumImpact();
-      _allowNextScanAfter(_scanCooldown);
-    } catch (_) {
-      final product = await DatabaseHelper.instance.findProductForBilling(
-        productUuid: raw,
-        barcode: raw,
-        itemCode: raw,
-        name: raw,
-      );
-      if (product != null) {
-        final item = await DatabaseHelper.instance.buildBillItemForProduct(
-          product,
+      _scheduleScanCooldown(fromManualSearch, _scanCooldown);
+      return;
+    }
+    if (fromManualSearch) {
+      final trimmed = raw.trim();
+      final query = trimmed.toLowerCase();
+      final matches = query.isEmpty
+          ? const <Product>[]
+          : _matchingCatalogProducts(query);
+      if (matches.isNotEmpty) {
+        _showCheckoutSnackBar(
+          '${matches.length} products match "$trimmed". Choose one from the list.',
         );
-        if (!mounted) return;
-        _addBillItem(item);
-        HapticFeedback.mediumImpact();
-        _allowNextScanAfter(_scanCooldown);
+        _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
         return;
       }
+    }
+    final code = checkoutBarcodeCandidate(raw);
+    if (code == null) {
+      _showCheckoutSnackBar(
+        'Product not found. Search the catalog for this label.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    final canCreate =
+        DatabaseHelper.instance.isAdminMutationAllowed == null ||
+        DatabaseHelper.instance.isAdminMutationAllowed!();
+    if (!canCreate) {
+      _showCheckoutSnackBar(
+        'No product matches "$code". Only a shop owner or admin can add new products.',
+      );
+      _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
+      return;
+    }
+    if (_recoveringCode) return;
+    _recoveringCode = true;
+    try {
+      await _flushCart();
       if (!mounted) return;
-      setState(() => _showAddedStatus = false);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Invalid QR code'),
-            duration: _invalidScanCooldown,
+      final add = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Product not found'),
+          content: Text(
+            'No product matches "$code". Add it without losing the current bill?',
           ),
+          actions: [
+            TextButton(
+              key: const ValueKey('checkout-code-cancel'),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep billing'),
+            ),
+            FilledButton(
+              key: const ValueKey('checkout-create-product'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Add product'),
+            ),
+          ],
+        ),
+      );
+      if (add != true || !mounted) return;
+      final saved = await showCheckoutQuickAdd(
+        context,
+        barcode: code,
+        scope: scope,
+      );
+      if (saved == null || !mounted) return;
+      final current = await db.productForCheckoutReturn(saved.uuid, scope);
+      if (!mounted) return;
+      if (current.trackStock && current.quantity <= 0) {
+        await _loadProducts();
+        if (!mounted) return;
+        _showCheckoutSnackBar(
+          'Product saved. Add stock before adding it to this bill.',
         );
-      _allowNextScanAfter(_invalidScanCooldown);
+        return;
+      }
+      final item = await db.buildBillItemForProduct(current);
+      await db.productForCheckoutReturn(saved.uuid, scope);
+      if (!mounted) return;
+      _addBillItem(item);
+      await _flushCart();
+      if (!mounted) return;
+      _productSearchCtrl.clear();
+      await _loadProducts();
+    } finally {
+      _recoveringCode = false;
+      _scheduleScanCooldown(fromManualSearch, _scanCooldown);
     }
   }
 
@@ -395,6 +612,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _addBillItem(BillItem item) {
+    if (_pendingCheckoutBlocksEdit()) return;
     final existing = _items.indexWhere(
       (existingItem) =>
           (item.productId != null &&
@@ -451,7 +669,9 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _allowNextScanAfter(Duration duration) {
-    Future.delayed(duration, () {
+    if (!mounted) return;
+    _scanCooldownTimer?.cancel();
+    _scanCooldownTimer = Timer(duration, () {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
@@ -460,105 +680,53 @@ class _ScanScreenState extends State<ScanScreen> {
     });
   }
 
-  Future<({int id, BillTotals totals})?> _completeBill({
-    required String customerName,
-    required String? customerPhone,
-    required String billType,
-    required String? customerGstin,
-    required String? customerGstLegalName,
-    required String? customerGstTradeName,
-    required String? customerAddress,
-    required String? placeOfSupplyStateCode,
-    required double discountPercent,
-    required double paidAmount,
-    required String paymentMethod,
-    String? transactionReference,
-  }) async {
-    if (_items.isEmpty) return null;
-    if (_isSavingBill) return null;
-
-    setState(() => _isSavingBill = true);
-    final percent = discountPercent.clamp(0, 100).toDouble();
-    final shop = await DatabaseHelper.instance.getShopProfile();
-    final settings = await DatabaseHelper.instance.getBillSettings();
-    final gstRegistered = shop?.gstRegistered ?? false;
-    final shopStateCode = _stateCodeFromGstin(shop?.gstin);
-    final supplyStateCode =
-        _cleanStateCode(placeOfSupplyStateCode) ??
-        _stateCodeFromGstin(customerGstin);
-    final interState =
-        gstRegistered &&
-        shopStateCode != null &&
-        supplyStateCode != null &&
-        shopStateCode != supplyStateCode;
-    final itemCopies = _items
-        .map(
-          (item) => BillTotals.taxedItem(
-            item,
-            discountPercent: percent,
-            gstRegistered: gstRegistered,
-            interState: interState,
-          ),
-        )
-        .toList();
-    final totals = BillTotals.fromTaxedItems(
-      itemCopies,
-      roundOff: settings.roundOffTotal,
-    );
-    final total = totals.grandTotal;
-    final received = paidAmount.clamp(0, total).toDouble();
-
-    final bill = Bill(
-      billType: billType,
-      customerName: customerName.trim().isEmpty
-          ? 'Walk-in Customer'
-          : customerName.trim(),
-      customerPhone: _cleanOptionalText(customerPhone),
-      customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
-      customerGstLegalName: _cleanOptionalText(customerGstLegalName),
-      customerGstTradeName: _cleanOptionalText(customerGstTradeName),
-      customerAddressSnapshot: _cleanOptionalText(customerAddress),
-      placeOfSupplyStateCode: supplyStateCode,
-      subtotalAmount: totals.subtotal,
-      discountPercent: percent,
-      discountAmount: totals.discountAmount,
-      taxableAmount: totals.taxableAmount,
-      cgstAmount: totals.cgstAmount,
-      sgstAmount: totals.sgstAmount,
-      igstAmount: totals.igstAmount,
-      roundOffAmount: totals.roundOffAmount,
-      totalAmount: total,
-      itemCount: _itemCount,
-      isPaid: received >= total - 0.005,
-      paymentMethod: paymentMethod,
-      paidAmount: received,
-      transactionReference: transactionReference,
-      duplicatedFromBillUuid: widget.duplicateFromBill?.uuid,
-    );
-
-    try {
-      final id = await DatabaseHelper.instance.insertBill(bill, itemCopies);
-      return (id: id, totals: totals);
-    } finally {
-      if (mounted) setState(() => _isSavingBill = false);
-    }
-  }
-
   Future<void> _openBillSheet() async {
     if (_items.isEmpty || _isOpeningBillSheet || _isSavingBill) return;
     _isOpeningBillSheet = true;
     try {
       await _runBillCheckout();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       _isOpeningBillSheet = false;
     }
   }
 
   Future<void> _runBillCheckout() async {
+    _draftTimer?.cancel();
+    await _flushCart();
+    if (_checkoutCart == null) {
+      throw StateError('Checkout cart is no longer available.');
+    }
+    _checkoutState = _checkoutCart!.state;
+    final device = (await _checkoutScope).deviceId;
+    var baseline = await DatabaseHelper.instance.captureSettingsEditBaseline();
+    final owner = await DatabaseHelper.instance.getCloudSyncState(
+      'preference_owner',
+    );
+    var shop = await DatabaseHelper.instance.getShopProfile();
     final customers = await DatabaseHelper.instance.getAllCustomers();
-    final settings = await DatabaseHelper.instance.getBillSettings();
+    var settings = await DatabaseHelper.instance.getBillSettings();
     if (!mounted) return;
     final cartItems = List<BillItem>.of(_items);
+    if (_checkoutState['pending'] == null &&
+        _checkoutState['raw'] is Map &&
+        (jsonEncode(_checkoutState['reviewed_context']) !=
+                jsonEncode(baseline.toLocalMap()) ||
+            _checkoutState['reviewed_items'] !=
+                HeldBill.encodeItems(cartItems))) {
+      _checkoutState = {
+        ..._checkoutState,
+        'raw': {
+          ...Map<String, dynamic>.from(_checkoutState['raw'] as Map),
+          'settlement': null,
+          'consent': false,
+        },
+      };
+    }
     // GST-inclusive prices: the payable total does not depend on GST
     // registration or inter-state supply, only on discount and round-off.
     BillTotals totalsFor(double discountPercent) => BillTotals.forCart(
@@ -566,45 +734,259 @@ class _ScanScreenState extends State<ScanScreen> {
       discountPercent: discountPercent,
       gstRegistered: false,
       interState: false,
-      roundOff: settings.roundOffTotal,
+      roundOff:
+          (_checkoutState['pending'] as Map?)?['round_off'] as bool? ??
+          settings.roundOffTotal,
     );
 
+    var attemptId = const Uuid().v4();
+    Bill? frozenBill;
+    List<BillItem>? frozenItems;
+    BillTotals? frozenTotals;
+    final pending = _checkoutState['pending'];
+    if (pending != null) {
+      final saved = Map<String, dynamic>.from(pending as Map);
+      attemptId = saved['attempt_id'] as String;
+      baseline = SettingsEditBaseline.fromLocalMap(
+        Map<String, dynamic>.from(saved['baseline'] as Map),
+      );
+      frozenItems = [
+        for (final item in saved['items'] as List)
+          BillItem.fromMap(Map<String, dynamic>.from(item as Map)),
+      ];
+      frozenBill = Bill.fromMap({
+        ...Map<String, dynamic>.from(saved['bill'] as Map),
+        'transaction_reference': saved['reference'],
+      }, frozenItems);
+      frozenTotals = BillTotals.fromTaxedItems(
+        frozenItems,
+        roundOff: saved['round_off'] as bool,
+      );
+      if (attemptId.isEmpty ||
+          frozenBill.uuid.isEmpty ||
+          frozenBill.shopId != baseline.shopId ||
+          baseline.shopId != (await _checkoutScope).shopId) {
+        throw const FormatException(
+          'Unreadable pending checkout identity. Keep a backup before recovery.',
+        );
+      }
+    }
+    Future<({int id, BillTotals totals})> save(_BillDraft draft) async {
+      if (_isSavingBill) throw StateError('Checkout save already in progress.');
+      if (mounted) setState(() => _isSavingBill = true);
+      try {
+        if (frozenBill == null) {
+          final customerName = draft.customerName;
+          final customerPhone = draft.customerPhone;
+          final billType = draft.billType;
+          final customerGstin = draft.customerGstin;
+          final customerGstLegalName = draft.customerGstLegalName;
+          final customerGstTradeName = draft.customerGstTradeName;
+          final customerAddress = draft.customerAddress;
+          final placeOfSupplyStateCode = draft.placeOfSupplyStateCode;
+          final discountPercent = draft.discountPercent;
+          final paidAmount = draft.paidAmount;
+          final paymentMethod = draft.paymentMethod;
+          final transactionReference = draft.transactionReference;
+          final percent = discountPercent;
+          final gstRegistered = shop?.gstRegistered ?? false;
+          final shopStateCode = _stateCodeFromGstin(shop?.gstin);
+          final supplyStateCode =
+              _cleanStateCode(placeOfSupplyStateCode) ??
+              _stateCodeFromGstin(customerGstin);
+          final interState =
+              gstRegistered &&
+              shopStateCode != null &&
+              supplyStateCode != null &&
+              shopStateCode != supplyStateCode;
+          final itemCopies = cartItems
+              .map(
+                (item) => BillTotals.taxedItem(
+                  item,
+                  discountPercent: percent,
+                  gstRegistered: gstRegistered,
+                  interState: interState,
+                ),
+              )
+              .toList();
+          final totals = BillTotals.fromTaxedItems(
+            itemCopies,
+            roundOff: settings.roundOffTotal,
+          );
+          final total = totals.grandTotal;
+          final received = paidAmount;
+
+          final bill = Bill(
+            uuid: const Uuid().v4(),
+            shopId: baseline.shopId,
+            billType: billType,
+            customerName: customerName.trim().isEmpty
+                ? 'Walk-in Customer'
+                : customerName.trim(),
+            customerPhone: _cleanOptionalText(customerPhone),
+            customerGstin: _cleanOptionalText(customerGstin)?.toUpperCase(),
+            customerGstLegalName: _cleanOptionalText(customerGstLegalName),
+            customerGstTradeName: _cleanOptionalText(customerGstTradeName),
+            customerAddressSnapshot: _cleanOptionalText(customerAddress),
+            placeOfSupplyStateCode: supplyStateCode,
+            subtotalAmount: totals.subtotal,
+            discountPercent: percent,
+            discountAmount: totals.discountAmount,
+            taxableAmount: totals.taxableAmount,
+            cgstAmount: totals.cgstAmount,
+            sgstAmount: totals.sgstAmount,
+            igstAmount: totals.igstAmount,
+            roundOffAmount: totals.roundOffAmount,
+            totalAmount: total,
+            itemCount: _itemCount,
+            isPaid: received >= total - 0.005,
+            paymentMethod: paymentMethod,
+            paidAmount: received,
+            transactionReference: transactionReference,
+            duplicatedFromBillUuid:
+                _checkoutState['source_bill_uuid'] as String? ??
+                _effectiveDuplicateFromBill?.uuid,
+          );
+
+          if (decimalScaledInteger(total.toStringAsFixed(2), scale: 2) !=
+              decimalScaledInteger(
+                totalsFor(percent).grandTotal.toStringAsFixed(2),
+                scale: 2,
+              )) {
+            throw StateError(
+              'Reviewed total changed. Return to the cart and review checkout again.',
+            );
+          }
+          frozenBill = bill;
+          frozenItems = itemCopies;
+          frozenTotals = totals;
+        }
+        await _checkoutWrites;
+        if (_checkoutState['pending'] == null) {
+          await _persistCheckoutState({
+            ..._checkoutState,
+            'version': 1,
+            'pending': {
+              'attempt_id': attemptId,
+              'baseline': baseline.toLocalMap(),
+              'bill': frozenBill!.toMap(),
+              'reference': frozenBill!.transactionReference,
+              'items': frozenItems!.map((item) => item.toMap(0)).toList(),
+              'round_off': settings.roundOffTotal,
+              'draft': draft.toMap(),
+            },
+          });
+        }
+        final id = await DatabaseHelper.instance.insertReviewedCheckout(
+          attemptId: attemptId,
+          expectedShopId: baseline.shopId,
+          expectedOwner: owner,
+          baseline: baseline,
+          cartSnapshot: HeldBill.encodeItems(cartItems),
+          originDeviceId: device,
+          bill: frozenBill!,
+          items: frozenItems!,
+          expectedCart: _checkoutCart,
+        );
+        return (id: id, totals: frozenTotals!);
+      } finally {
+        if (mounted) setState(() => _isSavingBill = false);
+      }
+    }
+
+    if (!mounted) return;
     try {
-      final draft = await showModalBottomSheet<_BillDraft>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: AppColors.surfaceOf(context),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (_) => _BillCheckoutSheet(
-          customers: customers,
-          totalsFor: totalsFor,
-          itemCount: _itemCount,
-          initialBill: widget.duplicateFromBill,
-        ),
-      );
-      if (draft == null) return;
-      final saved = await _completeBill(
-        customerName: draft.customerName,
-        customerPhone: draft.customerPhone,
-        billType: draft.billType,
-        customerGstin: draft.customerGstin,
-        customerGstLegalName: draft.customerGstLegalName,
-        customerGstTradeName: draft.customerGstTradeName,
-        customerAddress: draft.customerAddress,
-        placeOfSupplyStateCode: draft.placeOfSupplyStateCode,
-        discountPercent: draft.discountPercent,
-        paidAmount: draft.paidAmount,
-        paymentMethod: draft.paymentMethod,
-        transactionReference: draft.transactionReference,
-      );
-      if (saved == null || !mounted) return;
+      await _persistCheckoutState({
+        ..._checkoutState,
+        'version': 1,
+        'source_bill_uuid':
+            _checkoutState['source_bill_uuid'] ??
+            _effectiveDuplicateFromBill?.uuid,
+        'step': 'checkout',
+      });
+      if (!mounted) return;
+      final completed =
+          await showModalBottomSheet<
+            ({_BillDraft draft, int id, BillTotals totals})
+          >(
+            context: context,
+            isScrollControlled: true,
+            enableDrag: false,
+            isDismissible: false,
+            useSafeArea: true,
+            backgroundColor: AppColors.surfaceOf(context),
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            builder: (_) => _BillCheckoutSheet(
+              customers: customers,
+              initialState: _checkoutState,
+              onRawChanged: (raw) => _persistCheckoutState({
+                ..._checkoutState,
+                'version': 1,
+                'step': 'checkout',
+                'source_bill_uuid':
+                    _checkoutState['source_bill_uuid'] ??
+                    _effectiveDuplicateFromBill?.uuid,
+                'raw': raw,
+                'reviewed_items': HeldBill.encodeItems(cartItems),
+                'reviewed_context': baseline.toLocalMap(),
+              }),
+              onSave: save,
+              onReview: () async {
+                final next = await DatabaseHelper.instance
+                    .captureSettingsEditBaseline();
+                if (next.shopId != baseline.shopId ||
+                    await DatabaseHelper.instance.getCloudSyncState(
+                          'preference_owner',
+                        ) !=
+                        owner) {
+                  throw StateError(
+                    'Return to the original shop and account before reviewing.',
+                  );
+                }
+                final nextShop = await DatabaseHelper.instance.getShopProfile();
+                final nextSettings = await DatabaseHelper.instance
+                    .getBillSettings();
+                baseline = next;
+                shop = nextShop;
+                settings = nextSettings;
+                await _persistCheckoutState({
+                  ..._checkoutState,
+                  'pending': null,
+                });
+                frozenBill = null;
+                frozenItems = null;
+                frozenTotals = null;
+                attemptId = const Uuid().v4();
+              },
+              totalsFor: totalsFor,
+              itemCount: _itemCount,
+              initialBill: _effectiveDuplicateFromBill,
+            ),
+          );
+      if (completed == null) {
+        await _checkoutWrites;
+        if (mounted && _checkoutCart != null) {
+          await _persistCheckoutState({
+            ..._checkoutState,
+            'version': 1,
+            'step': 'items',
+          });
+        }
+        return;
+      }
+      if (!mounted) return;
+      final draft = completed.draft;
+      final saved = completed;
       final totalAmount = saved.totals.grandTotal;
       final itemCount = _itemCount;
-      // The bill is saved: empty the cart now so no path back to this screen
-      // (e.g. Android back on the success dialog) can save it a second time.
+      // The bill is saved: empty the cart and consume duplicate lineage now so
+      // no path back to this screen (or New Bill) can carry it forward.
+      _checkoutCart = null;
+      _checkoutState = const {};
+      _savedDraft = HeldBill.encodeItems(const []);
+      _duplicateConsumed = true;
       setState(() => _items.clear());
       final startNewBill = await _showBillCreatedDialog(
         billId: saved.id,
@@ -612,14 +994,19 @@ class _ScanScreenState extends State<ScanScreen> {
             ? 'Walk-in Customer'
             : draft.customerName.trim(),
         totalAmount: totalAmount,
+        paidAmount: draft.paidAmount,
+        expectedBillUuid: frozenBill!.uuid,
+        expectedScope: await _checkoutScope,
         itemCount: itemCount,
-        isPaid: draft.paidAmount >= totalAmount - 0.005,
       );
       if (!mounted) return;
       if (startNewBill) {
+        _duplicateConsumed = true;
         _loadProducts(); // stock changed
-      } else {
+      } else if (Navigator.canPop(context)) {
         Navigator.pop(context);
+      } else {
+        _loadProducts();
       }
     } catch (e) {
       if (!mounted) return;
@@ -635,28 +1022,75 @@ class _ScanScreenState extends State<ScanScreen> {
     required int billId,
     required String customerName,
     required double totalAmount,
+    required double paidAmount,
+    required String expectedBillUuid,
+    required CheckoutScope expectedScope,
     required int itemCount,
-    required bool isPaid,
   }) async {
+    Future<void> assertCompletionOwnership() async {
+      final current = await DatabaseHelper.instance.captureCheckoutScope();
+      if (current.shopId != expectedScope.shopId ||
+          current.owner != expectedScope.owner ||
+          current.deviceId != expectedScope.deviceId) {
+        throw StateError(
+          'Invoice saved. Return to the original shop and account to view it.',
+        );
+      }
+    }
+
+    await assertCompletionOwnership();
     final bill = await DatabaseHelper.instance.getBillById(billId);
+    await assertCompletionOwnership();
+    if (bill != null &&
+        (bill.uuid != expectedBillUuid ||
+            bill.shopId != expectedScope.shopId)) {
+      throw StateError(
+        'The saved invoice identity changed. Reopen it from the original shop history.',
+      );
+    }
     final billLabel = bill?.billNumber.isNotEmpty == true
         ? bill!.billNumber
         : 'Bill #$billId';
+    final effectiveTotal = bill?.totalAmount ?? totalAmount;
+    final effectivePaid = bill?.paidAmount ?? paidAmount;
+    final status =
+        bill?.paymentStatus ??
+        (effectivePaid <= 0.005
+            ? Bill.statusUnpaid
+            : effectivePaid + 0.005 >= effectiveTotal
+            ? Bill.statusPaid
+            : Bill.statusPartial);
+    final statusLabel = switch (status) {
+      Bill.statusPaid => 'Paid',
+      Bill.statusPartial => 'Partial',
+      _ => 'Unpaid',
+    };
+    final methodSuffix = effectivePaid > 0.005 && bill != null
+        ? ' · ${paymentMethodLabel(bill.paymentMethod)}'
+        : '';
     if (!mounted) return false;
-    final newBill = await showDialog<bool>(
+    final action = await showDialog<_BillCreatedAction>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => _BillCreatedDialog(
         bill: bill,
-        totalAmount: totalAmount,
+        totalAmount: effectiveTotal,
+        paidAmount: effectivePaid,
         summary:
-            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • ${isPaid ? 'Paid' : 'Unpaid'}',
+            '$customerName\n$billLabel • $itemCount item${itemCount != 1 ? 's' : ''} • $statusLabel$methodSuffix',
       ),
     );
-    return newBill == true;
+    if (action == _BillCreatedAction.viewInvoice && bill != null && mounted) {
+      await assertCompletionOwnership();
+      if (!mounted) return false;
+      await showBillQuickSheet(context, bill);
+      return false;
+    }
+    return action == _BillCreatedAction.newBill;
   }
 
   void _updateQty(int index, int delta) {
+    if (_pendingCheckoutBlocksEdit()) return;
     if (delta > 0) {
       final available = _availableStockForItem(_items[index]);
       if (available != null &&
@@ -671,6 +1105,7 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _setQty(int index, double quantity) {
+    if (_pendingCheckoutBlocksEdit()) return;
     if (quantity <= 0) return;
     final available = _availableStockForItem(_items[index]);
     if (available != null && exceedsStock(quantity, available)) {
@@ -826,13 +1261,27 @@ class _ScanScreenState extends State<ScanScreen> {
       child: Column(
         children: [
           TextField(
+            key: const ValueKey('checkout-product-search'),
             controller: _productSearchCtrl,
+            onSubmitted: _submitExactCode,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               labelText: context.l10n.searchProducts,
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),
+          if (checkoutBarcodeCandidate(_productSearchCtrl.text) != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('checkout-use-exact-code'),
+                onPressed: _isProcessing || _recoveringCode
+                    ? null
+                    : () => _submitExactCode(_productSearchCtrl.text),
+                icon: const Icon(Icons.qr_code_scanner_rounded),
+                label: const Text('Use exact code'),
+              ),
+            ),
           if (_productSearchCtrl.text.isEmpty && _saleCounts.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: AppSpacing.sm),
@@ -895,16 +1344,39 @@ class _ScanScreenState extends State<ScanScreen> {
       canPop: _items.isEmpty,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        final discard = await _confirmDiscard();
-        if (!discard || !context.mounted) return;
-        setState(() => _items.clear());
-        Navigator.pop(context);
+        final action = await _confirmExit();
+        if (action == null || !context.mounted) return;
+        try {
+          if (action == 'discard') {
+            if (_pendingCheckoutBlocksEdit()) return;
+            await _flushCart();
+            await DatabaseHelper.instance.saveCartDraft(
+              const [],
+              expectedScope: await _checkoutScope,
+              expectedCart: _checkoutCart,
+            );
+            _checkoutCart = null;
+            _checkoutState = const {};
+            _savedDraft = HeldBill.encodeItems(const []);
+            if (!mounted) return;
+            setState(() => _items.clear());
+          } else {
+            await _flushCart();
+          }
+          if (!context.mounted) return;
+          Navigator.pop(context);
+        } catch (error) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(error.toString())));
+        }
       },
       child: Scaffold(
         backgroundColor: headerSurface,
         appBar: AppBar(
           title: Text(
-            widget.duplicateFromBill != null
+            _effectiveDuplicateFromBill != null
                 ? context.l10n.duplicateBill
                 : _entryMode == BillingEntryMode.scan
                 ? 'Scan & Bill'
@@ -940,6 +1412,7 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
             if (_heldCount > 0)
               TextButton.icon(
+                key: const ValueKey('checkout-held-list'),
                 onPressed: _openHeldBills,
                 icon: const Icon(
                   Icons.inventory_rounded,
@@ -952,6 +1425,7 @@ class _ScanScreenState extends State<ScanScreen> {
               ),
             if (_items.isNotEmpty)
               IconButton(
+                key: const ValueKey('checkout-hold'),
                 tooltip: context.l10n.holdBill,
                 onPressed: _holdCart,
                 icon: const Icon(
@@ -1057,7 +1531,9 @@ class _ScanScreenState extends State<ScanScreen> {
                             onPressed: _openBillSheet,
                             icon: const Icon(Icons.receipt_long_rounded),
                             label: Text(
-                              context.l10n.bill,
+                              _checkoutState['pending'] != null
+                                  ? 'Recover pending checkout'
+                                  : context.l10n.bill,
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
                             style: FilledButton.styleFrom(
@@ -1084,32 +1560,37 @@ class _ScanScreenState extends State<ScanScreen> {
     );
   }
 
-  Future<bool> _confirmDiscard() async {
-    final discard = await showDialog<bool>(
+  Future<String?> _confirmExit() async {
+    final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(context.l10n.discardBillQ),
+        title: const Text('Keep this bill for later?'),
         content: Text(
-          '${_items.length} item${_items.length == 1 ? '' : 's'} in the cart '
-          'will be removed.',
+          'Keep the cart and checkout entries on this device, or discard them explicitly.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            key: const ValueKey('checkout-keep-exit'),
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: const Text('Keep and exit'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
             child: Text(context.l10n.keepBilling),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'discard'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: Text(context.l10n.discard),
           ),
         ],
       ),
     );
-    return discard == true;
+    return action;
   }
 
   void _clearWithUndo() {
+    if (_pendingCheckoutBlocksEdit()) return;
     final removed = List<BillItem>.of(_items);
     setState(() => _items.clear());
     ScaffoldMessenger.of(context)

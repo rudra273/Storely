@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../config/cloud_defaults.dart';
 import 'premium_request_screen.dart';
 import '../db/database_helper.dart';
@@ -6,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/test_keys.dart';
 import '../models/bill_settings.dart';
 import '../models/product.dart';
+import '../models/low_stock_threshold.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
@@ -45,6 +47,7 @@ class StoreScreen extends StatefulWidget {
 }
 
 class _StoreScreenState extends State<StoreScreen> {
+  SettingsEditBaseline? _settingsBaseline;
   String? _shopName;
   ShopProfile? _shopProfile;
   List<String> _categories = [];
@@ -53,13 +56,25 @@ class _StoreScreenState extends State<StoreScreen> {
   List<String> _units = [];
   GlobalPricingSettings _pricingSettings = const GlobalPricingSettings();
   InvoiceSeriesSettings _invoiceSeriesSettings = const InvoiceSeriesSettings();
-  int _lowStockThreshold = 5;
+  double _lowStockThreshold = 5;
   bool _isLoading = true;
+  String? _appVersion;
 
   @override
   void initState() {
     super.initState();
     _loadStoreData();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion = info.version);
+    } catch (_) {
+      // Without a version the About row just leaves the number out.
+    }
   }
 
   @override
@@ -72,6 +87,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
   Future<void> _loadStoreData() async {
     final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
     final shopProfile = await db.getShopProfile();
     final shopName = shopProfile?.name;
     final categories = await db.getCategories();
@@ -85,6 +101,7 @@ class _StoreScreenState extends State<StoreScreen> {
     final lowStockThreshold = await db.getLowStockThreshold();
     if (!mounted) return;
     setState(() {
+      _settingsBaseline = baseline;
       _shopName = shopName;
       _shopProfile = shopProfile;
       _categories = categories;
@@ -99,11 +116,20 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _editShopProfile() async {
+    final baseline = _settingsBaseline;
+    if (baseline == null) return;
     final value = await showModalBottomSheet<ShopProfile>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _ShopProfileSheet(
+        onSave: (profile) async {
+          await DatabaseHelper.instance.saveShopProfile(
+            profile,
+            baseline: baseline,
+          );
+          await DatabaseHelper.instance.refreshAllProductSellingPrices();
+        },
         profile:
             _shopProfile ??
             ShopProfile(
@@ -113,10 +139,7 @@ class _StoreScreenState extends State<StoreScreen> {
       ),
     );
     if (value == null) return;
-    await _runStoreAction(() async {
-      await DatabaseHelper.instance.saveShopProfile(value);
-      await DatabaseHelper.instance.refreshAllProductSellingPrices();
-    });
+    await _loadStoreData();
   }
 
   Future<void> _addCategory() async {
@@ -155,18 +178,21 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _editLowStockThreshold() async {
-    final value = await showDialog<int>(
+    final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
+    final current = await db.getLowStockThreshold();
+    if (!mounted) return;
+    final value = await showDialog<double>(
       context: context,
       builder: (_) => _NumberDialog(
         title: 'Needs Attention',
         label: 'Minimum Stock',
-        initialValue: _lowStockThreshold,
+        initialValue: current,
+        onSave: (value) => db.saveLowStockThreshold(value, baseline: baseline),
       ),
     );
     if (value == null) return;
-    await _runStoreAction(
-      () => DatabaseHelper.instance.saveLowStockThreshold(value),
-    );
+    await _loadStoreData();
   }
 
   void _openPrivacyPolicy() {
@@ -235,18 +261,26 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _showGlobalPricingSettings() async {
+    final baseline = _settingsBaseline;
+    if (baseline == null) return;
     final result = await showModalBottomSheet<GlobalPricingSettings>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _GlobalPricingSheet(settings: _pricingSettings, units: _units),
+      builder: (_) => _GlobalPricingSheet(
+        settings: _pricingSettings,
+        units: _units,
+        onSave: (settings) async {
+          await DatabaseHelper.instance.saveGlobalPricingSettings(
+            settings,
+            baseline: baseline,
+          );
+          await DatabaseHelper.instance.refreshAllProductSellingPrices();
+        },
+      ),
     );
     if (result == null) return;
-    await _runStoreAction(() async {
-      await DatabaseHelper.instance.saveGlobalPricingSettings(result);
-      await DatabaseHelper.instance.refreshAllProductSellingPrices();
-    });
+    await _loadStoreData();
   }
 
   Future<void> _showBillSettings() async {
@@ -556,7 +590,8 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'Low-stock alert',
-                    subtitle: 'Show stock at $_lowStockThreshold or below',
+                    subtitle:
+                        'Show stock at ${lowStockThresholdText(_lowStockThreshold)} or below',
                     icon: Icons.inventory_rounded,
                     onTap: _editLowStockThreshold,
                   ),
@@ -607,7 +642,9 @@ class _StoreScreenState extends State<StoreScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   _StoreActionRow(
                     title: 'About',
-                    subtitle: 'App information and version 1.0.4',
+                    subtitle: _appVersion == null
+                        ? 'App information and version'
+                        : 'App information and version $_appVersion',
                     icon: Icons.info_outline_rounded,
                     onTap: _openAboutApp,
                   ),

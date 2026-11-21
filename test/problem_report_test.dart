@@ -18,7 +18,7 @@ void main() {
           const MethodChannel('dev.fluttercommunity.plus/package_info'),
           (_) async => {
             'appName': 'Storely',
-            'packageName': 'com.rudra.storely',
+            'packageName': 'com.storely',
             'version': '2.0.0',
             'buildNumber': '6',
           },

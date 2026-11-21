@@ -33,6 +33,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   final TextEditingController _bankCtrl = TextEditingController();
   BillSettings _settings = BillSettings();
   InvoiceSeriesSettings _series = const InvoiceSeriesSettings();
+  SettingsEditBaseline? _baseline;
   bool _isLoading = true;
   bool _isSaving = false;
 
@@ -57,10 +58,12 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
 
   Future<void> _load() async {
     final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
     final settings = await db.getBillSettings();
     final series = await db.getDefaultInvoiceSeriesSettings();
     if (!mounted) return;
     setState(() {
+      _baseline = baseline;
       _settings = settings;
       _series = series;
       _titleCtrl.text = settings.invoiceTitle;
@@ -145,8 +148,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
     setState(() => _isSaving = true);
     try {
       final db = DatabaseHelper.instance;
-      await db.saveBillSettings(settings);
-      await db.saveDefaultInvoiceSeriesSettings(series);
+      await db.saveInvoiceSettings(settings, series, baseline: _baseline!);
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {

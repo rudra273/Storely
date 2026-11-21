@@ -6,8 +6,14 @@ String _paymentStatusLabel(String status) => switch (status) {
   _ => 'Unpaid',
 };
 
-String _paymentMethodLabel(String method) =>
-    method == 'online' ? 'Online' : 'Cash';
+String _paymentMethodLabel(String method) => switch (method) {
+  'cash' => 'Cash',
+  'upi' => 'UPI',
+  'card' => 'Card',
+  'bank' => 'Bank transfer',
+  'online' => 'Online',
+  _ => method.isEmpty ? 'Cash' : method,
+};
 
 String _billDisplayId(Bill bill) {
   if (bill.billNumber.isEmpty) return 'Bill #${bill.id}';

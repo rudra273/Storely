@@ -55,6 +55,10 @@ class BillSettings {
   /// PDF page size: [paperA4] or [paperA5].
   final String paperSize;
 
+  /// A valid persisted size unsupported by this editor's A4/A5 projection.
+  /// Retain it through unrelated edits; an explicit paper choice replaces it.
+  final String? _preservedPaperSize;
+
   /// Shop UPI id (name@bank). When set, unpaid invoices carry a UPI QR for
   /// the balance due.
   final String upiId;
@@ -120,6 +124,7 @@ class BillSettings {
     this.showFooterText = true,
     this.roundOffTotal = true,
     this.paperSize = paperA4,
+    String? preservedPaperSize,
     this.upiId = '',
     this.showUpiQr = true,
     this.showAmountInWords = true,
@@ -129,7 +134,11 @@ class BillSettings {
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
-  }) : createdAt = createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+  }) : _preservedPaperSize =
+           paperSize == paperA4 && {'80mm', '58mm'}.contains(preservedPaperSize)
+           ? preservedPaperSize
+           : null,
+       createdAt = createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
        updatedAt =
            updatedAt ?? createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -217,6 +226,9 @@ class BillSettings {
       showFooterText: _flag(map['show_footer_text'], fallback: true),
       roundOffTotal: _flag(map['round_off_total'], fallback: true),
       paperSize: map['paper_size'] == paperA5 ? paperA5 : paperA4,
+      preservedPaperSize: {'80mm', '58mm'}.contains(map['paper_size'])
+          ? map['paper_size'] as String
+          : null,
       upiId: map['upi_id']?.toString().trim() ?? '',
       showUpiQr: _flag(map['show_upi_qr'], fallback: true),
       showAmountInWords: _flag(map['show_amount_in_words'], fallback: true),
@@ -278,7 +290,7 @@ class BillSettings {
     'show_grand_total': showGrandTotal ? 1 : 0,
     'show_footer_text': showFooterText ? 1 : 0,
     'round_off_total': roundOffTotal ? 1 : 0,
-    'paper_size': paperSize,
+    'paper_size': _preservedPaperSize ?? paperSize,
     'upi_id': upiId.trim(),
     'show_upi_qr': showUpiQr ? 1 : 0,
     'show_amount_in_words': showAmountInWords ? 1 : 0,
@@ -403,6 +415,7 @@ class BillSettings {
       showFooterText: showFooterText ?? this.showFooterText,
       roundOffTotal: roundOffTotal ?? this.roundOffTotal,
       paperSize: paperSize ?? this.paperSize,
+      preservedPaperSize: paperSize == null ? _preservedPaperSize : null,
       upiId: upiId ?? this.upiId,
       showUpiQr: showUpiQr ?? this.showUpiQr,
       showAmountInWords: showAmountInWords ?? this.showAmountInWords,

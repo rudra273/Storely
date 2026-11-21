@@ -29,6 +29,9 @@ void main() {
         'cloud_sync_state',
         'purchase_documents',
         'purchase_drafts',
+        'supplier_payment_queue',
+        'checkout_acceptances',
+        'checkout_draft_state',
       },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
@@ -154,8 +157,86 @@ void main() {
       )).map((c) => c['name']).toSet(),
       draftFields.keys.toSet(),
     );
+    final paymentFields = {
+      'request_key':
+          'Stable idempotency key; preserve unchanged through retry and backup restore.',
+      'shop_id':
+          'Scope queued payments to the active shop; never upload after start fresh.',
+      'supplier_uuid':
+          'Supplier UUID submitted to the payment API after dependencies upload.',
+      'payload':
+          'Exact payment request via suppliers/payments; never row-sync. Full SQLite backup preserves pending requests.',
+      'sync_state':
+          'Local pending/synced/error/local state. Rejected requests require review and are never automatically resubmitted.',
+      'command_state':
+          'Local ready/sending/unknown/accepted/rejected/conflict/local lifecycle; never sent on wire.',
+      'attempt_count':
+          'Local durable send count; preserved through backup and retry.',
+      'last_attempt_at':
+          'Local last-send time; never changes the payment business date.',
+      'cloud_uuid':
+          'Acknowledged payment UUID; avoid double-counting when receipt feed arrives.',
+      'last_error':
+          'Actionable rejection or uncertain-send diagnostic retained on the originating device.',
+      'created_at':
+          'Local audit and deterministic upload order; never derived from business date.',
+    };
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(supplier_payment_queue)',
+      )).map((c) => c['name']).toSet(),
+      paymentFields.keys.toSet(),
+    );
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(checkout_acceptances)',
+      )).map((column) => column['name']).toSet(),
+      {
+        'attempt_id',
+        'shop_id',
+        'owner',
+        'request_fingerprint',
+        'bill_id',
+        'bill_uuid',
+      },
+    );
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(checkout_draft_state)',
+      )).map((column) => column['name']).toSet(),
+      {'cart_uuid', 'shop_id', 'owner', 'device_id', 'revision', 'payload'},
+    );
     final result = {
-      'version': 3,
+      'version': 7,
+      'local_checkout_drafts': {
+        'table': 'checkout_draft_state',
+        'policy':
+            'Device-only owner-scoped raw checkout and frozen local request; never row-sync. SQLite backups retain it with the exact original cart. Atomic park/swap transfers identity; acceptance or discard removes it.',
+        'fields': [
+          'cart_uuid',
+          'shop_id',
+          'owner',
+          'device_id',
+          'revision',
+          'payload',
+        ],
+      },
+      'local_checkout_acceptance': {
+        'table': 'checkout_acceptances',
+        'policy':
+            'Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.',
+        'fields': [
+          'attempt_id',
+          'shop_id',
+          'owner',
+          'request_fingerprint',
+          'bill_id',
+          'bill_uuid',
+        ],
+      },
+      'local_payment_tables': {
+        'supplier_payment_queue': {'fields': paymentFields},
+      },
       'local_draft_tables': {
         'purchase_drafts': {'fields': draftFields},
       },
@@ -185,7 +266,13 @@ void main() {
           },
       },
       'portable_preferences': (portablePreferenceKeys.toList()..sort()),
-      'device_only_tables': ['cloud_sync_state', 'purchase_drafts'],
+      'device_only_tables': [
+        'cloud_sync_state',
+        'purchase_drafts',
+        'supplier_payment_queue',
+        'checkout_acceptances',
+        'checkout_draft_state',
+      ],
       'server_managed_public_tables': {
         'shop_members': 'Membership and roles via authenticated API',
         'shop_invites': 'Invitations via authenticated API',
@@ -196,6 +283,10 @@ void main() {
             'Receipt lines via purchase-receipts API; the phone stores whole document snapshots',
         'purchase_receipt_imports':
             'Server-side purchase import fingerprints; never stored on the device',
+        'supplier_payments':
+            'Payment headers via supplier payment API; receipt feed carries allocations',
+        'supplier_payment_allocations':
+            'Allocated amounts via whole purchase document feed; never generic row-sync',
         'alembic_version': 'Migration runtime state',
       },
       'device_only': [

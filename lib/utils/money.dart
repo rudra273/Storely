@@ -21,6 +21,25 @@ String rupees(num value, {int decimals = 2}) {
   return isNegative ? '-$text' : text;
 }
 
+/// Formats exact paise without passing a large counter amount through double.
+String rupeesFromPaise(BigInt paise) {
+  final magnitude = paise.abs();
+  final digits = (magnitude ~/ BigInt.from(100)).toString();
+  final fraction = (magnitude % BigInt.from(100)).toString().padLeft(2, '0');
+  final groups = <String>[];
+  var end = digits.length;
+  if (end > 3) {
+    groups.add(digits.substring(end - 3));
+    end -= 3;
+    while (end > 2) {
+      groups.add(digits.substring(end - 2, end));
+      end -= 2;
+    }
+  }
+  groups.add(digits.substring(0, end));
+  return '${paise.isNegative ? '-' : ''}₹${groups.reversed.join(',')}.$fraction';
+}
+
 /// "+₹0.40" / "-₹0.40" for small signed adjustments like round-off.
 String signedRupees(num value) =>
     '${value < 0 ? '-' : '+'}${rupees(value.abs())}';

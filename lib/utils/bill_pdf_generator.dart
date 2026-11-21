@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/bill.dart';
 import '../models/bill_settings.dart';
 import '../models/bill_totals.dart';
+import '../models/checkout_settlement.dart';
 import '../models/gst_states.dart';
 import '../models/shop_profile.dart';
 import 'money.dart';
@@ -674,7 +675,7 @@ class BillPdfGenerator {
   }
 
   static String _paymentMode(Bill bill) =>
-      bill.paymentMethod == 'online' ? 'UPI/Online' : 'Cash';
+      paymentMethodLabel(bill.paymentMethod);
 
   static pw.Widget _kv(String label, String value, {bool bold = false}) {
     final style = pw.TextStyle(

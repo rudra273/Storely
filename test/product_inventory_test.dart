@@ -251,6 +251,80 @@ void main() {
       expect(adjustmentRows.single['quantity_delta'], -3);
     });
 
+    test(
+      'stale guarded product edit preserves fresh master and stock',
+      () async {
+        final id = await db.insertProduct(
+          Product(
+            name: 'Concurrent rice',
+            mrp: 60,
+            purchasePrice: 40,
+            quantity: 10,
+          ),
+        );
+        final opened = (await db.getProductById(id))!;
+        await db.updateProduct(
+          opened.copyWith(name: 'Fresh rice', quantity: 7),
+          expectedUpdatedAt: opened.updatedAt,
+        );
+        final fresh = (await db.getProductById(id))!;
+        final movementsBefore = await _stockRows();
+        await expectLater(
+          db.updateProduct(
+            opened.copyWith(name: 'Stale edit', quantity: 12),
+            expectedUpdatedAt: opened.updatedAt,
+          ),
+          throwsStateError,
+        );
+        final after = (await db.getProductById(id))!;
+        expect(after.name, 'Fresh rice');
+        expect(after.quantity, 7);
+        expect(after.updatedAt, fresh.updatedAt);
+        expect(await _stockRows(), movementsBefore);
+        expect(
+          opened.name,
+          'Concurrent rice',
+        ); // Failed save does not mutate editor input.
+        await db.updateProduct(
+          fresh.copyWith(name: 'Reviewed rice'),
+          expectedUpdatedAt: fresh.updatedAt.toLocal(),
+        );
+        expect((await db.getProductById(id))!.name, 'Reviewed rice');
+      },
+    );
+
+    test(
+      'guarded edit refuses a product from a different active shop',
+      () async {
+        final id = await db.insertProduct(
+          Product(name: 'Foreign rice', mrp: 60, quantity: 10),
+        );
+        final opened = (await db.getProductById(id))!;
+        final sql = await db.database;
+        await sql.update(
+          'products',
+          {'shop_id': 'another-shop'},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await expectLater(
+          db.updateProduct(
+            opened.copyWith(name: 'Wrong tenant'),
+            expectedUpdatedAt: opened.updatedAt,
+          ),
+          throwsStateError,
+        );
+        expect(
+          (await sql.query(
+            'products',
+            where: 'id = ?',
+            whereArgs: [id],
+          )).single['name'],
+          'Foreign rice',
+        );
+      },
+    );
+
     test('duplicate product code and barcode are rejected', () async {
       await db.insertProduct(
         Product(

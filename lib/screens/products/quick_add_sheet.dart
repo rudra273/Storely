@@ -7,9 +7,16 @@ class _QuickAddSheet extends StatefulWidget {
   static const openPurchase = 'purchase';
 
   final List<String> units;
+  final String? initialBarcode;
+  final CheckoutScope? checkoutScope;
   final Future<String?> Function(BuildContext sheetContext) scanBarcode;
 
-  const _QuickAddSheet({required this.units, required this.scanBarcode});
+  const _QuickAddSheet({
+    required this.units,
+    required this.scanBarcode,
+    this.initialBarcode,
+    this.checkoutScope,
+  });
 
   @override
   State<_QuickAddSheet> createState() => _QuickAddSheetState();
@@ -27,6 +34,12 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
   bool _trackStock = true;
   bool _saving = false;
   String? _nameError;
+
+  @override
+  void initState() {
+    super.initState();
+    _barcodeController.text = widget.initialBarcode ?? '';
+  }
 
   @override
   void dispose() {
@@ -75,23 +88,27 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
           ? double.tryParse(_qtyController.text.trim()) ?? 0
           : 0.0;
       final barcode = _barcodeController.text.trim();
-      await db.insertProduct(
-        Product(
-          name: name,
-          sellingPrice: price,
-          manualPrice: price,
-          directPriceToggle: true,
-          // Without a cost, profit shows as zero rather than as 100%.
-          purchasePrice: cost ?? price,
-          quantity: qty,
-          trackStock: _trackStock,
-          unit: _unit,
-          barcode: barcode.isEmpty ? null : barcode,
-        ),
+      final product = Product(
+        name: name,
+        sellingPrice: price,
+        manualPrice: price,
+        directPriceToggle: true,
+        // Without a cost, profit shows as zero rather than as 100%.
+        purchasePrice: cost ?? price,
+        quantity: qty,
+        trackStock: _trackStock,
+        unit: _unit,
+        barcode: barcode.isEmpty ? null : barcode,
       );
+      Product? saved;
+      if (widget.checkoutScope case final scope?) {
+        saved = await db.insertProductForCheckout(product, scope);
+      } else {
+        await db.insertProduct(product);
+      }
       if (!mounted) return;
       if (!addAnother) {
-        Navigator.pop(context);
+        Navigator.pop(context, saved);
         return;
       }
       _nameController.clear();
@@ -226,13 +243,14 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
+                  key: const ValueKey('quick-add-barcode'),
                   controller: _barcodeController,
                   decoration: InputDecoration(
                     labelText: context.l10n.barcodeOptional,
                     suffixIcon: IconButton(
                       tooltip: context.l10n.scanBarcode,
                       icon: const Icon(Icons.qr_code_scanner_rounded),
-                      onPressed: _scan,
+                      onPressed: widget.checkoutScope == null ? _scan : null,
                     ),
                   ),
                 ),
@@ -249,14 +267,25 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                 const SizedBox(height: AppSpacing.sm),
                 Row(
                   children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _saving
-                            ? null
-                            : () => _save(addAnother: true),
-                        child: Text(context.l10n.saveAndAddAnother),
+                    if (widget.checkoutScope == null)
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _saving
+                              ? null
+                              : () => _save(addAnother: true),
+                          child: Text(context.l10n.saveAndAddAnother),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: OutlinedButton(
+                          key: const ValueKey('quick-add-cancel'),
+                          onPressed: _saving
+                              ? null
+                              : () => Navigator.pop(context),
+                          child: Text(context.l10n.cancel),
+                        ),
                       ),
-                    ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
                       child: FilledButton(
@@ -269,14 +298,17 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                     ),
                   ],
                 ),
-                TextButton.icon(
-                  onPressed: _saving
-                      ? null
-                      : () =>
-                            Navigator.pop(context, _QuickAddSheet.openPurchase),
-                  icon: const Icon(Icons.add_shopping_cart_rounded),
-                  label: Text(context.l10n.fullPurchaseEntry),
-                ),
+                if (widget.checkoutScope == null)
+                  TextButton.icon(
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.pop(
+                            context,
+                            _QuickAddSheet.openPurchase,
+                          ),
+                    icon: const Icon(Icons.add_shopping_cart_rounded),
+                    label: Text(context.l10n.fullPurchaseEntry),
+                  ),
               ],
             ),
           ),

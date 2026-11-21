@@ -3,7 +3,7 @@ part of '../products_screen.dart';
 class _ProductCard extends StatelessWidget {
   final Product product;
   final ProductPurchaseSummary? purchaseSummary;
-  final int lowStockThreshold;
+  final double lowStockThreshold;
   final bool selectionMode;
   final bool isSelected;
   final VoidCallback onTap;

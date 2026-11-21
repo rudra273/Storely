@@ -1,4 +1,6 @@
 import 'product.dart';
+import 'shop_profile.dart';
+import 'pricing_default_input.dart';
 
 class GlobalPricingSettings {
   final double defaultGstPercent;
@@ -6,6 +8,119 @@ class GlobalPricingSettings {
   final double defaultProfitMarginPercent;
   final bool gstRegistered;
   final bool showPurchasePriceGlobally;
+  final Map<String, String> storedDefaults;
+
+  String get gstInput =>
+      storedDefaults['default_gst_percent'] ?? defaultGstPercent.toString();
+  String get overheadInput =>
+      storedDefaults['default_overhead_cost'] ?? defaultOverheadCost.toString();
+  String get marginInput =>
+      storedDefaults['default_profit_margin_percent'] ??
+      defaultProfitMarginPercent.toString();
+
+  factory GlobalPricingSettings.fromStoredValues(Map<String, String?> values) {
+    final gst = PricingDefaultNumber.parse(
+      values['default_gst_percent'],
+      maximum: 100,
+    );
+    final overhead = PricingDefaultNumber.parse(
+      values['default_overhead_cost'],
+      maximum: 999999999,
+    );
+    final margin = PricingDefaultNumber.parse(
+      values['default_profit_margin_percent'],
+      maximum: 100,
+    );
+    final scheme = GstScheme.clean(
+      values['gst_scheme'],
+      fallbackRegistered: values['gst_registered'] == '1',
+    );
+    return GlobalPricingSettings(
+      defaultGstPercent: gst?.value ?? 18,
+      defaultOverheadCost: overhead?.value ?? 0,
+      defaultProfitMarginPercent: margin?.value ?? 0,
+      gstRegistered: scheme == GstScheme.regular,
+      showPurchasePriceGlobally: values['show_purchase_price_globally'] == '1',
+      storedDefaults: {
+        'default_gst_percent': gst?.text ?? '18',
+        'default_overhead_cost': overhead?.text ?? '0',
+        'default_profit_margin_percent': margin?.text ?? '0',
+      },
+    );
+  }
+
+  GlobalPricingSettings editedDefaults({
+    required String gst,
+    required String overhead,
+    required String margin,
+  }) {
+    double edited(
+      String value,
+      String original,
+      int maximum,
+      int scale,
+      String label, {
+      bool gstRate = false,
+    }) {
+      if (value == original) {
+        return PricingDefaultNumber.parse(original, maximum: maximum)!.value;
+      }
+      final parsed = PricingDefaultNumber.parse(value, maximum: maximum);
+      if (parsed == null || parsed.scale > scale) {
+        throw FormatException(
+          '$label must be between 0 and $maximum with at most $scale decimal places.',
+        );
+      }
+      if (gstRate &&
+          !{
+            0.0,
+            0.25,
+            3.0,
+            5.0,
+            12.0,
+            18.0,
+            28.0,
+            40.0,
+          }.contains(parsed.value)) {
+        throw const FormatException(
+          'Default GST % must be 0, 0.25, 3, 5, 12, 18, 28 or 40.',
+        );
+      }
+      return parsed.value;
+    }
+
+    return GlobalPricingSettings(
+      gstRegistered: gstRegistered,
+      showPurchasePriceGlobally: showPurchasePriceGlobally,
+      storedDefaults: {
+        'default_gst_percent': gst.trim(),
+        'default_overhead_cost': overhead.trim(),
+        'default_profit_margin_percent': margin.trim(),
+      },
+      defaultGstPercent: edited(
+        gst,
+        gstInput,
+        100,
+        3,
+        'Default GST %',
+        gstRate: true,
+      ),
+      defaultOverheadCost: edited(
+        overhead,
+        overheadInput,
+        999999999,
+        2,
+        'Default Overhead',
+      ),
+      defaultProfitMarginPercent: edited(
+        margin,
+        marginInput,
+        100,
+        3,
+        'Default Profit Margin %',
+      ),
+    );
+  }
 
   const GlobalPricingSettings({
     this.defaultGstPercent = 18,
@@ -13,6 +128,7 @@ class GlobalPricingSettings {
     this.defaultProfitMarginPercent = 0,
     this.gstRegistered = false,
     this.showPurchasePriceGlobally = false,
+    this.storedDefaults = const {},
   });
 
   GlobalPricingSettings copyWith({
@@ -22,7 +138,21 @@ class GlobalPricingSettings {
     bool? gstRegistered,
     bool? showPurchasePriceGlobally,
   }) {
+    final inputs = Map<String, String>.of(storedDefaults);
+    if (defaultGstPercent != null &&
+        defaultGstPercent != this.defaultGstPercent) {
+      inputs.remove('default_gst_percent');
+    }
+    if (defaultOverheadCost != null &&
+        defaultOverheadCost != this.defaultOverheadCost) {
+      inputs.remove('default_overhead_cost');
+    }
+    if (defaultProfitMarginPercent != null &&
+        defaultProfitMarginPercent != this.defaultProfitMarginPercent) {
+      inputs.remove('default_profit_margin_percent');
+    }
     return GlobalPricingSettings(
+      storedDefaults: inputs,
       defaultGstPercent: defaultGstPercent ?? this.defaultGstPercent,
       defaultOverheadCost: defaultOverheadCost ?? this.defaultOverheadCost,
       defaultProfitMarginPercent:

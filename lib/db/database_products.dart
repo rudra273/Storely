@@ -18,6 +18,150 @@ mixin DatabaseProducts {
     });
   }
 
+  Future<Product?> resolveCheckoutProduct(
+    String raw,
+    CheckoutScope scope,
+  ) async {
+    final value = raw.trim();
+    final db = await database;
+    return db.transaction((txn) async {
+      await _assertCheckoutScope(txn, scope);
+      String? uuid;
+      String? barcode;
+      String? code;
+      int? id;
+      var name = value;
+      final structured = value.startsWith('{') || value.startsWith('[');
+      if (structured) {
+        final Object? label;
+        try {
+          label = jsonDecode(value);
+        } on FormatException {
+          return null;
+        }
+        if (label is! Map<String, dynamic>) {
+          throw const FormatException('This is not a product label.');
+        }
+        uuid = label['uuid'] is String
+            ? (label['uuid'] as String).trim()
+            : null;
+        code = label['code'] is String
+            ? (label['code'] as String).trim()
+            : null;
+        barcode = label['barcode'] is String
+            ? (label['barcode'] as String).trim()
+            : null;
+        name = label['name'] is String ? (label['name'] as String).trim() : '';
+        if ((uuid == null || uuid.isEmpty) &&
+            (code == null || code.isEmpty) &&
+            (barcode == null || barcode.isEmpty)) {
+          id = label['id'] is int ? label['id'] as int : null;
+        }
+      }
+      final clauses = <String>[];
+      final values = <Object?>[scope.shopId];
+      void match(String field, Object? input, {bool caseInsensitive = false}) {
+        if (input == null || input == '') return;
+        clauses.add(
+          caseInsensitive ? 'LOWER(p.$field) = LOWER(?)' : 'p.$field = ?',
+        );
+        values.add(input);
+      }
+
+      if (structured) {
+        match('uuid', uuid);
+        match('barcode', barcode, caseInsensitive: true);
+        match('product_code', code, caseInsensitive: true);
+        match('id', id);
+      } else {
+        match('uuid', value);
+        match('barcode', value, caseInsensitive: true);
+        match('product_code', value, caseInsensitive: true);
+      }
+      final rows = clauses.isEmpty
+          ? <Map<String, dynamic>>[]
+          : await _queryProducts(
+              txn,
+              where: 'p.shop_id = ? AND (${clauses.join(' OR ')})',
+              whereArgs: values,
+            );
+      if (rows.length > 1) {
+        throw StateError(
+          'This code matches more than one product. Choose the product from search.',
+        );
+      }
+      if (rows.isNotEmpty) return Product.fromMap(rows.single);
+      if (structured && uuid != null && uuid.isNotEmpty) return null;
+      if (name.isEmpty) return null;
+      final names = await _queryProducts(
+        txn,
+        where: 'p.shop_id = ? AND LOWER(p.name) = LOWER(?)',
+        whereArgs: [scope.shopId, name],
+      );
+      if (names.length > 1) {
+        throw StateError(
+          'More than one product has this name. Choose the product from search.',
+        );
+      }
+      return names.isEmpty ? null : Product.fromMap(names.single);
+    });
+  }
+
+  Future<Product> insertProductForCheckout(
+    Product product,
+    CheckoutScope scope,
+  ) async {
+    await _requireAdminMutation();
+    final db = await database;
+    return db.transaction((txn) async {
+      await _assertCheckoutScope(txn, scope);
+      if (!_canMutateAsAdmin()) {
+        throw StateError('Only a shop owner/admin can add a product.');
+      }
+      if (product.shopId.isNotEmpty && product.shopId != scope.shopId) {
+        throw StateError('Product belongs to another shop.');
+      }
+      final id = await _insertProductInTransaction(
+        txn,
+        product.copyWith(shopId: scope.shopId),
+      );
+      final rows = await _queryProducts(
+        txn,
+        where: 'p.shop_id = ? AND p.id = ?',
+        whereArgs: [scope.shopId, id],
+      );
+      notifyDatabaseChanged();
+      return Product.fromMap(rows.single);
+    });
+  }
+
+  Future<Product> productForCheckoutReturn(
+    String uuid,
+    CheckoutScope scope,
+  ) async {
+    await _requireAdminMutation();
+    final db = await database;
+    return db.transaction((txn) async {
+      await _assertCheckoutScope(txn, scope);
+      if (!_canMutateAsAdmin()) {
+        throw StateError(
+          'Only a shop owner/admin can recover a newly added product.',
+        );
+      }
+      final rows = await _queryProducts(
+        txn,
+        where: 'p.shop_id = ? AND p.uuid = ?',
+        whereArgs: [scope.shopId, uuid],
+      );
+      if (rows.isEmpty) {
+        throw StateError(
+          'The saved product is no longer available in the original shop.',
+        );
+      }
+      return Product.fromMap(rows.single);
+    });
+  }
+
   Future<List<Product>> getAllProducts() async {
     final db = await database;
     final maps = await _queryProducts(db, orderBy: 'p.created_at ASC');
@@ -93,7 +237,10 @@ mixin DatabaseProducts {
     return result.isEmpty;
   }
 
-  Future<int> updateProduct(Product product) async {
+  Future<int> updateProduct(
+    Product product, {
+    DateTime? expectedUpdatedAt,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     return db.transaction((txn) async {
@@ -108,6 +255,15 @@ mixin DatabaseProducts {
       final current = existing.isEmpty
           ? null
           : Product.fromMap(existing.single);
+      if (expectedUpdatedAt != null &&
+          (current == null ||
+              current.uuid != product.uuid ||
+              current.shopId != await _activeShopId(txn) ||
+              !current.updatedAt.isAtSameMomentAs(expectedUpdatedAt))) {
+        throw StateError(
+          'This product changed while you were editing. Your entries are kept; reopen the product before saving.',
+        );
+      }
       final productToUpdate = await _prepareProductForWrite(
         txn,
         product.copyWith(updatedAt: DateTime.now().toUtc()),
@@ -1491,16 +1647,7 @@ Future<GlobalPricingSettings> _getGlobalPricingSettingsFromExecutor(
   final values = {
     for (final row in rows) row['key'] as String: row['value']?.toString(),
   };
-  return GlobalPricingSettings(
-    defaultGstPercent:
-        double.tryParse(values['default_gst_percent'] ?? '') ?? 18,
-    defaultOverheadCost:
-        double.tryParse(values['default_overhead_cost'] ?? '') ?? 0,
-    defaultProfitMarginPercent:
-        double.tryParse(values['default_profit_margin_percent'] ?? '') ?? 0,
-    gstRegistered: values['gst_registered'] == '1',
-    showPurchasePriceGlobally: values['show_purchase_price_globally'] == '1',
-  );
+  return GlobalPricingSettings.fromStoredValues(values);
 }
 
 PriceBreakdown _resolveProductPrice(

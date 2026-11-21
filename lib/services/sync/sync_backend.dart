@@ -31,7 +31,9 @@ abstract class SyncBackend {
 class SyncRowRejected implements Exception {
   final String message;
 
-  const SyncRowRejected(this.message);
+  final bool isConflict;
+
+  const SyncRowRejected(this.message, {this.isConflict = false});
 
   @override
   String toString() => message;

@@ -21,6 +21,7 @@ class PricingScreen extends StatefulWidget {
 }
 
 class _PricingScreenState extends State<PricingScreen> {
+  SettingsEditBaseline? _settingsBaseline;
   final _gstCtrl = TextEditingController();
   final _overheadCtrl = TextEditingController();
   final _marginCtrl = TextEditingController();
@@ -48,6 +49,7 @@ class _PricingScreenState extends State<PricingScreen> {
 
   Future<void> _load() async {
     final db = DatabaseHelper.instance;
+    final baseline = await db.captureSettingsEditBaseline();
     final settings = await db.getGlobalPricingSettings();
     final categories = await db.getCategories();
 
@@ -59,12 +61,13 @@ class _PricingScreenState extends State<PricingScreen> {
 
     if (!mounted) return;
     setState(() {
+      _settingsBaseline = baseline;
       _settings = settings;
       _categories = categories;
       _categoryPricing = pricing;
-      _gstCtrl.text = settings.defaultGstPercent.toStringAsFixed(2);
-      _overheadCtrl.text = settings.defaultOverheadCost.toStringAsFixed(2);
-      _marginCtrl.text = settings.defaultProfitMarginPercent.toStringAsFixed(2);
+      _gstCtrl.text = settings.gstInput;
+      _overheadCtrl.text = settings.overheadInput;
+      _marginCtrl.text = settings.marginInput;
       _isLoading = false;
     });
   }
@@ -73,24 +76,35 @@ class _PricingScreenState extends State<PricingScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(error.toString().replaceFirst('Invalid argument: ', '')),
+        content: Text(
+          error is FormatException
+              ? error.message
+              : error.toString().replaceFirst('Invalid argument: ', ''),
+        ),
       ),
     );
   }
 
   Future<void> _saveDefaults() async {
-    setState(() => _savingDefaults = true);
-    // Preserve flags owned elsewhere (Shop Profile / product display settings).
-    final updated = _settings.copyWith(
-      defaultGstPercent: double.tryParse(_gstCtrl.text) ?? 0,
-      defaultOverheadCost: double.tryParse(_overheadCtrl.text) ?? 0,
-      defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
-    );
+    if (_savingDefaults || _settingsBaseline == null) return;
     try {
-      await DatabaseHelper.instance.saveGlobalPricingSettings(updated);
+      final updated = _settings.editedDefaults(
+        gst: _gstCtrl.text,
+        overhead: _overheadCtrl.text,
+        margin: _marginCtrl.text,
+      );
+      setState(() => _savingDefaults = true);
+      final savedBaseline = await DatabaseHelper.instance
+          .savePricingSettingsWithBaseline(
+            updated,
+            baseline: _settingsBaseline!,
+          );
       await DatabaseHelper.instance.refreshAllProductSellingPrices();
       if (!mounted) return;
-      setState(() => _settings = updated);
+      setState(() {
+        _settings = updated;
+        _settingsBaseline = savedBaseline;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Pricing defaults saved')));

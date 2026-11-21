@@ -1,6 +1,7 @@
 import '../../db/database_helper.dart';
 import 'sync_backend.dart';
 import 'purchase_sync_backend.dart';
+import 'dart:convert';
 
 /// How a device's existing local data is handled on its first sync.
 enum FirstSyncMode { uploadExisting, startFresh }
@@ -98,6 +99,11 @@ class CloudSyncEngine {
     DatabaseHelper database,
     SyncConflict conflict,
   ) async {
+    if (conflict.table == 'supplier_payment_queue') {
+      throw StateError(
+        'Review this payment in Suppliers. The saved request is preserved.',
+      );
+    }
     if (conflict.table == 'purchase_documents') {
       throw StateError(
         'Review this purchase in Purchase history. Stock and pending documents are preserved.',
@@ -243,6 +249,92 @@ class CloudSyncEngine {
             message: error.message,
           ),
         );
+      }
+    }
+    if (transport is SupplierPaymentSyncBackend) {
+      final payments = transport as SupplierPaymentSyncBackend;
+      for (final payment in await database.pendingSupplierPayments(
+        shopId: shopId,
+      )) {
+        final key = payment['request_key'] as String;
+        final previouslyUnknown = payment['command_state'] == 'unknown';
+        if (!await database.beginSupplierPaymentAttempt(key, shopId: shopId)) {
+          continue;
+        }
+        try {
+          final supplierId = payment['supplier_uuid'] as String;
+          final payload = Map<String, dynamic>.from(
+            jsonDecode(payment['payload'] as String) as Map,
+          );
+          if (payment['shop_id'] != shopId ||
+              supplierId.trim().isEmpty ||
+              payload['request_key'] != key) {
+            throw const FormatException(
+              'Saved payment identity does not match its queue record',
+            );
+          }
+          String? recoveredUuid;
+          if (previouslyUnknown && payload['purchase_uuid'] != null &&
+              transport is! SupplierPaymentRecoveryBackend) {
+            throw StateError('This server cannot verify the selected purchase for this saved payment.');
+          }
+          if (previouslyUnknown &&
+              transport is SupplierPaymentRecoveryBackend) {
+            final recovery = await (transport as SupplierPaymentRecoveryBackend)
+                .recoverSupplierPayment(shopId, supplierId, payload);
+            if (recovery.status == SupplierPaymentRecoveryStatus.unsupported &&
+                payload['purchase_uuid'] != null) {
+              throw StateError(
+                'This server cannot verify the selected purchase for this saved payment.',
+              );
+            }
+            if (recovery.status == SupplierPaymentRecoveryStatus.committed) {
+              recoveredUuid = recovery.uuid;
+              if (recoveredUuid == null ||
+                  recoveredUuid.trim().isEmpty ||
+                  recoveredUuid != recoveredUuid.trim()) {
+                throw const FormatException(
+                  'Missing recovered payment identity',
+                );
+              }
+            }
+          }
+          final result = recoveredUuid == null
+              ? await payments.publishSupplierPayment(
+                  shopId,
+                  supplierId,
+                  payload,
+                )
+              : {'uuid': recoveredUuid};
+          await database.setSupplierPaymentSync(
+            key,
+            shopId: shopId,
+            cloudUuid: result['uuid'] as String,
+          );
+        } on SyncRowRejected catch (error) {
+          // A retry denied after a lost response cannot prove that the first
+          // attempt did not commit. Keep the reservation and original identity.
+          if (previouslyUnknown) {
+            await database.markSupplierPaymentUncertain(key, shopId: shopId);
+          } else {
+            await database.setSupplierPaymentSync(
+              key,
+              shopId: shopId,
+              error: error.message,
+              isConflict: error.isConflict,
+            );
+          }
+          conflicts.add(
+            SyncConflict(
+              table: 'supplier_payment_queue',
+              key: key,
+              message: error.message,
+            ),
+          );
+        } catch (_) {
+          await database.markSupplierPaymentUncertain(key, shopId: shopId);
+          rethrow;
+        }
       }
     }
     var sequence =

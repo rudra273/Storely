@@ -6,12 +6,23 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 24,
+      version: 28,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
     await _ensureSchema(db);
+    // A persisted send may have committed remotely before the process stopped.
+    // Recover once per database open, never while another sender is in flight.
+    await db.update(
+      'supplier_payment_queue',
+      {
+        'command_state': 'unknown',
+        'last_error':
+            'Previous send was interrupted. Sync to recover the saved payment.',
+      },
+      where: "sync_state = 'pending' AND command_state = 'sending'",
+    );
     return db;
   }
 
@@ -147,8 +158,17 @@ mixin DatabaseSchema {
   static const _v16BillingBackfillKey = 'v16_billing_backfill';
   static const _v21IndexRebuildKey = 'v21_index_rebuild';
   static const _gstInvoiceNumberKey = 'v2_gst_invoice_number_default';
+  static const _v26PaymentStateKey = 'v26_supplier_payment_state';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
+    if (!await _isMigrationDone(executor, _v26PaymentStateKey)) {
+      await executor.execute(
+        """UPDATE supplier_payment_queue SET command_state =
+        CASE sync_state WHEN 'synced' THEN 'accepted' WHEN 'error' THEN 'rejected'
+          WHEN 'local' THEN 'local' ELSE 'unknown' END""",
+      );
+      await _markMigrationDone(executor, _v26PaymentStateKey);
+    }
     if (!await _isMigrationDone(executor, _v16BillingBackfillKey)) {
       await _backfillV16Billing(executor);
       await _markMigrationDone(executor, _v16BillingBackfillKey);
@@ -186,6 +206,20 @@ mixin DatabaseSchema {
   /// every open. Does NOT seed data or create the local shop — that lives in
   /// [_seedBaseData] so it is not repeated needlessly on each launch.
   Future<void> _createCleanSchema(DatabaseExecutor executor) async {
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS checkout_acceptances(
+        attempt_id TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
+        owner TEXT, request_fingerprint TEXT NOT NULL,
+        bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL
+      )
+    ''');
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS checkout_draft_state(
+        cart_uuid TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
+        owner TEXT, device_id TEXT NOT NULL, revision INTEGER NOT NULL,
+        payload TEXT NOT NULL
+      )
+    ''');
     await _createShopTables(executor);
     await _createSettingsTable(executor);
     await _createBillSettingsTable(executor);
@@ -215,6 +249,16 @@ mixin DatabaseSchema {
     await executor.execute(
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_draft_active ON purchase_drafts(shop_id) WHERE status = 'editing'",
     );
+    await executor.execute('''CREATE TABLE IF NOT EXISTS supplier_payment_queue(
+      request_key TEXT PRIMARY KEY, shop_id TEXT NOT NULL, supplier_uuid TEXT NOT NULL,
+      payload TEXT NOT NULL, sync_state TEXT NOT NULL DEFAULT 'pending',
+      cloud_uuid TEXT, last_error TEXT, created_at TEXT NOT NULL
+    )''');
+    await _ensureColumns(executor, 'supplier_payment_queue', {
+      'command_state': "TEXT NOT NULL DEFAULT 'ready'",
+      'attempt_count': 'INTEGER NOT NULL DEFAULT 0',
+      'last_attempt_at': 'TEXT',
+    });
     await _createCloudSyncTables(executor);
     await _createHeldBillTables(executor);
     await executor.execute('''

@@ -1,0 +1,325 @@
+{
+  "schema_version": 1,
+  "status": "partially_verified",
+  "run_isolation": {
+    "shop_prefix": "refactor-e00-",
+    "cleanup": "Only exact IDs created by run; no name-based bulk deletion.",
+    "shared_environment_owner": "coordinator"
+  },
+  "fixtures": [
+    {
+      "id": "premium-owner",
+      "purpose": "Synthetic active premium shop with owner/admin/staff and second tenant."
+    },
+    {
+      "id": "free-local",
+      "purpose": "Local-only mobile shop without cloud identity."
+    },
+    {
+      "id": "valuation",
+      "purpose": "Quantity 10; purchase 100; GST 18%; overhead 5; unregistered; compare current 1000/1230 valuation difference without altering historical invoices."
+    },
+    {
+      "id": "independent-financial-v1",
+      "purpose": "Twelve manually derived decimal examples; identical API/mobile fixture bytes. No expectations generated from application calculators.",
+      "sha256": "f08e95e14feb65800b19065b1ca46b0f3a5e8d41661831e2f7fcc4ee26abbf60"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "E2E-01",
+      "name": "sale-parity",
+      "state": "partially_verified",
+      "description": "Equivalent seed shops; compare explicit payment choice and steps.",
+      "evidence": "evidence/E02/slice-1.md",
+      "verified_scope": "Deliberate full/partial/unpaid settlement, strict partial validation and consent on actual localhost/Android118 fixture; API review-context atomicity. Full held drafts, broader steps and account/catalog/locale parity remain E02.2/E02.3.",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-settlement.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and exact run-owned premium fixture. Coordinator cleanup required."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_settlement_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Existing unlocked Android emulator; dedicated test DB, no cloud account or network needed."
+        }
+      ]
+    },
+    {
+      "id": "E2E-02",
+      "name": "cross-client-roundtrip",
+      "state": "partially_verified",
+      "description": "Web invoice → mobile pull → mobile payment/return → web.",
+      "evidence": "evidence/E01/summary.md",
+      "verified_scope": "Premium device harness verifies activation/upload/all-table restore/two-device REST roundtrip. Full intended browser invoice → mobile payment/return → browser flow remains open.",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "make test-device-premium DEVICE=emulator-5554",
+          "prerequisites": "Booted Android emulator and local TLS API; exclusive shared API window, synthetic fixtures only."
+        }
+      ]
+    },
+    {
+      "id": "E2E-03",
+      "name": "offline-restart",
+      "state": "planned",
+      "description": "Offline sale, restart, reconnect and reconcile.",
+      "evidence": null
+    },
+    {
+      "id": "E2E-04",
+      "name": "uncertain-save",
+      "state": "partially_verified",
+      "description": "Lose response after commit; recover same operation.",
+      "evidence": "evidence/E01/summary.md",
+      "verified_scope": "Web invoice committed/lost response, reload and identical retry with one stock decrement; API ledger-family authorization/collision checks. Full mobile sales recovery remains open. Supplier selected-purchase lost-response/reload/exact retry, one allocation, API v1/v2 intent proof and mobile unknown proof/reservation tests verified in E01 slice 3.",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/invoice-recovery.cjs",
+          "prerequisites": "Current-source localhost server, Chromium, run-owned premium fixture; see script environment variables."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-integration",
+          "scope": "tests/test_operation_recovery.py; complete integration command provisions scratch DB exclusively."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-supplier-payment-recovery",
+          "prerequisites": "Current-source localhost server, Chromium and exact run-owned premium fixture with supplier/two unpaid purchases; see script variables and E01/slice-3.md."
+        }
+      ]
+    },
+    {
+      "id": "E2E-19",
+      "name": "local-only",
+      "state": "planned",
+      "description": "Core local use without account/network.",
+      "evidence": null
+    },
+    {
+      "id": "E01-PRODUCT-CAS",
+      "name": "guarded-product-edit",
+      "state": "verified-scoped",
+      "description": "Two guarded server writers cannot both accept one version; browser retains input and explicitly reapplies only dirty fields. Mobile local CAS and tenant guard covered separately.",
+      "evidence": "evidence/E01/slice-4.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-product-revision",
+          "prerequisites": "Current-source localhost/Chromium and run-owned premium product fixture."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_command_capabilities.py",
+          "prerequisites": "Exclusive scratch database window."
+        }
+      ]
+    },
+    {
+      "id": "E01-JOBS",
+      "name": "durable-inventory-report",
+      "state": "verified-scoped",
+      "description": "Enqueue rollback, private artifact, lease/retry/cancel/revocation/expiry/fencing and real dispatcher/restart recovery. No external provider exactly-once claim.",
+      "evidence": "evidence/E01/slice-4.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_background_jobs.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-platform",
+          "prerequisites": "Docker; isolated production stack only."
+        }
+      ]
+    },
+    {
+      "id": "E01-SETTINGS",
+      "name": "settings-revision-and-local-atomic-save",
+      "state": "verified-scoped",
+      "description": "Coherent REST settings revision across legacy sync mutations, preserved/rebased web edits, guarded local persisted snapshot and atomic bill/default-series save.",
+      "evidence": "evidence/E01/slice-5.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_settings_revision.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "make e2e-settings-revision",
+          "prerequisites": "Current-source localhost/Chromium and exact run-owned premium shop fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test test/settings_concurrency_test.dart",
+          "prerequisites": "Flutter tooling; local synthetic SQLite fixtures."
+        }
+      ]
+    },
+    {
+      "id": "E01-POSTING",
+      "name": "shared-posting-transaction-boundary",
+      "state": "verified-scoped",
+      "description": "Typed exact-money/provenance effects, live transaction binding, journal failure/outer rollback, and unchanged payment replay/reversal. Real journal storage remains E06.",
+      "evidence": "evidence/E01/slice-5.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "make test",
+          "scope": "Includes tests/test_posting_unit.py."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_posting_adapters.py",
+          "prerequisites": "Exclusive scratch database window."
+        }
+      ]
+    },
+    {
+      "id": "E01-FIN-01",
+      "name": "independent-financial-expectations",
+      "state": "verified",
+      "description": "API Decimal and legacy mobile calculator match twelve independent expected totals; public sale rejects signed negative quantity.",
+      "evidence": "evidence/E01/closing-audit.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "pytest tests/test_financial_contract.py",
+          "prerequisites": "Pinned API Docker runtime; no database required."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test test/independent_financial_contract_test.dart",
+          "prerequisites": "Flutter toolchain."
+        }
+      ]
+    },
+    {
+      "id": "E02-DRAFT-01",
+      "name": "checkout-draft-hold-and-recovery",
+      "state": "verified",
+      "description": "Restore raw checkout, retain work after failed storage, atomically hold and swap, then post resumed invoice once.",
+      "verified_scope": "Browser reload/storage failure and Android screen/SQLite reopen, aligned hold/swap and single posting. Legacy cloud backup compatibility passed.",
+      "evidence": "evidence/E02/slice-2.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-drafts.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_drafts_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Unlocked Android emulator and isolated test DB."
+        }
+      ]
+    },
+    {
+      "id": "E02-CATALOG-01",
+      "name": "checkout-product-entry-and-return",
+      "state": "verified",
+      "description": "Resolve exact code, guard partial-name suggestions and non-barcode payloads, persist draft before product creation, retain work on cancel, and return exact saved UUID even when barcode is edited.",
+      "verified_scope": "API concurrent code/barcode races, ambiguous lookup, staff guard and zero-stock creation; web and offline Android checkout product creation, cancel preservation, edited-barcode exact return, raw field retention and settlement review reset. Web also recovers the exact catalog save after a failed cart update and reload.",
+      "evidence": "evidence/E02/slice-3-catalog.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_product_entry.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-product-entry.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_product_entry_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Unlocked Android emulator and isolated test DB."
+        }
+      ]
+    },
+    {
+      "id": "E02-PAYMENT-01",
+      "name": "checkout-payment-and-completion",
+      "state": "verified",
+      "description": "Review full cash change and partial bank transfer, save, then check the invoice and start another checkout.",
+      "verified_scope": "Localhost and Android verified amounts, reference, clean continuation and view. API replay and legacy sync compatibility passed.",
+      "evidence": "evidence/E02/slice-3-payment-completion.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/checkout-payment-completion.cjs",
+          "prerequisites": "Current localhost Vite and Docker API, Chromium and disposable premium shop."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/checkout_payment_completion_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
+        }
+      ]
+    },
+    {
+      "id": "E02-PRICING-01",
+      "name": "gst-scheme-and-pricing-defaults",
+      "state": "verified",
+      "description": "Correct an invalid pricing edit, persist a three-decimal margin, and compare regular and composition product pricing with stale registration flags.",
+      "verified_scope": "PostgreSQL settings, legacy sync, product previews and issued invoices. Localhost pricing editor and API previews. Offline Android pricing editor, current price resolution and product insert transaction.",
+      "evidence": "evidence/E02/slice-3-pricing-settings.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_pricing_settings_integration.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/gst-pricing-settings.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/pricing_settings_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
+        }
+      ]
+    },
+    {
+      "id": "E02-STOCK-01",
+      "name": "shop-wide-low-stock-threshold",
+      "state": "verified",
+      "description": "Edit one shop default from existing screens and use it consistently for tracked stock warnings, filters, and counts.",
+      "verified_scope": "Effective fallback, exact boundary, invalid draft retention, settings revision, product override, dashboard and catalog behavior, offline Android and browser persistence, and native app settings sync.",
+      "evidence": "evidence/E02/slice-3-low-stock-threshold.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_low_stock_settings.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/low-stock-settings.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and disposable premium fixture with ten units in stock."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test integration_test/low_stock_threshold_test.dart --no-uninstall -d emulator-5554",
+          "prerequisites": "Android emulator and dedicated offline test database."
+        },
+        {
+          "repository": "storelyapi",
+          "command": "make test-device-premium DEVICE=emulator-5554",
+          "prerequisites": "Android emulator and local Docker API. Run in an exclusive device and API window with a synthetic Premium fixture."
+        }
+      ]
+    }
+  ],
+  "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
+}

@@ -1,6 +1,6 @@
 // The real CloudService on a real (emulated) Android phone, talking to the real
 // Storely API over TLS: Keystore storage, the network security rules, the on-device
-// SQLite, sign-up with an emailed code, registering a shop, and a first sync.
+// SQLite, sign-up with an emailed code, registering a free shop, and preserving local data when sync is paused.
 //
 // Run with `make test-device` in the storelyapi repo (boots nothing by itself:
 // start the emulator first). Needs a debug build, which trusts the development CA.
@@ -43,7 +43,7 @@ void main() {
     throw StateError('no email for $email');
   }
 
-  testWidgets('sign up, confirm, sign in, register a shop and sync', (
+  testWidgets('free registration pauses sync and preserves local stock', (
     tester,
   ) async {
     final email =
@@ -93,18 +93,23 @@ void main() {
     expect(service.state.value.user?.email, email);
     expect(await service.currentUserHasShopMembership(), isFalse);
 
-    // Register the shop and upload the product the phone already had.
+    // Free registration must not grant cloud upload. Premium upload/restore is
+    // covered by premium_on_device_test.dart.
     await service.registerShop();
     if (service.state.value.firstSyncChoicePending) {
       await service.chooseFirstSync(FirstSyncMode.uploadExisting);
     }
     await service.syncNow(reason: 'on-device test');
     final after = service.state.value;
-    expect(after.error, isNull, reason: after.error);
+    expect(after.error, contains('subscription free'));
     expect(after.membership, CloudMembership.member);
     expect(after.shopRole, 'owner');
-    expect(after.lastSyncedAt, isNotNull);
-    expect(await DatabaseHelper.instance.pendingSyncCounts(), isEmpty);
+    expect(await DatabaseHelper.instance.pendingSyncCounts(), isNotEmpty);
+    final rice = (await DatabaseHelper.instance.getAllProducts()).where(
+      (product) => product.name == 'Device Rice',
+    );
+    expect(rice, isNotEmpty);
+    expect(rice.last.quantity, 10);
 
     // Signing out leaves nobody signed in.
     await service.signOut();

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/product.dart';
+import 'package:storely/models/supplier.dart';
 import 'package:storely/models/product_purchase.dart';
 import 'package:storely/models/purchase_document.dart';
 import 'package:storely/services/sync/cloud_sync_engine.dart';
@@ -13,12 +14,54 @@ import 'package:storely/services/sync/sync_backend.dart';
 
 import 'support/fake_sync_backend.dart';
 
-class ReceiptServer extends FakeSyncBackend implements PurchaseSyncBackend {
+class ReceiptServer extends FakeSyncBackend
+    implements PurchaseSyncBackend, SupplierPaymentSyncBackend {
   final Map<String, Map<String, dynamic>> documents = {};
   final Map<String, String> originalRequests = {};
   final List<String> publishes = [];
   bool dropAck = false;
   bool deny = false;
+
+  bool dropPaymentAck = false;
+  bool rejectPayment = false;
+  final Map<String, Map<String, dynamic>> paymentRequests = {};
+  @override
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    if (rejectPayment) {
+      throw const SyncRowRejected('Balance changed on another device.');
+    }
+    final key = payment['request_key'] as String;
+    if (paymentRequests.containsKey(key)) {
+      expect(jsonEncode(payment), jsonEncode(paymentRequests[key]));
+    } else {
+      paymentRequests[key] = payment;
+      final id = documents.keys.single;
+      documents[id] = {
+        ...documents[id]!,
+        'change_sequence': 3,
+        'payment_status': 'partial',
+        'paid_amount': '4.00',
+        'balance_due': '6.00',
+        'payments': [
+          {
+            'uuid': key,
+            'payment_date': payment['payment_date'],
+            'amount': '4.00',
+            'payment_method': 'cash',
+          },
+        ],
+      };
+    }
+    if (dropPaymentAck) {
+      dropPaymentAck = false;
+      throw StateError('Lost payment acknowledgement');
+    }
+    return {'uuid': key};
+  }
 
   @override
   Future<Map<String, dynamic>> publishNativePurchase(
@@ -71,6 +114,44 @@ class ReceiptServer extends FakeSyncBackend implements PurchaseSyncBackend {
   }
 }
 
+class RecoveringReceiptServer extends ReceiptServer
+    implements SupplierPaymentRecoveryBackend {
+  int recoveryCalls = 0;
+  int publishCalls = 0;
+  Object? recoveryError;
+  bool unsupported = false;
+
+  @override
+  Future<Map<String, dynamic>> publishSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    publishCalls++;
+    return super.publishSupplierPayment(shopId, supplierId, payment);
+  }
+
+  @override
+  Future<SupplierPaymentRecovery> recoverSupplierPayment(
+    String shopId,
+    String supplierId,
+    Map<String, dynamic> payment,
+  ) async {
+    recoveryCalls++;
+    if (recoveryError != null) throw recoveryError!;
+    if (unsupported) return const SupplierPaymentRecovery.unsupported();
+    final stored = paymentRequests[payment['request_key']];
+    if (stored == null) return const SupplierPaymentRecovery.notFound();
+    if (jsonEncode(stored) != jsonEncode(payment)) {
+      throw const SyncRowRejected(
+        'Request identity mismatch',
+        isConflict: true,
+      );
+    }
+    return SupplierPaymentRecovery.committed(payment['request_key'] as String);
+  }
+}
+
 void main() {
   final db = DatabaseHelper.instance;
   const files = ['purchase-a.db', 'purchase-b.db'];
@@ -113,6 +194,457 @@ void main() {
       ], purchaseDate: DateTime(2026, 10, 1))
       .then((_) {});
 
+  test(
+    'offline supplier payment survives reopen and lost acknowledgement without duplicate balance or stock',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'Payments vendor'));
+      final profiles = await db.getSupplierProfiles();
+      final supplierId = profiles.single.uuid;
+      final server = ReceiptServer()..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+        pageSize: 1,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final id = server.documents.keys.single;
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'supplier_uuid': supplierId,
+        'total': '10.00',
+        'balance_due': '10.00',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      await db.queueSupplierPayment(supplierId, '4', 'cash', '2026-10-01');
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      expect((await db.pendingSyncCounts())['supplier_payment_queue'], 1);
+      await db.close();
+      expect((await db.pendingSupplierPayments()).length, 1);
+      server.dropPaymentAck = true;
+      await expectLater(engine.sync(), throwsStateError);
+      final uncertain = (await db.pendingSupplierPayments()).single;
+      expect(uncertain['command_state'], 'unknown');
+      expect(uncertain['attempt_count'], 1);
+      expect(uncertain['last_attempt_at'], isNotNull);
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['payload'],
+        uncertain['payload'],
+      );
+      server.rejectPayment =
+          true; // e.g. access revoked after the first commit.
+      final deniedReplay = await engine.sync();
+      expect(
+        deniedReplay.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      final stillUnknown = (await db.pendingSupplierPayments()).single;
+      expect(stillUnknown['command_state'], 'unknown');
+      expect(stillUnknown['payload'], uncertain['payload']);
+      // The receipt feed already includes the remote payment, but no matching
+      // result UUID was acknowledged. Keep a conservative reservation until
+      // replay resolves identity rather than allowing another unsafe payment.
+      expect((await db.supplierAccounting(supplierId))['balance'], '2.00');
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '3', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+      server.rejectPayment = false;
+      await engine.sync();
+      final accepted = (await (await db.database).query(
+        'supplier_payment_queue',
+      )).single;
+      expect(accepted['command_state'], 'accepted');
+      expect(accepted['attempt_count'], 3);
+      expect(server.paymentRequests.length, 1);
+      expect((await db.pendingSupplierPayments()), isEmpty);
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      expect((await db.getAllProducts()).single.quantity, 2);
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '7', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+      await db.queueSupplierPayment(supplierId, '1', 'cash', '2026-10-01');
+      server.rejectPayment = true;
+      final rejected = await engine.sync();
+      expect(
+        rejected.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      expect((await db.supplierAccounting(supplierId))['balance'], '6.00');
+      server.rejectPayment = false;
+      await engine.sync();
+      expect(server.paymentRequests.length, 1);
+      db.isAdminMutationAllowed = () => false;
+      await expectLater(
+        db.queueSupplierPayment(supplierId, '1', 'cash', '2026-10-01'),
+        throwsStateError,
+      );
+    },
+  );
+
+  test(
+    'large supplier payment stays exact across queue persistence and rejection',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'Exact vendor'));
+      final supplierId = (await db.getSupplierProfiles()).single.uuid;
+      final server = ReceiptServer()..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final id = server.documents.keys.single;
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'supplier_uuid': supplierId,
+        'total': '900719925474.02',
+        'balance_due': '900719925474.02',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      for (final invalid in ['1.005', '1.2300', '-1', ' 1 ', '1e2', '0']) {
+        await expectLater(
+          db.queueSupplierPayment(supplierId, invalid, 'cash', '2026-10-01'),
+          throwsArgumentError,
+          reason: invalid,
+        );
+      }
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      await db.queueSupplierPayment(
+        supplierId,
+        '900719925474.01',
+        'cash',
+        '2026-10-01',
+      );
+      final original = (await db.pendingSupplierPayments()).single;
+      expect(
+        (jsonDecode(original['payload'] as String) as Map)['amount'],
+        '900719925474.01',
+      );
+      expect((await db.supplierAccounting(supplierId))['balance'], '0.01');
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['payload'],
+        original['payload'],
+      );
+      expect((await db.supplierAccounting(supplierId))['balance'], '0.01');
+      server.rejectPayment = true;
+      final result = await engine.sync();
+      expect(
+        result.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+        isTrue,
+      );
+      expect(
+        (await db.supplierAccounting(supplierId))['balance'],
+        '900719925474.02',
+      );
+    },
+  );
+
+  test(
+    'interrupted send reopens as unknown and duplicate claim cannot send twice',
+    () async {
+      final sql = await db.database;
+      final shop = await db.currentShopId();
+      const payload = '{"request_key":"durable-key","amount":"0.01"}';
+      await sql.insert('supplier_payment_queue', {
+        'request_key': 'durable-key',
+        'shop_id': shop,
+        'supplier_uuid': 'supplier',
+        'payload': payload,
+        'sync_state': 'pending',
+        'created_at': '2026-10-01',
+      });
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isTrue,
+      );
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isFalse,
+      );
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      // A callback constrained to a different shop cannot accept this request.
+      await db.setSupplierPaymentSync(
+        'durable-key',
+        shopId: 'other-shop',
+        cloudUuid: 'wrong',
+      );
+      expect(
+        (await sql.query('supplier_payment_queue')).single['command_state'],
+        'sending',
+      );
+      await db.close();
+      final recovered = (await db.pendingSupplierPayments()).single;
+      expect(recovered['command_state'], 'unknown');
+      expect(recovered['payload'], payload);
+      expect(recovered['attempt_count'], 1);
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isTrue,
+      );
+      await db.setSupplierPaymentSync(
+        'durable-key',
+        shopId: shop,
+        error: 'Identity conflict',
+        isConflict: true,
+      );
+      final conflict = (await (await db.database).query(
+        'supplier_payment_queue',
+      )).single;
+      expect(conflict['command_state'], 'conflict');
+      expect(conflict['sync_state'], 'pending');
+      expect(conflict['attempt_count'], 2);
+      expect(conflict['payload'], payload);
+      expect(await db.pendingSupplierPayments(), isEmpty);
+      expect(
+        await db.beginSupplierPaymentAttempt('durable-key', shopId: shop),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'v25 queue from an older backup gains local state without changing saved requests',
+    () async {
+      final sql = await db.database;
+      final shop = await db.currentShopId();
+      for (final state in ['pending', 'synced', 'error', 'local']) {
+        await sql.insert('supplier_payment_queue', {
+          'request_key': state,
+          'shop_id': shop,
+          'supplier_uuid': 'supplier',
+          'payload': '{"request_key":"$state","amount":"0.01"}',
+          'sync_state': state,
+          'created_at': '2026-10-01',
+        });
+      }
+      await db.close();
+      final raw = await openDatabase(
+        p.join(await getDatabasesPath(), files.first),
+      );
+      for (final column in [
+        'command_state',
+        'attempt_count',
+        'last_attempt_at',
+      ]) {
+        await raw.execute(
+          'ALTER TABLE supplier_payment_queue DROP COLUMN $column',
+        );
+      }
+      await raw.delete(
+        'cloud_sync_state',
+        where: 'key = ?',
+        whereArgs: ['migration_done:v26_supplier_payment_state'],
+      );
+      await raw.execute('PRAGMA user_version = 25');
+      await raw.close();
+      final migrated = await db.database;
+      final rows = await migrated.query(
+        'supplier_payment_queue',
+        orderBy: 'request_key',
+      );
+      expect(
+        {for (final row in rows) row['request_key']: row['command_state']},
+        {
+          'pending': 'unknown',
+          'synced': 'accepted',
+          'error': 'rejected',
+          'local': 'local',
+        },
+      );
+      for (final row in rows) {
+        expect(row['attempt_count'], 0);
+        expect(
+          (jsonDecode(row['payload'] as String) as Map)['request_key'],
+          row['request_key'],
+        );
+      }
+      await db.beginSupplierPaymentAttempt('pending', shopId: shop);
+      await db.markSupplierPaymentUncertain('pending', shopId: shop);
+      await db.close();
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
+      );
+    },
+  );
+
+  for (final fallback in [false, true]) {
+    test(
+      'unknown payment ${fallback ? 'older-backend replay' : 'bound proof'} reconciles exactly once',
+      () async {
+        await purchase();
+        await db.saveSupplierProfile(SupplierProfile(name: 'Recovery vendor'));
+        final supplier = (await db.getSupplierProfiles()).single.uuid;
+        final server = RecoveringReceiptServer()
+          ..memberShopId = await db.currentShopId();
+        final engine = CloudSyncEngine(
+          backend: server,
+          database: db,
+          knownIsAdmin: true,
+        );
+        await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+        final receipt = server.documents.keys.single;
+        server.documents[receipt] = {
+          ...server.documents[receipt]!,
+          'supplier_uuid': supplier,
+          'total': '10.00',
+          'balance_due': '10.00',
+          'payment_status': 'unpaid',
+          'change_sequence': 2,
+        };
+        await engine.sync();
+        await db.queueSupplierPayment(supplier, '4', 'cash', '2026-10-01');
+        final payload = (await db.pendingSupplierPayments()).single['payload'];
+        server.dropPaymentAck = true;
+        await expectLater(engine.sync(), throwsStateError);
+        await db.close();
+        server.recoveryError = StateError('Lookup unavailable');
+        await expectLater(engine.sync(), throwsStateError);
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        expect((await db.supplierAccounting(supplier))['balance'], '6.00');
+        server.recoveryError = const SyncRowRejected('No permission');
+        final denied = await engine.sync();
+        expect(
+          denied.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+          isTrue,
+        );
+        expect(server.publishCalls, 1);
+        expect((await db.pendingSupplierPayments()).single['payload'], payload);
+        // The current receipt feed may include the payment while identity is still unknown.
+        expect((await db.supplierAccounting(supplier))['balance'], '2.00');
+        server.recoveryError = const FormatException(
+          'Malformed recovery proof',
+        );
+        await expectLater(engine.sync(), throwsFormatException);
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        server.recoveryError = const SyncRowRejected(
+          'Request identity conflict',
+          isConflict: true,
+        );
+        final conflict = await engine.sync();
+        expect(
+          conflict.conflicts.any((c) => c.table == 'supplier_payment_queue'),
+          isTrue,
+        );
+        expect(server.publishCalls, 1);
+        expect(
+          (await db.pendingSupplierPayments()).single['command_state'],
+          'unknown',
+        );
+        server.recoveryError = null;
+        server.unsupported = fallback;
+        await engine.sync();
+        final row = (await (await db.database).query(
+          'supplier_payment_queue',
+        )).single;
+        expect(row['command_state'], 'accepted');
+        expect(row['payload'], payload);
+        expect(server.publishCalls, fallback ? 2 : 1);
+        expect(server.paymentRequests.length, 1);
+        expect((await db.supplierAccounting(supplier))['balance'], '6.00');
+      },
+    );
+  }
+
+  test(
+    'unknown request with no committed proof retries its original identity',
+    () async {
+      await purchase();
+      await db.saveSupplierProfile(SupplierProfile(name: 'No-result vendor'));
+      final supplier = (await db.getSupplierProfiles()).single.uuid;
+      final server = RecoveringReceiptServer()
+        ..memberShopId = await db.currentShopId();
+      final engine = CloudSyncEngine(
+        backend: server,
+        database: db,
+        knownIsAdmin: true,
+      );
+      await engine.sync(firstSyncMode: FirstSyncMode.uploadExisting);
+      final receipt = server.documents.keys.single;
+      server.documents[receipt] = {
+        ...server.documents[receipt]!,
+        'supplier_uuid': supplier,
+        'total': '10.00',
+        'balance_due': '10.00',
+        'payment_status': 'unpaid',
+        'change_sequence': 2,
+      };
+      await engine.sync();
+      await db.queueSupplierPayment(supplier, '4', 'cash', '2026-10-01');
+      final queued = (await db.pendingSupplierPayments()).single;
+      final shop = await db.currentShopId();
+      await db.beginSupplierPaymentAttempt(
+        queued['request_key'] as String,
+        shopId: shop,
+      );
+      await db.close(); // Interrupted before the server ever saw the request.
+      final reopened = await db.database;
+      await reopened.update('supplier_payment_queue', {
+        'payload': jsonEncode({
+          ...jsonDecode(queued['payload'] as String) as Map,
+          'request_key': 'wrong-saved-key',
+        }),
+      });
+      await expectLater(engine.sync(), throwsFormatException);
+      expect(server.recoveryCalls, 0);
+      expect(server.publishCalls, 0);
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
+      );
+      await reopened.update('supplier_payment_queue', {
+        'payload': jsonEncode({
+          ...jsonDecode(queued['payload'] as String) as Map,
+          'purchase_uuid': receipt,
+        }),
+      });
+      final legacy = ReceiptServer()..memberShopId = shop;
+      legacy.documents.addAll(server.documents);
+      final legacyEngine = CloudSyncEngine(backend: legacy, database: db, knownIsAdmin: true);
+      await expectLater(legacyEngine.sync(), throwsStateError);
+      expect(legacy.paymentRequests, isEmpty);
+      server.unsupported = true;
+      await expectLater(engine.sync(), throwsStateError);
+      expect(server.publishCalls, 0);
+      expect(
+        (await db.pendingSupplierPayments()).single['command_state'],
+        'unknown',
+      );
+      await reopened.update('supplier_payment_queue', {
+        'payload': queued['payload'],
+      });
+      server.unsupported = false;
+      await engine.sync();
+      expect(server.recoveryCalls, 2);
+      expect(server.publishCalls, 1);
+      expect(server.paymentRequests.keys.single, queued['request_key']);
+      expect(
+        jsonEncode(server.paymentRequests.values.single),
+        queued['payload'],
+      );
+      expect((await db.supplierAccounting(supplier))['balance'], '6.00');
+    },
+  );
+
   test('exact line amounts and currency do not use binary money math', () {
     expect(purchaseCentsText(purchaseLineCents('1', '0.005')), '0.01');
     expect(
@@ -121,6 +653,13 @@ void main() {
     );
     expect(() => purchaseDecimal(1.12345), throwsArgumentError);
     expect(purchaseDecimal(0.1 + 0.2), '0.3');
+    expect(normalizePurchaseDecimal('0001.2300'), '1.23');
+    for (final legacyInvalid in ['-0', ' 1 ', '+1', '1.23000']) {
+      expect(
+        () => normalizePurchaseDecimal(legacyInvalid),
+        throwsFormatException,
+      );
+    }
   });
 
   test(
@@ -223,6 +762,28 @@ void main() {
       await engine.sync();
       expect((await db.getAllProducts()).single.quantity, 2);
       expect((await db.getPurchaseDocuments()).length, 1);
+      server.documents[id] = {
+        ...server.documents[id]!,
+        'change_sequence': 2,
+        'payment_status': 'partial',
+        'total': '10.00',
+        'paid_amount': '4.00',
+        'balance_due': '6.00',
+        'payments': [
+          {
+            'uuid': 'payment-1',
+            'payment_date': '2026-10-01',
+            'amount': '4.00',
+            'payment_method': 'cash',
+          },
+        ],
+      };
+      await engine.sync();
+      final updated = (await db.getPurchaseDocuments()).single;
+      expect(updated.paymentStatus, 'partial');
+      expect(updated.balanceDue, '6.00');
+      expect(updated.payments.single['amount'], '4.00');
+      expect((await db.getAllProducts()).single.quantity, 2);
     },
   );
 

@@ -191,7 +191,9 @@ class _PurchaseDetails extends StatelessWidget {
                       color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                const Text('Payment: Not recorded'),
+                Text(
+                  'Payment: ${{'not_recorded': 'Not recorded', 'unpaid': 'Unpaid', 'partial': 'Part paid', 'paid': 'Paid'}[document.paymentStatus] ?? document.paymentStatus}',
+                ),
                 if (document.toJson()['invoice_number'] != null)
                   Text(
                     'Supplier invoice: ${document.toJson()['invoice_number']}',
@@ -225,9 +227,24 @@ class _PurchaseDetails extends StatelessWidget {
                   'Stock cost subtotal: ${purchaseMoney(document.subtotal)}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const Text(
-                  'Payment, tax and additional charges are not recorded in this receipt.',
-                ),
+                if (document.total != null) ...[
+                  Text('GST: ${purchaseMoney(document.taxAmount)}'),
+                  Text(
+                    'Other charges: ${purchaseMoney(document.chargesAmount)}',
+                  ),
+                  Text('Discount: ${purchaseMoney(document.discountAmount)}'),
+                  Text('Total: ${purchaseMoney(document.total!)}'),
+                ],
+                if (document.balanceDue != null)
+                  Text('Balance due: ${purchaseMoney(document.balanceDue!)}'),
+                for (final payment in document.payments)
+                  Text(
+                    '${payment['payment_date']} · ${purchaseMoney(payment['amount'] as String)} · ${payment['payment_method']}',
+                  ),
+                if (document.paymentStatus == 'not_recorded')
+                  const Text(
+                    'Payment is not recorded. This receipt does not count towards supplier dues.',
+                  ),
               ],
             ),
     ),

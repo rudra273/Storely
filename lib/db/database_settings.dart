@@ -13,6 +13,72 @@ mixin DatabaseSettings {
   Future<Database> get database;
   Future<void> _seedDefaultInvoiceSeries(DatabaseExecutor executor);
 
+  Future<SettingsEditBaseline> captureSettingsEditBaseline() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      await _seedDefaultInvoiceSeries(txn);
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
+      );
+    });
+  }
+
+  Future<void> _assertSettingsBaseline(
+    DatabaseExecutor txn,
+    SettingsEditBaseline? baseline,
+  ) async {
+    if (baseline == null) {
+      return; // Legacy programmatic callers stay compatible.
+    }
+    final shopId = await _activeShopId(txn);
+    if (shopId != baseline.shopId ||
+        await _settingsSnapshot(txn, shopId) != baseline._snapshot) {
+      throw StateError(
+        'Shop settings changed while you were editing. Your entries are kept; reopen settings before saving.',
+      );
+    }
+  }
+
+  Future<String> _settingsSnapshot(DatabaseExecutor txn, String shopId) async {
+    final snapshot = <String, Object?>{};
+    for (final table in [
+      'shops',
+      'app_settings',
+      'bill_settings',
+      'invoice_series',
+    ]) {
+      final rows = await txn.query(
+        table,
+        where:
+            '${table == 'shops' ? 'uuid' : 'shop_id'} = ? AND deleted_at IS NULL',
+        whereArgs: [shopId],
+      );
+      final values = rows.map((row) {
+        final keys =
+            row.keys
+                .where(
+                  (key) => !{
+                    'id',
+                    'sync_dirty',
+                    'server_updated_at',
+                    'device_id',
+                    'created_at',
+                    'updated_at',
+                    'next_sequence',
+                    'last_sequence_key',
+                  }.contains(key),
+                )
+                .toList()
+              ..sort();
+        return jsonEncode({for (final key in keys) key: row[key]});
+      }).toList()..sort();
+      snapshot[table] = values;
+    }
+    return jsonEncode(snapshot);
+  }
+
   Future<String?> getShopName() async {
     final profile = await getShopProfile();
     if (profile != null) return profile.name;
@@ -88,13 +154,17 @@ mixin DatabaseSettings {
     return ShopProfile(name: legacyName, gstScheme: scheme);
   }
 
-  Future<void> saveShopProfile(ShopProfile profile) async {
+  Future<void> saveShopProfile(
+    ShopProfile profile, {
+    SettingsEditBaseline? baseline,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     final name = _normaliseName(profile.name);
     if (name == null) throw ArgumentError('Shop name is required');
 
     await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
       final shopId = await _activeShopId(txn);
       final now = _nowIso();
       final existing = await txn.query(
@@ -148,7 +218,7 @@ mixin DatabaseSettings {
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
-  Future<int> getLowStockThreshold() async {
+  Future<double> getLowStockThreshold() async {
     final db = await database;
     final shopId = await _activeShopId(db);
     final rows = await db.query(
@@ -159,24 +229,49 @@ mixin DatabaseSettings {
       limit: 1,
     );
     if (rows.isEmpty) return 5;
-    final value = int.tryParse(rows.first['value']?.toString() ?? '');
-    return value == null || value < 0 ? 5 : value;
+    return LowStockThreshold.parse(rows.first['value']?.toString())?.value ?? 5;
   }
 
-  Future<void> saveLowStockThreshold(int value) async {
+  Future<void> saveLowStockThreshold(
+    num value, {
+    SettingsEditBaseline? baseline,
+  }) async {
+    await _persistLowStockThreshold(value, baseline);
+  }
+
+  Future<SettingsEditBaseline> saveLowStockThresholdWithBaseline(
+    num value, {
+    required SettingsEditBaseline baseline,
+  }) => _persistLowStockThreshold(value, baseline);
+
+  Future<SettingsEditBaseline> _persistLowStockThreshold(
+    num value,
+    SettingsEditBaseline? baseline,
+  ) async {
     await _requireAdminMutation();
-    if (value < 0) {
-      throw ArgumentError('Minimum stock cannot be negative');
+    final threshold = LowStockThreshold.parse(value.toString());
+    if (threshold == null) {
+      throw const FormatException(
+        'Minimum stock must be between 0 and 999999999 with at most 4 decimal places.',
+      );
     }
     final db = await database;
-    final shopId = await _activeShopId(db);
-    await db.insert('app_settings', {
-      'key': _lowStockThresholdKey,
-      'shop_id': shopId,
-      'value': value.toString(),
-      'updated_at': _nowIso(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final saved = await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
+      if (!_canMutateAsAdmin()) {
+        throw StateError(
+          'Only a shop owner/admin can change the minimum stock.',
+        );
+      }
+      await _saveSetting(txn, _lowStockThresholdKey, threshold.text);
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
+      );
+    });
     notifyDatabaseChanged();
+    return saved;
   }
 
   Future<List<String>> getUnits() async {
@@ -222,60 +317,79 @@ mixin DatabaseSettings {
     notifyDatabaseChanged();
   }
 
-  Future<GlobalPricingSettings> getGlobalPricingSettings() async {
-    final db = await database;
-    final shopId = await _activeShopId(db);
-    final rows = await db.query(
-      'app_settings',
-      where: 'shop_id = ? AND deleted_at IS NULL',
-      whereArgs: [shopId],
-    );
-    final values = {
-      for (final row in rows) row['key'] as String: row['value']?.toString(),
-    };
-    return GlobalPricingSettings(
-      defaultGstPercent:
-          double.tryParse(values[_defaultGstPercentKey] ?? '') ?? 18,
-      defaultOverheadCost:
-          double.tryParse(values[_defaultOverheadCostKey] ?? '') ?? 0,
-      defaultProfitMarginPercent:
-          double.tryParse(values[_defaultProfitMarginPercentKey] ?? '') ?? 0,
-      gstRegistered: values[_gstRegisteredKey] == '1',
-      showPurchasePriceGlobally: values[_showPurchasePriceGloballyKey] == '1',
-    );
+  Future<GlobalPricingSettings> getGlobalPricingSettings() async =>
+      _getGlobalPricingSettingsFromExecutor(await database);
+
+  Future<void> saveGlobalPricingSettings(
+    GlobalPricingSettings settings, {
+    SettingsEditBaseline? baseline,
+  }) async {
+    await _persistGlobalPricingSettings(settings, baseline);
   }
 
-  Future<void> saveGlobalPricingSettings(GlobalPricingSettings settings) async {
+  Future<SettingsEditBaseline> savePricingSettingsWithBaseline(
+    GlobalPricingSettings settings, {
+    required SettingsEditBaseline baseline,
+  }) => _persistGlobalPricingSettings(settings, baseline);
+
+  Future<SettingsEditBaseline> _persistGlobalPricingSettings(
+    GlobalPricingSettings settings,
+    SettingsEditBaseline? baseline,
+  ) async {
     await _requireAdminMutation();
     final db = await database;
-    await db.transaction((txn) async {
-      await _saveSetting(
-        txn,
+    final saved = await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
+      final current = await _getGlobalPricingSettingsFromExecutor(txn);
+      final rows = await txn.query(
+        'app_settings',
+        columns: ['key'],
+        where: 'shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [await _activeShopId(txn)],
+      );
+      final keys = rows.map((row) => row['key']).toSet();
+      Future<void> changed(String key, Object value, Object old) async {
+        final input = settings.storedDefaults[key];
+        final changedInput =
+            input != null && input != current.storedDefaults[key];
+        if (!keys.contains(key) || value != old || changedInput) {
+          await _saveSetting(txn, key, input ?? value.toString());
+        }
+      }
+
+      await changed(
         _defaultGstPercentKey,
-        settings.defaultGstPercent.toString(),
+        settings.defaultGstPercent,
+        current.defaultGstPercent,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _defaultOverheadCostKey,
-        settings.defaultOverheadCost.toString(),
+        settings.defaultOverheadCost,
+        current.defaultOverheadCost,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _defaultProfitMarginPercentKey,
-        settings.defaultProfitMarginPercent.toString(),
+        settings.defaultProfitMarginPercent,
+        current.defaultProfitMarginPercent,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _gstRegisteredKey,
         settings.gstRegistered ? '1' : '0',
+        current.gstRegistered ? '1' : '0',
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _showPurchasePriceGloballyKey,
         settings.showPurchasePriceGlobally ? '1' : '0',
+        current.showPurchasePriceGlobally ? '1' : '0',
+      );
+      final shopId = await _activeShopId(txn);
+      return SettingsEditBaseline._(
+        shopId,
+        await _settingsSnapshot(txn, shopId),
       );
     });
     notifyDatabaseChanged();
+    return saved;
   }
 
   Future<BillSettings> getBillSettings() async {
@@ -292,41 +406,67 @@ mixin DatabaseSettings {
     return BillSettings(shopId: shopId, createdAt: now, updatedAt: now);
   }
 
-  Future<void> saveBillSettings(BillSettings settings) async {
+  Future<void> saveBillSettings(
+    BillSettings settings, {
+    SettingsEditBaseline? baseline,
+  }) async {
     await _requireAdminMutation();
     final db = await database;
     await db.transaction((txn) async {
-      final shopId = await _activeShopId(txn);
-      final now = _nowIso();
-      final existing = await txn.query(
-        'bill_settings',
-        columns: ['id', 'uuid', 'created_at'],
-        where: 'shop_id = ? AND deleted_at IS NULL',
-        whereArgs: [shopId],
-        limit: 1,
-      );
-      final createdAt = existing.isEmpty
-          ? now
-          : existing.single['created_at']?.toString() ?? now;
-      final uuid = existing.isEmpty
-          ? (settings.uuid.isEmpty ? _newUuid() : settings.uuid)
-          : existing.single['uuid'] as String;
-      final map =
-          settings
-              .copyWith(
-                id: existing.isEmpty ? null : existing.single['id'] as int?,
-                uuid: uuid,
-                shopId: shopId,
-                createdAt: DateTime.parse(createdAt),
-                updatedAt: DateTime.parse(now),
-              )
-              .toMap()
-            ..remove('id');
-      await txn.insert(
-        'bill_settings',
-        map,
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await _assertSettingsBaseline(txn, baseline);
+      await _saveBillSettings(txn, settings);
+    });
+    notifyDatabaseChanged();
+  }
+
+  Future<void> _saveBillSettings(
+    DatabaseExecutor txn,
+    BillSettings settings,
+  ) async {
+    final shopId = await _activeShopId(txn);
+    final now = _nowIso();
+    final existing = await txn.query(
+      'bill_settings',
+      columns: ['id', 'uuid', 'created_at'],
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shopId],
+      limit: 1,
+    );
+    final createdAt = existing.isEmpty
+        ? now
+        : existing.single['created_at']?.toString() ?? now;
+    final uuid = existing.isEmpty
+        ? (settings.uuid.isEmpty ? _newUuid() : settings.uuid)
+        : existing.single['uuid'] as String;
+    final map =
+        settings
+            .copyWith(
+              id: existing.isEmpty ? null : existing.single['id'] as int?,
+              uuid: uuid,
+              shopId: shopId,
+              createdAt: DateTime.parse(createdAt),
+              updatedAt: DateTime.parse(now),
+            )
+            .toMap()
+          ..remove('id');
+    await txn.insert(
+      'bill_settings',
+      map,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> saveInvoiceSettings(
+    BillSettings settings,
+    InvoiceSeriesSettings series, {
+    required SettingsEditBaseline baseline,
+  }) async {
+    await _requireAdminMutation();
+    final db = await database;
+    await db.transaction((txn) async {
+      await _assertSettingsBaseline(txn, baseline);
+      await _saveBillSettings(txn, settings);
+      await _saveInvoiceSeries(txn, series);
     });
     notifyDatabaseChanged();
   }
@@ -361,6 +501,15 @@ mixin DatabaseSettings {
     InvoiceSeriesSettings settings,
   ) async {
     await _requireAdminMutation();
+    final db = await database;
+    await db.transaction((txn) => _saveInvoiceSeries(txn, settings));
+    notifyDatabaseChanged();
+  }
+
+  Future<void> _saveInvoiceSeries(
+    DatabaseExecutor txn,
+    InvoiceSeriesSettings settings,
+  ) async {
     final template = _normaliseName(settings.formatTemplate);
     final problem = InvoiceNumbering.validate(
       template: template ?? '',
@@ -368,10 +517,19 @@ mixin DatabaseSettings {
       resetPeriod: settings.resetPeriod,
     );
     if (problem != null) throw ArgumentError(problem);
-    final db = await database;
-    await db.transaction((txn) async {
-      final shopId = await _activeShopId(txn);
-      var rows = await txn.query(
+    final shopId = await _activeShopId(txn);
+    var rows = await txn.query(
+      'invoice_series',
+      columns: ['id'],
+      where:
+          'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
+      whereArgs: [shopId],
+      orderBy: 'id ASC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      await _seedDefaultInvoiceSeries(txn);
+      rows = await txn.query(
         'invoice_series',
         columns: ['id'],
         where:
@@ -380,35 +538,22 @@ mixin DatabaseSettings {
         orderBy: 'id ASC',
         limit: 1,
       );
-      if (rows.isEmpty) {
-        await _seedDefaultInvoiceSeries(txn);
-        rows = await txn.query(
-          'invoice_series',
-          columns: ['id'],
-          where:
-              'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
-          whereArgs: [shopId],
-          orderBy: 'id ASC',
-          limit: 1,
-        );
-      }
-      if (rows.isEmpty) {
-        throw StateError('No active invoice series is configured');
-      }
-      await txn.update(
-        'invoice_series',
-        {
-          'name': _normaliseName(settings.name) ?? 'Default',
-          'format_template': template,
-          'sequence_padding': settings.sequencePadding.clamp(1, 8),
-          'reset_period': settings.resetPeriod,
-          'updated_at': _nowIso(),
-        },
-        where: 'id = ?',
-        whereArgs: [rows.single['id']],
-      );
-    });
-    notifyDatabaseChanged();
+    }
+    if (rows.isEmpty) {
+      throw StateError('No active invoice series is configured');
+    }
+    await txn.update(
+      'invoice_series',
+      {
+        'name': _normaliseName(settings.name) ?? 'Default',
+        'format_template': template,
+        'sequence_padding': settings.sequencePadding.clamp(1, 8),
+        'reset_period': settings.resetPeriod,
+        'updated_at': _nowIso(),
+      },
+      where: 'id = ?',
+      whereArgs: [rows.single['id']],
+    );
   }
 }
 
@@ -434,4 +579,24 @@ Future<String?> _getSetting(DatabaseExecutor executor, String key) async {
     limit: 1,
   );
   return rows.isEmpty ? null : rows.single['value']?.toString();
+}
+
+/// Frozen persisted configuration values, never serialized into cloud settings.
+class SettingsEditBaseline {
+  final String shopId;
+  final String _snapshot;
+  const SettingsEditBaseline._(this.shopId, this._snapshot);
+  Map<String, dynamic> toLocalMap() => {
+    'shop_id': shopId,
+    'snapshot': _snapshot,
+  };
+  factory SettingsEditBaseline.fromLocalMap(Map<String, dynamic> map) {
+    if (map['shop_id'] is! String || map['snapshot'] is! String) {
+      throw const FormatException('Unreadable checkout settings baseline.');
+    }
+    return SettingsEditBaseline._(
+      map['shop_id'] as String,
+      map['snapshot'] as String,
+    );
+  }
 }
