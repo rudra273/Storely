@@ -53,15 +53,9 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
   @override
   void initState() {
     super.initState();
-    _gstCtrl = TextEditingController(
-      text: widget.settings.defaultGstPercent.toStringAsFixed(2),
-    );
-    _overheadCtrl = TextEditingController(
-      text: widget.settings.defaultOverheadCost.toStringAsFixed(2),
-    );
-    _marginCtrl = TextEditingController(
-      text: widget.settings.defaultProfitMarginPercent.toStringAsFixed(2),
-    );
+    _gstCtrl = TextEditingController(text: widget.settings.gstInput);
+    _overheadCtrl = TextEditingController(text: widget.settings.overheadInput);
+    _marginCtrl = TextEditingController(text: widget.settings.marginInput);
     _units = List.of(widget.units);
   }
 
@@ -92,22 +86,24 @@ class _GlobalPricingSheetState extends State<_GlobalPricingSheet> {
 
   Future<void> _save() async {
     if (_saving) return;
-    final result = GlobalPricingSettings(
-      defaultGstPercent: double.tryParse(_gstCtrl.text) ?? 0,
-      defaultOverheadCost: double.tryParse(_overheadCtrl.text) ?? 0,
-      defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
-      gstRegistered: widget.settings.gstRegistered,
-      showPurchasePriceGlobally: widget.settings.showPurchasePriceGlobally,
-    );
-    setState(() => _saving = true);
     try {
+      final result = widget.settings.editedDefaults(
+        gst: _gstCtrl.text,
+        overhead: _overheadCtrl.text,
+        margin: _marginCtrl.text,
+      );
+      setState(() => _saving = true);
       await widget.onSave(result);
       if (mounted) Navigator.pop(context, result);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is FormatException ? error.message : friendlyError(error),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

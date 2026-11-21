@@ -292,28 +292,8 @@ mixin DatabaseSettings {
     notifyDatabaseChanged();
   }
 
-  Future<GlobalPricingSettings> getGlobalPricingSettings() async {
-    final db = await database;
-    final shopId = await _activeShopId(db);
-    final rows = await db.query(
-      'app_settings',
-      where: 'shop_id = ? AND deleted_at IS NULL',
-      whereArgs: [shopId],
-    );
-    final values = {
-      for (final row in rows) row['key'] as String: row['value']?.toString(),
-    };
-    return GlobalPricingSettings(
-      defaultGstPercent:
-          double.tryParse(values[_defaultGstPercentKey] ?? '') ?? 18,
-      defaultOverheadCost:
-          double.tryParse(values[_defaultOverheadCostKey] ?? '') ?? 0,
-      defaultProfitMarginPercent:
-          double.tryParse(values[_defaultProfitMarginPercentKey] ?? '') ?? 0,
-      gstRegistered: values[_gstRegisteredKey] == '1',
-      showPurchasePriceGlobally: values[_showPurchasePriceGloballyKey] == '1',
-    );
-  }
+  Future<GlobalPricingSettings> getGlobalPricingSettings() async =>
+      _getGlobalPricingSettingsFromExecutor(await database);
 
   Future<void> saveGlobalPricingSettings(
     GlobalPricingSettings settings, {
@@ -335,30 +315,47 @@ mixin DatabaseSettings {
     final db = await database;
     final saved = await db.transaction((txn) async {
       await _assertSettingsBaseline(txn, baseline);
-      await _saveSetting(
-        txn,
+      final current = await _getGlobalPricingSettingsFromExecutor(txn);
+      final rows = await txn.query(
+        'app_settings',
+        columns: ['key'],
+        where: 'shop_id = ? AND deleted_at IS NULL',
+        whereArgs: [await _activeShopId(txn)],
+      );
+      final keys = rows.map((row) => row['key']).toSet();
+      Future<void> changed(String key, Object value, Object old) async {
+        final input = settings.storedDefaults[key];
+        final changedInput =
+            input != null && input != current.storedDefaults[key];
+        if (!keys.contains(key) || value != old || changedInput) {
+          await _saveSetting(txn, key, input ?? value.toString());
+        }
+      }
+
+      await changed(
         _defaultGstPercentKey,
-        settings.defaultGstPercent.toString(),
+        settings.defaultGstPercent,
+        current.defaultGstPercent,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _defaultOverheadCostKey,
-        settings.defaultOverheadCost.toString(),
+        settings.defaultOverheadCost,
+        current.defaultOverheadCost,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _defaultProfitMarginPercentKey,
-        settings.defaultProfitMarginPercent.toString(),
+        settings.defaultProfitMarginPercent,
+        current.defaultProfitMarginPercent,
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _gstRegisteredKey,
         settings.gstRegistered ? '1' : '0',
+        current.gstRegistered ? '1' : '0',
       );
-      await _saveSetting(
-        txn,
+      await changed(
         _showPurchasePriceGloballyKey,
         settings.showPurchasePriceGlobally ? '1' : '0',
+        current.showPurchasePriceGlobally ? '1' : '0',
       );
       final shopId = await _activeShopId(txn);
       return SettingsEditBaseline._(

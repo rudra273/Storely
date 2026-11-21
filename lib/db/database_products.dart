@@ -1647,16 +1647,7 @@ Future<GlobalPricingSettings> _getGlobalPricingSettingsFromExecutor(
   final values = {
     for (final row in rows) row['key'] as String: row['value']?.toString(),
   };
-  return GlobalPricingSettings(
-    defaultGstPercent:
-        double.tryParse(values['default_gst_percent'] ?? '') ?? 18,
-    defaultOverheadCost:
-        double.tryParse(values['default_overhead_cost'] ?? '') ?? 0,
-    defaultProfitMarginPercent:
-        double.tryParse(values['default_profit_margin_percent'] ?? '') ?? 0,
-    gstRegistered: values['gst_registered'] == '1',
-    showPurchasePriceGlobally: values['show_purchase_price_globally'] == '1',
-  );
+  return GlobalPricingSettings.fromStoredValues(values);
 }
 
 PriceBreakdown _resolveProductPrice(

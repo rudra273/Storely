@@ -65,9 +65,9 @@ class _PricingScreenState extends State<PricingScreen> {
       _settings = settings;
       _categories = categories;
       _categoryPricing = pricing;
-      _gstCtrl.text = settings.defaultGstPercent.toStringAsFixed(2);
-      _overheadCtrl.text = settings.defaultOverheadCost.toStringAsFixed(2);
-      _marginCtrl.text = settings.defaultProfitMarginPercent.toStringAsFixed(2);
+      _gstCtrl.text = settings.gstInput;
+      _overheadCtrl.text = settings.overheadInput;
+      _marginCtrl.text = settings.marginInput;
       _isLoading = false;
     });
   }
@@ -76,20 +76,24 @@ class _PricingScreenState extends State<PricingScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(error.toString().replaceFirst('Invalid argument: ', '')),
+        content: Text(
+          error is FormatException
+              ? error.message
+              : error.toString().replaceFirst('Invalid argument: ', ''),
+        ),
       ),
     );
   }
 
   Future<void> _saveDefaults() async {
-    setState(() => _savingDefaults = true);
-    // Preserve flags owned elsewhere (Shop Profile / product display settings).
-    final updated = _settings.copyWith(
-      defaultGstPercent: double.tryParse(_gstCtrl.text) ?? 0,
-      defaultOverheadCost: double.tryParse(_overheadCtrl.text) ?? 0,
-      defaultProfitMarginPercent: double.tryParse(_marginCtrl.text) ?? 0,
-    );
+    if (_savingDefaults || _settingsBaseline == null) return;
     try {
+      final updated = _settings.editedDefaults(
+        gst: _gstCtrl.text,
+        overhead: _overheadCtrl.text,
+        margin: _marginCtrl.text,
+      );
+      setState(() => _savingDefaults = true);
       final savedBaseline = await DatabaseHelper.instance
           .savePricingSettingsWithBaseline(
             updated,
