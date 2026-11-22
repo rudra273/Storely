@@ -455,6 +455,18 @@
         { "repository": "Storely", "command": "flutter test --no-pub test/stock_valuation_contract_test.dart", "prerequisites": "Isolated SQLite test database." },
         { "repository": "Storely", "command": "flutter test --no-pub integration_test/stock_valuation_test.dart --no-uninstall -d emulator-5556", "prerequisites": "Dedicated Android emulator." }
       ]
+    },
+    {
+      "id": "E03-RETURN-01",
+      "name": "exact-fractional-return-quantity",
+      "state": "verified",
+      "description": "Reject quantities outside the sale precision or remaining amount, then post a corrected fractional credit note.",
+      "evidence": "evidence/E03/return-quantity.md",
+      "checks": [
+        { "repository": "storelyapi", "command": "bash scripts/integration-tests.sh tests/test_return_quantity_contract.py", "prerequisites": "Exclusive scratch database window." },
+        { "repository": "storelyweb", "command": "node e2e/return-quantity.cjs", "prerequisites": "Local Vite, Docker API, Chromium and a disposable paid shop." },
+        { "repository": "Storely", "command": "flutter test --no-pub integration_test/return_quantity_test.dart --no-uninstall -d emulator-5556", "prerequisites": "Disposable emulator and isolated SQLite test database." }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
