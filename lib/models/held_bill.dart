@@ -22,12 +22,21 @@ class HeldBill {
 
   double get total => items.fold(0, (sum, item) => sum + item.subtotal);
 
-  static String encodeItems(List<BillItem> items) =>
-      jsonEncode([for (final item in items) item.toMap(0)]);
+  static String encodeItems(List<BillItem> items) => jsonEncode([
+    for (final item in items)
+      {
+        ...item.toMap(0),
+        if (item.draftQuantityInput != null)
+          'draft_quantity_input': item.draftQuantityInput,
+      },
+  ]);
 
   static List<BillItem> decodeItems(String json) => [
     for (final map in jsonDecode(json) as List)
-      BillItem.fromMap(Map<String, dynamic>.from(map as Map)),
+      BillItem.fromMap(Map<String, dynamic>.from(map as Map))
+        ..draftQuantityInput = map['draft_quantity_input'] is String
+            ? map['draft_quantity_input'] as String
+            : null,
   ];
 
   factory HeldBill.fromMap(Map<String, Object?> map) => HeldBill(

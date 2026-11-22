@@ -6,6 +6,7 @@ import 'package:storely/db/database_helper.dart';
 import 'package:storely/l10n/l10n.dart';
 import 'package:storely/models/bill.dart';
 import 'package:storely/models/bill_settings.dart';
+import 'package:storely/models/sale_quantity.dart';
 import 'package:storely/screens/scan_screen.dart';
 import 'package:storely/utils/test_keys.dart';
 
@@ -196,6 +197,63 @@ void main() {
     await settleIo(tester);
     await reopenSheet(tester);
   }
+
+  test('sale quantity accepts only supported positive exact decimals', () {
+    expect(saleQuantityThousandths(' 0001.12500 '), BigInt.from(1125));
+    expect(saleQuantityThousandths('1000000.0000'), BigInt.from(1000000000));
+    for (final input in [
+      '',
+      '0',
+      '0.0001',
+      '1.2345',
+      '1000000.001',
+      '1e3',
+      '+1',
+      '-1',
+    ]) {
+      expect(saleQuantityThousandths(input), isNull, reason: input);
+    }
+    expect(adjustSaleQuantity(1.001, 1), 2.001);
+    expect(adjustSaleQuantity(1000000, 1), isNull);
+  });
+
+  testWidgets('invalid sale quantity survives reopening and blocks review', (
+    tester,
+  ) async {
+    await open(tester);
+    await tapVisible(tester, find.byKey(const ValueKey('checkout-close')));
+    await settleIo(tester);
+    final quantity = find.byKey(const ValueKey('sale-quantity-input'));
+    await tester.enterText(quantity, '1.2345');
+    await settleIo(tester);
+    await reopenSheet(tester);
+    expect(find.text('Create Bill'), findsNothing);
+    expect(await tester.runAsync(db.getAllBills), isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+    await settleIo(tester);
+    await tester.runAsync(db.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const ScanScreen(initialMode: BillingEntryMode.manual),
+      ),
+    );
+    await settleIo(tester);
+    expect(tester.widget<TextField>(quantity).controller!.text, '1.2345');
+    await tester.enterText(quantity, '1.1250');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await settleIo(tester);
+    final scope = await tester.runAsync(db.captureCheckoutScope);
+    final cart = await tester.runAsync(() => db.loadCheckoutCart(scope!));
+    expect(cart!.cart.items.single.quantity, 1.125);
+    expect(cart.cart.items.single.draftQuantityInput, isNull);
+    await reopenSheet(tester);
+    expect(find.text('Create Bill'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await settleIo(tester);
+  });
 
   testWidgets(
     'raw checkout fields survive sheet close and physical database reopen',

@@ -20,6 +20,7 @@ import '../models/bill_totals.dart';
 import '../models/customer.dart';
 import '../models/held_bill.dart';
 import '../models/product.dart';
+import '../models/sale_quantity.dart';
 import '../utils/money.dart';
 import '../utils/checkout_code.dart';
 import 'products_screen.dart' show showCheckoutQuickAdd;
@@ -165,7 +166,7 @@ class _ScanScreenState extends State<ScanScreen> {
     _savedDraft = encoded;
     try {
       _checkoutCart = await DatabaseHelper.instance.saveCartDraft(
-        List.of(_items),
+        HeldBill.decodeItems(encoded),
         expectedScope: await _checkoutScope,
         expectedCart: _checkoutCart,
       );
@@ -215,7 +216,8 @@ class _ScanScreenState extends State<ScanScreen> {
       _savedDraft = HeldBill.encodeItems(draft);
       _draftReady = true;
       if (draft.isEmpty || _items.isNotEmpty) return;
-      setState(() => _items.addAll(draft));
+      // Do not mutate the saved revision used for the next compare-and-save.
+      setState(() => _items.addAll(HeldBill.decodeItems(_savedDraft)));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -343,7 +345,9 @@ class _ScanScreenState extends State<ScanScreen> {
     _savedDraft = HeldBill.encodeItems(resumed.cart.items);
     setState(() {
       _items.clear();
-      _items.addAll(resumed.cart.items);
+      _items.addAll(
+        HeldBill.decodeItems(HeldBill.encodeItems(resumed.cart.items)),
+      );
     });
     await _loadHeldCount();
   }
@@ -624,17 +628,23 @@ class _ScanScreenState extends State<ScanScreen> {
               existingItem.productName.toLowerCase() ==
                   item.productName.toLowerCase()),
     );
+    final quantity = existing < 0
+        ? saleQuantityValue(item.quantity.toString())
+        : _items[existing].draftQuantityInput == null
+        ? adjustSaleQuantity(_items[existing].quantity, 1)
+        : null;
+    if (quantity == null) {
+      _showCheckoutSnackBar(saleQuantityGuidance);
+      return;
+    }
     final available = _availableStockForItem(item);
-    if (available != null) {
-      final currentQty = existing >= 0 ? _items[existing].quantity : 0.0;
-      if (exceedsStock(currentQty + 1, available)) {
-        _showStockLimitMessage(item.productName, available);
-      }
+    if (available != null && exceedsStock(quantity, available)) {
+      _showStockLimitMessage(item.productName, available);
     }
 
     setState(() {
       if (existing >= 0) {
-        _items[existing].quantity++;
+        _items[existing].quantity = quantity;
         _items[existing].unit ??= item.unit;
       } else {
         _items.add(item);
@@ -705,6 +715,15 @@ class _ScanScreenState extends State<ScanScreen> {
       throw StateError('Checkout cart is no longer available.');
     }
     _checkoutState = _checkoutCart!.state;
+    if (_checkoutState['pending'] == null &&
+        _items.any(
+          (item) =>
+              item.draftQuantityInput != null ||
+              saleQuantityThousandths(item.quantity.toString()) == null,
+        )) {
+      _showCheckoutSnackBar(saleQuantityGuidance);
+      return;
+    }
     final device = (await _checkoutScope).deviceId;
     var baseline = await DatabaseHelper.instance.captureSettingsEditBaseline();
     final owner = await DatabaseHelper.instance.getCloudSyncState(
@@ -1094,27 +1113,43 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _updateQty(int index, int delta) {
     if (_pendingCheckoutBlocksEdit()) return;
+    if (_items[index].draftQuantityInput != null) {
+      _showCheckoutSnackBar(saleQuantityGuidance);
+      return;
+    }
+    final next = adjustSaleQuantity(_items[index].quantity, delta);
+    if (next == null) {
+      _showCheckoutSnackBar(saleQuantityGuidance);
+      return;
+    }
     if (delta > 0) {
       final available = _availableStockForItem(_items[index]);
-      if (available != null &&
-          exceedsStock(_items[index].quantity + delta, available)) {
+      if (available != null && exceedsStock(next, available)) {
         _showStockLimitMessage(_items[index].productName, available);
       }
     }
     setState(() {
-      _items[index].quantity += delta;
+      _items[index].quantity = next;
       if (_items[index].quantity <= 0) _items.removeAt(index);
     });
   }
 
-  void _setQty(int index, double quantity) {
+  void _setQty(int index, String input) {
     if (_pendingCheckoutBlocksEdit()) return;
-    if (quantity <= 0) return;
+    final item = _items[index];
+    final quantity = saleQuantityValue(input);
+    if (quantity == null) {
+      setState(() => item.draftQuantityInput = input);
+      return;
+    }
     final available = _availableStockForItem(_items[index]);
     if (available != null && exceedsStock(quantity, available)) {
       _showStockLimitMessage(_items[index].productName, available);
     }
-    setState(() => _items[index].quantity = quantity);
+    setState(() {
+      item.draftQuantityInput = null;
+      item.quantity = quantity;
+    });
   }
 
   String? _cleanOptionalText(String? value) {
@@ -1674,6 +1709,17 @@ class _ScanScreenState extends State<ScanScreen> {
                                 fontSize: 12,
                               ),
                             ),
+                            if (item.draftQuantityInput != null ||
+                                saleQuantityThousandths(
+                                      item.quantity.toString(),
+                                    ) ==
+                                    null)
+                              Text(
+                                saleQuantityGuidance,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1698,6 +1744,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               child: _QuantityInput(
                                 key: ObjectKey(item),
                                 quantity: item.quantity,
+                                invalidInput: item.draftQuantityInput,
+                                enabled: _checkoutState['pending'] == null,
                                 onChanged: (quantity) => _setQty(i, quantity),
                               ),
                             ),

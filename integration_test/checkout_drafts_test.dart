@@ -101,6 +101,18 @@ void main() {
       }
 
       await mount();
+      final quantity = find.byKey(const ValueKey('sale-quantity-input'));
+      await enter(quantity, '1.2345');
+      await tap(find.bySemanticsIdentifier(TestKeys.scanBillBtn));
+      expect(find.text('Create Bill'), findsNothing);
+      expect(await db.getAllBills(), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await db.close();
+      await mount();
+      await waitFor(quantity);
+      expect(tester.widget<TextField>(quantity).controller!.text, '1.2345');
+      await enter(quantity, '1.0000');
       await openCheckout();
       await enter(name, 'Draft One');
       await tap(find.text('Partial'));
