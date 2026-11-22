@@ -401,7 +401,13 @@ void main() {
         isNull,
       );
       await tapVisible(tester, find.byKey(const ValueKey('checkout-save')));
-      await settleIo(tester);
+      for (
+        var attempt = 0;
+        find.text('Bill Created!').evaluate().isEmpty && attempt < 10;
+        attempt++
+      ) {
+        await settleIo(tester);
+      }
       final bills = await tester.runAsync(db.getAllBills);
       expect(bills, hasLength(1));
       expect(bills!.single.paidAmount, 25.01);
