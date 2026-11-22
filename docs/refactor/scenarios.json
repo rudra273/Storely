@@ -392,6 +392,25 @@
           "prerequisites": "Separate Android emulator and disposable offline test database."
         }
       ]
+    },
+    {
+      "id": "E02-SETTINGS-SEARCH-01",
+      "name": "settings-search-and-existing-editors",
+      "state": "verified",
+      "description": "Find settings by label or task and open the existing editor while preserving permissions and unsaved edits.",
+      "evidence": "evidence/E02/settings-search.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/settings-search.cjs",
+          "prerequisites": "Local Vite, Docker API, Chromium and a disposable paid shop."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test --no-pub integration_test/settings_search_test.dart --no-uninstall -d emulator-5556",
+          "prerequisites": "Disposable Android emulator and isolated offline database."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
