@@ -411,6 +411,25 @@
           "prerequisites": "Disposable Android emulator and isolated offline database."
         }
       ]
+    },
+    {
+      "id": "E02-ALERTS-01",
+      "name": "in-app-notification-routing",
+      "state": "verified",
+      "description": "Open existing overdue and expiry reports with matching alert filters and enforce the active workspace and role.",
+      "evidence": "evidence/E02/notification-routing.md",
+      "checks": [
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/needs-action.cjs",
+          "prerequisites": "Local Vite, Docker API, Chromium and disposable owner/staff shops with dated invoices and an expiring batch."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test --no-pub integration_test/notification_routing_test.dart --no-uninstall -d emulator-5556",
+          "prerequisites": "Disposable Android emulator and isolated offline database."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
