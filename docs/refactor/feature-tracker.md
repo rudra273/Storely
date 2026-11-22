@@ -164,9 +164,9 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|---|
 | D01 | E02 | planned | Not run; paired before/after scenario and regression required. |
 | D02 | E02 | verified | Both clients require an explicit settlement decision. A new or duplicated invoice starts unsettled. See evidence/E02/slice-1.md and evidence/E02/slice-3-payment-completion.md. |
-| D03 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D03 | E03 | verified | Android uses the same stock cost basis, signed quantities and row rounding as API/web. Shared fixture and emulator/browser/CSV evidence in `evidence/E03/stock-valuation.md`. |
 | D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
-| D05 | E02 | implementing | Raw checkout and frozen identity recover on browser reload and Android DB reopen. Android records checkout and items steps. Hard process interruption remains in E02 regression. See evidence/E02/slice-2.md. |
+| D05 | E02 | verified | Browser reload and Android database reopen preserve checkout. Two Android force-stops and cold launches preserved fields and step, then verified one invoice, payment and stock deduction. See `evidence/E02/slice-2.md`. |
 | D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
@@ -185,7 +185,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
 | E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
 | E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Android preference isolation and web/Android theme sync verified in `evidence/E02/slice-3-portable-preferences.md`. First-invoice onboarding verified in `evidence/E02/first-invoice-onboarding.md`. Workspace search, settings search and in-app alert routing are verified. Phase-exit checks remain open. Web Hindi localization is deferred. |
-| E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
+| E03 | implementing | Stock valuation parity (D03) passed with the shared fixture across API, web, CSV and Android. E02 phase-exit checks and the rest of the billing and sync work remain open. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |

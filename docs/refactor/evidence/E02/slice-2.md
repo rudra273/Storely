@@ -13,4 +13,6 @@
 
 - Premium activation, all-table clean restore and two-device/web roundtrip passed on the emulator. See `/tmp/storely-e02-drafts-premium.log` and `/tmp/storely-e02-drafts-premium-artifacts/premium-activated.png`.
 
-The Android acceptance run verified screen and database reopen. Hard process interruption, broader catalog entry return paths and role switching remain in the phase regression plan. Editable drafts stay on their originating device or browser. The audit's separate cross-device handoff remains a later feature.
+The Android acceptance also passed across two real `adb force-stop` calls and three app processes on emulator-5556 in `a53debc`. Opening checkout after the first cold launch restored the raw invalid partial amount, customer, payment reference and step. Correcting and saving posted one invoice and payment. The third process confirmed stock fell from ten to nine and the draft was consumed. The runner mounts the production checkout flow in an isolated test app. [Process-death procedure and evidence](../../mobile-e00-baseline.md).
+
+Editable drafts stay on their originating device or browser. The audit's separate cross-device handoff remains a later feature.

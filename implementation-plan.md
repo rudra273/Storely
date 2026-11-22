@@ -132,9 +132,13 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 **Exit:** paired browser/emulator recordings show equivalent steps; kill/relaunch/reload restores complete drafts; switch tenant/role safely; expiry and failed save do not discard work.
 
+The [real Android process-death acceptance](docs/refactor/evidence/E02/slice-2.md) passed two force-stops and three processes. The remaining phase-exit work includes the paired logical checkout sequence review. Human UX review remains pending.
+
 ### E03 — Billing, calculation and atomic sync correctness
 
 **Dependency:** E01/E02. **Comparison groups:** P2.
+
+The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.md) and [paired verification](docs/refactor/evidence/E03/stock-valuation.md) are complete. The remaining E03 billing calculations and atomic sync work are tracked below.
 
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.

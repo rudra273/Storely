@@ -430,6 +430,31 @@
           "prerequisites": "Disposable Android emulator and isolated offline database."
         }
       ]
+    },
+    {
+      "id": "E02-PROCESS-01",
+      "name": "android-checkout-process-death",
+      "state": "verified",
+      "description": "Force-stop and relaunch the offline Android checkout, restore fields and step, then post and confirm one stock deduction.",
+      "evidence": "evidence/E02/slice-2.md",
+      "checks": [{
+        "repository": "Storely",
+        "command": "python3 integration_test/support/checkout_process_recovery.py emulator-5556",
+        "prerequisites": "Dedicated emulator and its isolated checkout test database."
+      }]
+    },
+    {
+      "id": "E03-STOCK-01",
+      "name": "stock-valuation-gst-cost-and-signed-quantity",
+      "state": "verified",
+      "description": "Compare signed nonzero stock rows and totals across GST schemes using the same independent fixture.",
+      "evidence": "evidence/E03/stock-valuation.md",
+      "checks": [
+        { "repository": "storelyapi", "command": "bash scripts/integration-tests.sh tests/test_stock_valuation_contract.py", "prerequisites": "Exclusive scratch database window." },
+        { "repository": "storelyweb", "command": "node e2e/stock-valuation.cjs", "prerequisites": "Local Vite, Docker API, Chromium and three disposable paid shops seeded from the shared fixture." },
+        { "repository": "Storely", "command": "flutter test --no-pub test/stock_valuation_contract_test.dart", "prerequisites": "Isolated SQLite test database." },
+        { "repository": "Storely", "command": "flutter test --no-pub integration_test/stock_valuation_test.dart --no-uninstall -d emulator-5556", "prerequisites": "Dedicated Android emulator." }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."

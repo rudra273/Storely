@@ -13,4 +13,4 @@ Run date: 22 November 2026. [Acceptance contract](../../contracts/E02-notificati
 
 The sales checkout no longer uses the generic expiring draft helper. The dedicated invoice store retains meaningful older drafts, preserves saved work after a storage failure, refuses conflicting tabs, and protects an unconfirmed request from replacement or clearing. `npm test -- --maxWorkers=2 src/billing/checkout/invoiceDraftStore.test.ts src/billing/Billing.test.tsx` passed 122 tests. The generic draft helper still serves product forms.
 
-The Android process-kill and relaunch scenario remains open. Database close and reopen is covered by the existing checkout tests. Human UX review remains open.
+Android process-kill and relaunch passed in the subsequent [checkout acceptance](slice-2.md). Human UX review remains open.
