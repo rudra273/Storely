@@ -611,9 +611,9 @@ mixin DatabaseBills {
     );
     return {
       for (final row in rows)
-        row['uuid'] as String: roundMoney(
-          (row['sold'] as num).toDouble() - (row['returned'] as num).toDouble(),
-        ),
+        row['uuid'] as String:
+            (row['sold'] as num).toDouble() -
+            (row['returned'] as num).toDouble(),
     };
   }
 
@@ -631,6 +631,11 @@ mixin DatabaseBills {
     DateTime? createdAt,
   }) async {
     await _requireAdminMutation();
+    if (quantities.values.any(
+      (quantity) => saleQuantityThousandths(quantity.toString()) == null,
+    )) {
+      throw ArgumentError(saleQuantityGuidance);
+    }
     final when = createdAt ?? DateTime.now();
     final db = await database;
     final settings = await getBillSettings();
@@ -652,12 +657,15 @@ mixin DatabaseBills {
         whereArgs: [billId],
       );
       final returnable = await _returnableQuantities(txn, billId);
+      if (quantities.keys.any((key) => !returnable.containsKey(key))) {
+        throw ArgumentError('A selected line is no longer returnable.');
+      }
       final lines = <BillItem>[];
       for (final row in itemRows) {
         final item = BillItem.fromMap(row);
         final qty = quantities[item.uuid] ?? 0;
         if (qty <= 0) continue;
-        if (qty > (returnable[item.uuid] ?? 0) + stockQuantityEpsilon) {
+        if (qty > returnQuantityLimit(returnable[item.uuid] ?? 0)) {
           throw ArgumentError(
             'Only ${_formatDbQuantity(returnable[item.uuid] ?? 0)} of '
             '"${item.productName}" can be returned',

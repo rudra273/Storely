@@ -35,6 +35,8 @@ class _ReturnSheet extends StatefulWidget {
 class _ReturnSheetState extends State<_ReturnSheet> {
   final _reasonCtrl = TextEditingController();
   final Map<String, double> _qty = {};
+  final Map<String, TextEditingController> _quantityControllers = {};
+  final Set<String> _invalid = {};
   late String _settlement = widget.bill.balanceDue > 0.005
       ? DatabaseBills.creditNoteSettleAdjust
       : DatabaseBills.creditNoteSettleRefund;
@@ -43,11 +45,16 @@ class _ReturnSheetState extends State<_ReturnSheet> {
   @override
   void dispose() {
     _reasonCtrl.dispose();
+    for (final controller in _quantityControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   List<BillItem> get _returnableItems => widget.bill.items
-      .where((item) => (widget.returnable[item.uuid] ?? 0) > 0)
+      .where(
+        (item) => returnQuantityLimit(widget.returnable[item.uuid] ?? 0) > 0,
+      )
       .toList();
 
   double get _creditAmount {
@@ -64,9 +71,33 @@ class _ReturnSheetState extends State<_ReturnSheet> {
   }
 
   void _step(BillItem item, double delta) {
-    final max = widget.returnable[item.uuid] ?? 0;
-    final next = ((_qty[item.uuid] ?? 0) + delta).clamp(0.0, max).toDouble();
-    setState(() => _qty[item.uuid] = next);
+    final max = (returnQuantityLimit(widget.returnable[item.uuid]!) * 1000)
+        .round();
+    final current = ((_qty[item.uuid] ?? 0) * 1000).round();
+    final next = (current + (delta * 1000).round()).clamp(0, max) / 1000;
+    final text = _formatQty(next);
+    _controller(item).text = text;
+    _changeQuantity(item, text);
+  }
+
+  TextEditingController _controller(BillItem item) => _quantityControllers
+      .putIfAbsent(item.uuid, () => TextEditingController(text: '0'));
+
+  void _changeQuantity(BillItem item, String raw) {
+    final text = raw.trim();
+    final quantity = text.isEmpty || RegExp(r'^0+(?:\.0+)?$').hasMatch(text)
+        ? 0.0
+        : saleQuantityValue(text);
+    setState(() {
+      if (quantity == null ||
+          quantity > returnQuantityLimit(widget.returnable[item.uuid]!)) {
+        _invalid.add(item.uuid);
+        _qty.remove(item.uuid);
+      } else {
+        _invalid.remove(item.uuid);
+        _qty[item.uuid] = quantity;
+      }
+    });
   }
 
   @override
@@ -97,7 +128,9 @@ class _ReturnSheetState extends State<_ReturnSheet> {
             const SizedBox(height: AppSpacing.md),
             if (_returnableItems.isEmpty)
               Text(
-                'Everything on this bill has already been returned.',
+                widget.returnable.values.any((quantity) => quantity > 0)
+                    ? 'The remaining quantity is below the supported return increment of 0.001.'
+                    : 'Everything on this bill has already been returned.',
                 style: AppText.caption,
               ),
             for (final item in _returnableItems)
@@ -111,7 +144,7 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                         children: [
                           Text(item.productName, style: AppText.body),
                           Text(
-                            'Up to ${_formatQty(widget.returnable[item.uuid]!)}'
+                            'Up to ${_formatQty(returnQuantityLimit(widget.returnable[item.uuid]!))}'
                             ' ${item.unitLabel} · ${item.priceLabel}',
                             style: AppText.caption,
                           ),
@@ -128,11 +161,22 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                       icon: const Icon(Icons.remove),
                     ),
                     SizedBox(
-                      width: 36,
-                      child: Text(
-                        _formatQty(_qty[item.uuid] ?? 0),
+                      width: 76,
+                      child: TextField(
+                        key: ValueKey('return-quantity-${item.uuid}'),
+                        controller: _controller(item),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                         textAlign: TextAlign.center,
-                        style: AppText.subtitle,
+                        onChanged: (value) => _changeQuantity(item, value),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          labelText: 'Quantity',
+                          errorText: _invalid.contains(item.uuid)
+                              ? 'Invalid'
+                              : null,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -148,6 +192,10 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                 ),
               ),
             const SizedBox(height: AppSpacing.sm),
+            if (_invalid.isNotEmpty)
+              const Text(
+                'Use up to three decimal places and stay within the returnable quantity.',
+              ),
             SegmentedButton<String>(
               segments: [
                 if (canAdjust)
@@ -210,7 +258,7 @@ class _ReturnSheetState extends State<_ReturnSheet> {
               ),
             const SizedBox(height: AppSpacing.md),
             FilledButton.icon(
-              onPressed: credit <= 0 || adjustTooBig
+              onPressed: credit <= 0 || adjustTooBig || _invalid.isNotEmpty
                   ? null
                   : () => Navigator.pop(
                       context,
@@ -235,7 +283,6 @@ class _ReturnSheetState extends State<_ReturnSheet> {
     );
   }
 
-  static String _formatQty(double value) => value == value.roundToDouble()
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(2);
+  static String _formatQty(double value) =>
+      value.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 }

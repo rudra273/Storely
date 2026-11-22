@@ -23,6 +23,12 @@ double? saleQuantityValue(String raw) {
   return amount == null ? null : amount.toDouble() / 1000;
 }
 
+/// Tolerate only floating-point subtraction drift from the local stock ledger.
+double returnQuantityLimit(double remaining) {
+  final noise = (remaining.abs() + 1) * 4e-16;
+  return ((remaining + noise) * 1000).floor().clamp(0, 1000000000) / 1000;
+}
+
 double? adjustSaleQuantity(double current, int units) {
   final quantity = saleQuantityThousandths(current.toString());
   if (quantity == null) return null;
