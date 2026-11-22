@@ -1,0 +1,239 @@
+{
+  "fixture_version": 1,
+  "currency": "INR",
+  "decimal_encoding": "strings",
+  "provenance": "Manually authored independent arithmetic; not generated from either Storely calculator.",
+  "policy": "Tracked, nondeleted, signed nonzero stock. Product > category > shop GST/overhead with explicit zero preserved. Regular excludes recoverable purchase GST; composition/unregistered include it. Multiply unrounded unit cost by quantity, HALF_UP each row to paise, then sum. Sale value uses saved selling price, not formula repricing. API unit_cost is a display field rounded HALF_EVEN; never recompute row values from this rounded display.",
+  "shop_defaults": {
+    "default_gst_percent": "12",
+    "default_overhead_cost": "0.005",
+    "default_profit_margin_percent": "50"
+  },
+  "categories": [
+    {
+      "id": "category",
+      "gst_percent": "5",
+      "overhead_cost": "3",
+      "profit_margin_percent": "25"
+    }
+  ],
+  "products": [
+    {
+      "id": "product",
+      "name": "Product override",
+      "quantity": "2.5",
+      "purchase_price": "100",
+      "selling_price": "140",
+      "gst_percent": "18",
+      "overhead_cost": "5",
+      "category": "category"
+    },
+    {
+      "id": "negative",
+      "name": "Category negative",
+      "quantity": "-2",
+      "purchase_price": "60",
+      "selling_price": "80",
+      "category": "category"
+    },
+    {
+      "id": "fallback",
+      "name": "Shop fallback",
+      "quantity": "1.005",
+      "purchase_price": "1",
+      "selling_price": "2"
+    },
+    {
+      "id": "half-a",
+      "name": "Half paise A",
+      "quantity": "0.5",
+      "purchase_price": "0.01",
+      "selling_price": "0.01",
+      "gst_percent": "0",
+      "overhead_cost": "0"
+    },
+    {
+      "id": "half-b",
+      "name": "Half paise B",
+      "quantity": "0.5",
+      "purchase_price": "0.01",
+      "selling_price": "0.01",
+      "gst_percent": "0",
+      "overhead_cost": "0"
+    },
+    {
+      "id": "zero-override",
+      "name": "Zero override",
+      "quantity": "1",
+      "purchase_price": "100",
+      "selling_price": "0",
+      "gst_percent": "0",
+      "overhead_cost": "0",
+      "category": "category"
+    },
+    {
+      "id": "zero-stock",
+      "name": "Zero stock",
+      "quantity": "0",
+      "purchase_price": "999",
+      "selling_price": "999"
+    },
+    {
+      "id": "untracked",
+      "name": "Untracked",
+      "quantity": "99",
+      "purchase_price": "999",
+      "selling_price": "999",
+      "track_stock": false
+    },
+    {
+      "id": "deleted",
+      "name": "Deleted",
+      "quantity": "99",
+      "purchase_price": "999",
+      "selling_price": "999",
+      "deleted": true
+    }
+  ],
+  "excluded": [
+    "zero-stock",
+    "untracked",
+    "deleted"
+  ],
+  "expected_order": [
+    "product",
+    "zero-override",
+    "fallback",
+    "half-a",
+    "half-b",
+    "negative"
+  ],
+  "cases": [
+    {
+      "id": "regular",
+      "gst_scheme": "regular",
+      "gst_registered": "0",
+      "expected": {
+        "gst_registered": true,
+        "total_cost": "237.53",
+        "total_sale": "192.03",
+        "items": {
+          "product": {
+            "cost_value": "262.50",
+            "sale_value": "350.00",
+            "unit_cost": "105.00"
+          },
+          "negative": {
+            "cost_value": "-126.00",
+            "sale_value": "-160.00",
+            "unit_cost": "63.00"
+          },
+          "fallback": {
+            "cost_value": "1.01",
+            "sale_value": "2.01",
+            "unit_cost": "1.00"
+          },
+          "half-a": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "half-b": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "zero-override": {
+            "cost_value": "100.00",
+            "sale_value": "0.00",
+            "unit_cost": "100.00"
+          }
+        }
+      }
+    },
+    {
+      "id": "composition",
+      "gst_scheme": "composition",
+      "gst_registered": "1",
+      "expected": {
+        "gst_registered": false,
+        "total_cost": "276.65",
+        "total_sale": "192.03",
+        "items": {
+          "product": {
+            "cost_value": "307.50",
+            "sale_value": "350.00",
+            "unit_cost": "123.00"
+          },
+          "negative": {
+            "cost_value": "-132.00",
+            "sale_value": "-160.00",
+            "unit_cost": "66.00"
+          },
+          "fallback": {
+            "cost_value": "1.13",
+            "sale_value": "2.01",
+            "unit_cost": "1.12"
+          },
+          "half-a": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "half-b": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "zero-override": {
+            "cost_value": "100.00",
+            "sale_value": "0.00",
+            "unit_cost": "100.00"
+          }
+        }
+      }
+    },
+    {
+      "id": "unregistered",
+      "gst_scheme": "unregistered",
+      "gst_registered": "1",
+      "expected": {
+        "gst_registered": false,
+        "total_cost": "276.65",
+        "total_sale": "192.03",
+        "items": {
+          "product": {
+            "cost_value": "307.50",
+            "sale_value": "350.00",
+            "unit_cost": "123.00"
+          },
+          "negative": {
+            "cost_value": "-132.00",
+            "sale_value": "-160.00",
+            "unit_cost": "66.00"
+          },
+          "fallback": {
+            "cost_value": "1.13",
+            "sale_value": "2.01",
+            "unit_cost": "1.12"
+          },
+          "half-a": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "half-b": {
+            "cost_value": "0.01",
+            "sale_value": "0.01",
+            "unit_cost": "0.01"
+          },
+          "zero-override": {
+            "cost_value": "100.00",
+            "sale_value": "0.00",
+            "unit_cost": "100.00"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -553,7 +553,7 @@ class StockValueScreen extends StatelessWidget {
   const StockValueScreen({super.key});
 
   static String _qty(double q) =>
-      q == q.roundToDouble() ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
+      q.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
 
   @override
   Widget build(BuildContext context) {
@@ -590,8 +590,8 @@ class StockValueScreen extends StatelessWidget {
                           signedRupees(roundMoney(sale - cost)),
                         ),
                         Text(
-                          '${rows.length} items in stock. Cost is the '
-                          'weighted-average purchase price.',
+                          '${rows.length} products with nonzero stock. Cost '
+                          'includes overhead and any nonrecoverable purchase GST.',
                           style: AppText.caption,
                         ),
                       ],
