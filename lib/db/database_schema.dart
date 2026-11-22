@@ -210,9 +210,13 @@ mixin DatabaseSchema {
       CREATE TABLE IF NOT EXISTS checkout_acceptances(
         attempt_id TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
         owner TEXT, request_fingerprint TEXT NOT NULL,
-        bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL
+        bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL,
+        posting_snapshot TEXT
       )
     ''');
+    await _ensureColumns(executor, 'checkout_acceptances', {
+      'posting_snapshot': 'TEXT',
+    });
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS checkout_draft_state(
         cart_uuid TEXT PRIMARY KEY, shop_id TEXT NOT NULL,

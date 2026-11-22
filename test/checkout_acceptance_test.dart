@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/bill.dart';
 import 'package:storely/models/held_bill.dart';
 import 'package:storely/models/bill_settings.dart';
+import 'package:storely/models/product.dart';
 
 void main() {
   final helper = DatabaseHelper.instance;
@@ -116,6 +119,15 @@ void main() {
     },
   );
   test('late ledger failure rolls back bill payment and cart consume', () async {
+    final productId = await helper.insertProduct(
+      Product(name: 'Tracked rollback item', sellingPrice: 100, quantity: 5),
+    );
+    items = [
+      await helper.buildBillItemForProduct(
+        (await helper.getProductById(productId))!,
+      ),
+    ];
+    await helper.saveCartDraft(items);
     final sql = await helper.database;
     await sql.execute(
       "CREATE TRIGGER fail_checkout BEFORE INSERT ON checkout_acceptances BEGIN SELECT RAISE(ABORT, 'test late failure'); END",
@@ -123,11 +135,79 @@ void main() {
     await expectLater(save(), throwsA(isA<DatabaseException>()));
     expect(await helper.getAllBills(), isEmpty);
     expect(await sql.query('bill_payments'), isEmpty);
+    expect(await sql.query('checkout_acceptances'), isEmpty);
+    expect((await helper.getProductById(productId))!.quantity, 5);
     expect(await helper.loadCartDraft(), hasLength(1));
     await sql.execute('DROP TRIGGER fail_checkout');
     await save();
     expect(await helper.getAllBills(), hasLength(1));
+    expect((await helper.getProductById(productId))!.quantity, 4);
   });
+
+  test(
+    'stock, payment and invoice snapshots share one immutable acceptance',
+    () async {
+      final productId = await helper.insertProduct(
+        Product(name: 'Tracked item', sellingPrice: 100, quantity: 5),
+      );
+      items = [
+        await helper.buildBillItemForProduct(
+          (await helper.getProductById(productId))!,
+        ),
+      ];
+      await helper.saveCartDraft(items);
+      final id = await save();
+      var sql = await helper.database;
+      Future<String> captured() async =>
+          (await sql.query('checkout_acceptances')).single['posting_snapshot']
+              as String;
+      final raw = await captured();
+      final posting = jsonDecode(raw) as Map<String, dynamic>;
+      expect(posting['version'], 1);
+      expect(posting['device_id'], device);
+      expect(posting['invoice']['uuid'], bill.uuid);
+      expect(posting['invoice']['paid_amount'], 25);
+      final line = (posting['items'] as List).single as Map;
+      final payment = (posting['payments'] as List).single as Map;
+      final movement = (posting['movements'] as List).single as Map;
+      expect(line['bill_uuid'], bill.uuid);
+      expect(line.containsKey('product_id'), isFalse);
+      expect(payment['amount'], 25);
+      expect(movement['quantity_delta'], -1);
+      expect(movement['product_uuid'], line['product_uuid']);
+      expect(movement['source_document_uuid'], bill.uuid);
+      expect((await helper.getProductById(productId))!.quantity, 4);
+      await sql.update('bills', {'customer_name': 'Changed after posting'});
+      await helper.close();
+      sql = await helper.database;
+      expect(await save(), id);
+      expect(await captured(), raw);
+      expect((await helper.getProductById(productId))!.quantity, 4);
+      expect(await sql.query('bill_payments'), hasLength(1));
+    },
+  );
+
+  test(
+    'an existing v28 acceptance gains a nullable snapshot without backfill',
+    () async {
+      final id = await save();
+      var sql = await helper.database;
+      await sql.execute(
+        'ALTER TABLE checkout_acceptances DROP COLUMN posting_snapshot',
+      );
+      await helper.close();
+      sql = await helper.database;
+      expect(
+        (await sql.query('checkout_acceptances')).single['posting_snapshot'],
+        isNull,
+      );
+      expect(await save(), id);
+      expect(
+        (await sql.query('checkout_acceptances')).single['posting_snapshot'],
+        isNull,
+      );
+    },
+  );
   test('different newer cart is not consumed', () async {
     await helper.saveCartDraft([
       BillItem(productName: 'Other cart', quantity: 1, mrp: 10),

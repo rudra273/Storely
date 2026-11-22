@@ -198,6 +198,7 @@ void main() {
         'request_fingerprint',
         'bill_id',
         'bill_uuid',
+        'posting_snapshot',
       },
     );
     expect(
@@ -207,7 +208,7 @@ void main() {
       {'cart_uuid', 'shop_id', 'owner', 'device_id', 'revision', 'payload'},
     );
     final result = {
-      'version': 7,
+      'version': 8,
       'local_checkout_drafts': {
         'table': 'checkout_draft_state',
         'policy':
@@ -224,7 +225,7 @@ void main() {
       'local_checkout_acceptance': {
         'table': 'checkout_acceptances',
         'policy':
-            'Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.',
+            'Device-only exact retry ledger and immutable local sale effects; never row-sync or portable restore. Invoice, snapshot and matching origin cart tombstone commit atomically. Legacy acceptances have no posting snapshot.',
         'fields': [
           'attempt_id',
           'shop_id',
@@ -232,6 +233,7 @@ void main() {
           'request_fingerprint',
           'bill_id',
           'bill_uuid',
+          'posting_snapshot',
         ],
       },
       'local_payment_tables': {

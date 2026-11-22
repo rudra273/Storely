@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "local_checkout_drafts": {
     "table": "checkout_draft_state",
     "policy": "Device-only owner-scoped raw checkout and frozen local request; never row-sync. SQLite backups retain it with the exact original cart. Atomic park/swap transfers identity; acceptance or discard removes it.",
@@ -14,14 +14,15 @@
   },
   "local_checkout_acceptance": {
     "table": "checkout_acceptances",
-    "policy": "Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.",
+    "policy": "Device-only exact retry ledger and immutable local sale effects; never row-sync or portable restore. Invoice, snapshot and matching origin cart tombstone commit atomically. Legacy acceptances have no posting snapshot.",
     "fields": [
       "attempt_id",
       "shop_id",
       "owner",
       "request_fingerprint",
       "bill_id",
-      "bill_uuid"
+      "bill_uuid",
+      "posting_snapshot"
     ]
   },
   "local_payment_tables": {

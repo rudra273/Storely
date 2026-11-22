@@ -1,5 +1,7 @@
 // Host orchestrator: integration_test/support/checkout_process_recovery.py.
 // Each stage runs in a separate Android process against the same isolated DB.
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -128,6 +130,14 @@ void main() {
       expect(bills.single.balanceDue, 68);
       expect((await db.getProductById(product.id!))!.quantity, 9);
       final connection = await db.database;
+      final acceptance = (await connection.query(
+        'checkout_acceptances',
+      )).single;
+      final snapshot =
+          jsonDecode(acceptance['posting_snapshot'] as String) as Map;
+      expect(snapshot['invoice']['uuid'], bills.single.uuid);
+      expect((snapshot['payments'] as List).single['amount'], 50);
+      expect((snapshot['movements'] as List).single['quantity_delta'], -1);
       expect(
         Sqflite.firstIntValue(
           await connection.rawQuery('SELECT count(*) FROM bill_payments'),

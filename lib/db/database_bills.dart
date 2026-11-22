@@ -177,8 +177,70 @@ mixin DatabaseBills {
         'request_fingerprint': fingerprint,
         'bill_id': id,
         'bill_uuid': bill.uuid,
+        'posting_snapshot': await _captureReviewedSalePosting(
+          txn,
+          shopId: expectedShopId,
+          billId: id,
+          billUuid: bill.uuid,
+          originDeviceId: originDeviceId,
+        ),
       });
       return id;
+    });
+  }
+
+  /// Freeze the accepted effects while the invoice transaction still owns them.
+  /// The transport must separately negotiate how these effects are published.
+  Future<String> _captureReviewedSalePosting(
+    Transaction txn, {
+    required String shopId,
+    required int billId,
+    required String billUuid,
+    required String originDeviceId,
+  }) async {
+    Future<List<Map<String, Object?>>> rows(
+      String table,
+      String filter,
+      Object reference,
+    ) => txn.query(
+      table,
+      where: '$filter AND shop_id = ?',
+      whereArgs: [reference, shopId],
+      orderBy: 'id',
+    );
+
+    final invoice = (await rows('bills', 'id = ?', billId)).single;
+    List<Map<String, Object?>> snapshot(
+      List<Map<String, Object?>> records,
+      List<String> localKeys,
+    ) => [
+      for (final row in records)
+        Map<String, Object?>.of(row)
+          ..remove('id')
+          ..remove('sync_dirty')
+          ..remove('server_updated_at')
+          ..removeWhere((key, _) => localKeys.contains(key)),
+    ];
+    return jsonEncode({
+      'version': 1,
+      'device_id': originDeviceId,
+      'invoice': snapshot([invoice], ['customer_id']).single,
+      'items': snapshot(await rows('bill_items', 'bill_id = ?', billId), [
+        'bill_id',
+        'product_id',
+      ]),
+      'payments': snapshot(
+        await rows('bill_payments', 'bill_uuid = ?', billUuid),
+        [],
+      ),
+      'movements': snapshot(
+        await rows(
+          'stock_movements',
+          "source_document_uuid = ? AND source_document_type = 'bill' AND movement_type = 'sale'",
+          billUuid,
+        ),
+        ['product_id', 'source_document_id', 'supplier_id'],
+      ),
     });
   }
 
