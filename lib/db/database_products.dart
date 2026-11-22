@@ -605,11 +605,13 @@ mixin DatabaseProducts {
     required double delta,
     required String reason,
     String? note,
+    CheckoutScope? expectedScope,
   }) async {
     await _requireAdminMutation();
     if (delta.abs() < stockQuantityEpsilon) return;
     final db = await database;
     await db.transaction((txn) async {
+      if (expectedScope != null) await _assertCheckoutScope(txn, expectedScope);
       final rows = await _queryProducts(
         txn,
         where: 'p.id = ?',
@@ -618,6 +620,9 @@ mixin DatabaseProducts {
       );
       if (rows.isEmpty) throw StateError('Product no longer exists');
       final product = Product.fromMap(rows.single);
+      if (expectedScope != null && product.shopId != expectedScope.shopId) {
+        throw StateError('Product belongs to another workspace.');
+      }
       final trimmedNote = note?.trim();
       await _insertStockMovement(
         txn,

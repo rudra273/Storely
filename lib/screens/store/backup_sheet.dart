@@ -9,7 +9,8 @@ import '../../theme/app_theme.dart';
 /// Back up all shop data to one file, or restore from one.
 /// Pops `true` after a restore (callers should reload everything).
 class BackupSheet extends StatefulWidget {
-  const BackupSheet({super.key});
+  final Future<void> Function()? assertWorkspace;
+  const BackupSheet({super.key, this.assertWorkspace});
 
   @override
   State<BackupSheet> createState() => _BackupSheetState();
@@ -34,6 +35,7 @@ class _BackupSheetState extends State<BackupSheet> {
       _message = null;
     });
     try {
+      await widget.assertWorkspace?.call();
       await BackupService.shareBackup();
       final last = await BackupService.lastBackupAt();
       if (!mounted) return;
@@ -47,6 +49,12 @@ class _BackupSheetState extends State<BackupSheet> {
   }
 
   Future<void> _restore() async {
+    try {
+      await widget.assertWorkspace?.call();
+    } catch (error) {
+      if (mounted) setState(() => _message = error.toString());
+      return;
+    }
     final picked = await FilePicker.pickFiles(
       type: FileType.any,
       withData: true,
@@ -58,6 +66,7 @@ class _BackupSheetState extends State<BackupSheet> {
       _message = null;
     });
     try {
+      await widget.assertWorkspace?.call();
       final (info, dbBytes) = await BackupService.readBackup(bytes);
       if (!mounted) return;
       final confirmed = await showDialog<bool>(
@@ -89,6 +98,7 @@ class _BackupSheetState extends State<BackupSheet> {
         if (mounted) setState(() => _busy = false);
         return;
       }
+      await widget.assertWorkspace?.call();
       await BackupService.restore(dbBytes);
       if (!mounted) return;
       Navigator.pop(context, true);

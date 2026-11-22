@@ -14,6 +14,7 @@ import '../services/gstr1_export.dart';
 import '../models/product_purchase.dart';
 import '../theme/app_theme.dart';
 import '../utils/money.dart';
+import '../services/needs_action.dart';
 
 /// Report shortcuts shown at the top of the Reports (KPI) screen.
 class ReportShortcuts extends StatelessWidget {
@@ -456,16 +457,29 @@ class _ProfitLossScreenState extends State<ProfitLossScreen> {
 // ── Receivables ageing ──────────────────────────────────────────────────────
 
 class ReceivablesScreen extends StatelessWidget {
-  const ReceivablesScreen({super.key});
+  final bool overdueOnly;
+  final NeedsActionWorkspace? workspace;
+  const ReceivablesScreen({
+    super.key,
+    this.overdueOnly = false,
+    this.workspace,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: navyAppBar(title: 'Dues ageing'),
+      appBar: navyAppBar(title: overdueOnly ? 'Overdue dues' : 'Dues ageing'),
       body: _ReportLoader<List<AgeingRow>>(
         reloadKey: 0,
-        load: DatabaseHelper.instance.receivablesAgeing,
+        load: () async {
+          final rows = workspace == null
+              ? await DatabaseHelper.instance.receivablesAgeing()
+              : await workspace!.read(
+                  DatabaseHelper.instance.receivablesAgeing,
+                );
+          return overdueOnly ? overdueAgeingRows(rows) : rows;
+        },
         builder: (rows) {
           final totals = List<double>.generate(
             4,
@@ -490,7 +504,7 @@ class ReceivablesScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _Line('Customers owe you', rupees(grand), bold: true),
-                        for (var b = 0; b < 4; b++)
+                        for (var b = overdueOnly ? 2 : 0; b < 4; b++)
                           _Line(
                             DatabaseReports.ageingBuckets[b],
                             rupees(totals[b]),
@@ -776,20 +790,33 @@ class _Gstr1ScreenState extends State<Gstr1Screen> {
 // ── Expiring stock ──────────────────────────────────────────────────────────
 
 class ExpiringStockScreen extends StatefulWidget {
-  const ExpiringStockScreen({super.key});
+  final int initialDays;
+  final NeedsActionWorkspace? workspace;
+  const ExpiringStockScreen({super.key, this.initialDays = 30, this.workspace});
 
   @override
   State<ExpiringStockScreen> createState() => _ExpiringStockScreenState();
 }
 
 class _ExpiringStockScreenState extends State<ExpiringStockScreen> {
-  int _days = 30;
+  late int _days = widget.initialDays;
   int _reload = 0;
 
   static String _qty(double q) =>
       q == q.roundToDouble() ? q.toStringAsFixed(0) : q.toStringAsFixed(2);
 
   Future<void> _writeOff(ExpiringBatch batch) async {
+    try {
+      await widget.workspace?.verify();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+      return;
+    }
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -812,8 +839,10 @@ class _ExpiringStockScreenState extends State<ExpiringStockScreen> {
     );
     if (ok != true || !mounted) return;
     try {
+      await widget.workspace?.verify();
       await DatabaseHelper.instance.adjustStock(
         batch.productId,
+        expectedScope: widget.workspace?.scope,
         delta: -batch.quantity,
         reason: StockAdjustmentReason.expired,
         note: [
@@ -861,7 +890,11 @@ class _ExpiringStockScreenState extends State<ExpiringStockScreen> {
           Expanded(
             child: _ReportLoader<List<ExpiringBatch>>(
               reloadKey: '$_days-$_reload',
-              load: () => DatabaseHelper.instance.expiringStock(days: _days),
+              load: () => widget.workspace == null
+                  ? DatabaseHelper.instance.expiringStock(days: _days)
+                  : widget.workspace!.read(
+                      () => expiringAlertBatches(days: _days),
+                    ),
               builder: (batches) => batches.isEmpty
                   ? const AppEmptyState(
                       icon: Icons.event_available_outlined,
