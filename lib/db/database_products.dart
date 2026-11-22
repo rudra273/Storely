@@ -162,6 +162,18 @@ mixin DatabaseProducts {
     });
   }
 
+  /// Search never inherits names from retired or another shop's relations.
+  Future<List<Product>> getProductsForHomeSearch(String shopId) async {
+    final db = await database;
+    final rows = await _queryProducts(
+      db,
+      where: 'p.shop_id = ?',
+      whereArgs: [shopId],
+      scopedRelations: true,
+    );
+    return rows.map(Product.fromMap).toList();
+  }
+
   Future<List<Product>> getAllProducts() async {
     final db = await database;
     final maps = await _queryProducts(db, orderBy: 'p.created_at ASC');
@@ -1600,6 +1612,7 @@ Future<List<Map<String, dynamic>>> _queryProducts(
   List<Object?>? whereArgs,
   String? orderBy,
   int? limit,
+  bool scopedRelations = false,
 }) {
   final conditions = ['p.deleted_at IS NULL'];
   if (where != null && where.trim().isNotEmpty) {
@@ -1612,8 +1625,11 @@ Future<List<Map<String, dynamic>>> _queryProducts(
            u.name AS unit_name
     FROM products p
     LEFT JOIN categories c ON c.id = p.category_id
+      ${scopedRelations ? 'AND c.shop_id = p.shop_id AND c.deleted_at IS NULL' : ''}
     LEFT JOIN suppliers s ON s.id = p.supplier_id
+      ${scopedRelations ? 'AND s.shop_id = p.shop_id AND s.deleted_at IS NULL' : ''}
     LEFT JOIN units u ON u.id = p.unit_id
+      ${scopedRelations ? 'AND u.shop_id = p.shop_id AND u.deleted_at IS NULL' : ''}
     WHERE ${conditions.join(' AND ')}
     ${orderBy == null ? '' : 'ORDER BY $orderBy'}
     ${limit == null ? '' : 'LIMIT $limit'}

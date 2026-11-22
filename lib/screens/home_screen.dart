@@ -14,6 +14,9 @@ import 'expenses_screen.dart';
 import 'shared/sync_status_widgets.dart';
 import 'shared/bill_quick_sheet.dart';
 import '../services/needs_action.dart';
+import '../services/home_search.dart';
+import '../services/cloud_service.dart';
+import 'products_screen.dart';
 import 'customers_screen.dart';
 import 'pricing_screen.dart';
 import 'home/home_section_settings.dart';
@@ -46,17 +49,18 @@ class _HomeScreenState extends State<HomeScreen> {
   /// False until the first load finishes, so zeros never flash as if the
   /// shop had no data.
   bool _loaded = false;
+  bool _searchLoaded = false;
   int _needsActionCount = 0;
-  List<Product> _products = [];
+  List<Product> _searchProducts = [];
   List<Bill> _unpaidBills = [];
   List<Bill> _bills = [];
   List<Customer> _customers = [];
-  Map<int, double> _pendingByCustomerId = {};
-  Map<String, double> _pendingByPhone = {};
   int _productCount = 0;
   bool _hasFirstProduct = false;
   bool _hasSavedOriginalInvoice = false;
+  (String?, CloudMembership, String?, String?)? _cloudSearchIdentity;
   int _loadGeneration = 0;
+  CheckoutScope? _loadedSearchScope;
   int _supplierCount = 0;
   int _todayBillCount = 0;
   double _todaySales = 0;
@@ -71,6 +75,20 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _homeSearchCtrl.addListener(_onSearchChanged);
     HomeSectionPrefs.instance.addListener(_onPrefsChanged);
+    _cloudSearchIdentity = _searchIdentity(CloudService.instance.state.value);
+    CloudService.instance.state.addListener(_onCloudSearchScopeChanged);
+    _loadData();
+  }
+
+  (String?, CloudMembership, String?, String?) _searchIdentity(
+    CloudState state,
+  ) => (state.user?.id, state.membership, state.shopRole, state.config?.url);
+
+  void _onCloudSearchScopeChanged() {
+    final identity = _searchIdentity(CloudService.instance.state.value);
+    if (identity == _cloudSearchIdentity || !mounted) return;
+    _cloudSearchIdentity = identity;
+    _homeSearchCtrl.clear();
     _loadData();
   }
 
@@ -95,6 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _homeSearchCtrl.removeListener(_onSearchChanged);
     HomeSectionPrefs.instance.removeListener(_onPrefsChanged);
+    CloudService.instance.state.removeListener(_onCloudSearchScopeChanged);
     _homeSearchCtrl.dispose();
     super.dispose();
   }
@@ -136,11 +155,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     final generation = ++_loadGeneration;
+    if (mounted) setState(() => _searchLoaded = false);
     final db = DatabaseHelper.instance;
-    final shop = await db.currentShopId();
+    final scope = await db.captureCheckoutScope();
     final progress = await db.getFirstInvoiceProgress();
     final products = await db.getAllProducts();
-    final customers = await db.getAllCustomers();
+    final searchProducts = await db.getProductsForHomeSearch(scope.shopId);
+    final customers = await db.getCustomersForHomeSearch(scope.shopId);
     final suppliers = await db.getSupplierProfiles();
     final bills = await db.getAllBills();
     final shopName = await db.getShopName();
@@ -150,14 +171,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final todayBillCount = await db.getTodayBillCount();
     final needsAction = await NeedsAction.load();
     final unpaidBills = bills.where((bill) => bill.balanceDue > 0).toList();
-    final pending = _buildCustomerPendingMaps(bills);
     if (!mounted || generation != _loadGeneration) return;
-    if (await db.currentShopId() != shop) return;
+    if (!await isCurrentHomeSearchScope(scope)) return;
     if (!mounted || generation != _loadGeneration) return;
     setState(() {
       _loaded = true;
+      _searchLoaded = true;
+      _loadedSearchScope = scope;
       _needsActionCount = needsAction.length;
-      _products = products;
+      _searchProducts = searchProducts;
       _productCount = products.length;
       _hasFirstProduct = progress.hasProducts;
       _hasSavedOriginalInvoice = progress.hasInvoice;
@@ -168,8 +190,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _unpaidBills = unpaidBills;
       _bills = bills;
       _customers = customers;
-      _pendingByCustomerId = pending.byCustomerId;
-      _pendingByPhone = pending.byPhone;
       _shopName = shopName;
       _lowStockProducts = products
           .where((p) => p.isLowStock(lowStockThreshold))
@@ -269,7 +289,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: showSearchResults
-                        ? [_HomeSearchResults(results: _searchResults)]
+                        ? [
+                            if (!_searchLoaded)
+                              const SizedBox(
+                                height: 240,
+                                child: AppSkeletonList(rows: 3, rowHeight: 80),
+                              )
+                            else
+                              _HomeSearchResults(results: _searchResults),
+                          ]
                         : !_loaded
                         ? [
                             const SizedBox(
@@ -378,20 +406,45 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<_HomeSearchResult> get _searchResults {
-    final query = _homeSearchQuery.toLowerCase();
-    if (query.isEmpty) return [];
-    final digits = query.replaceAll(RegExp(r'[^0-9]'), '');
+    final query = HomeSearchQuery(_homeSearchQuery);
+    final scope = _loadedSearchScope;
+    if (!_searchLoaded || query.text.isEmpty || scope == null) return [];
+    final shop = scope.shopId;
     final results = <_HomeSearchResult>[];
 
-    for (final product in _products) {
-      if (results.length >= 8) break;
-      final matches =
-          product.name.toLowerCase().contains(query) ||
-          (product.itemCode?.toLowerCase().contains(query) ?? false) ||
-          (product.barcode?.toLowerCase().contains(query) ?? false) ||
-          (product.category?.toLowerCase().contains(query) ?? false) ||
-          (product.supplier?.toLowerCase().contains(query) ?? false);
-      if (!matches) continue;
+    final products =
+        _searchProducts
+            .where(
+              (p) =>
+                  p.shopId == shop &&
+                  query.product(
+                    p,
+                    allowSupplier:
+                        DatabaseHelper.instance.isAdminMutationAllowed
+                            ?.call() ??
+                        true,
+                  ),
+            )
+            .toList()
+          ..sort((a, b) {
+            final name = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+            return name != 0 ? name : a.uuid.compareTo(b.uuid);
+          });
+    final bills =
+        _bills.where((b) => b.shopId == shop && query.bill(b)).toList()
+          ..sort((a, b) {
+            final date = b.createdAt.compareTo(a.createdAt);
+            if (date != 0) return date;
+            final number = b.billNumber.compareTo(a.billNumber);
+            return number != 0 ? number : a.uuid.compareTo(b.uuid);
+          });
+    final customers =
+        _customers.where((c) => c.shopId == shop && query.customer(c)).toList()
+          ..sort((a, b) {
+            final name = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+            return name != 0 ? name : a.uuid.compareTo(b.uuid);
+          });
+    for (final product in products.take(5)) {
       results.add(
         _HomeSearchResult(
           icon: Icons.inventory_2_outlined,
@@ -399,20 +452,12 @@ class _HomeScreenState extends State<HomeScreen> {
           title: product.name,
           subtitle: 'Product · ${product.quantityLabel} in stock',
           trailing: rupees(product.sellingPrice, decimals: 0),
-          onTap: () => widget.onNavigate(1),
+          onTap: () => _openSearchProduct(product, scope),
         ),
       );
     }
 
-    for (final bill in _bills) {
-      if (results.length >= 8) break;
-      final number = _cleanBillNumber(bill).toLowerCase();
-      final phone = bill.customerPhone?.replaceAll(RegExp(r'[^0-9]'), '') ?? '';
-      final matches =
-          number.contains(query) ||
-          bill.customerName.toLowerCase().contains(query) ||
-          (digits.isNotEmpty && phone.contains(digits));
-      if (!matches) continue;
+    for (final bill in bills.take(5)) {
       results.add(
         _HomeSearchResult(
           icon: Icons.receipt_long_outlined,
@@ -420,20 +465,19 @@ class _HomeScreenState extends State<HomeScreen> {
           title: _cleanBillNumber(bill),
           subtitle: 'Bill · ${bill.customerName}',
           trailing: rupees(bill.totalAmount, decimals: 0),
-          onTap: () => widget.onNavigate(2),
+          onTap: () => _openSearchBill(bill, scope),
         ),
       );
     }
 
-    for (final customer in _customers) {
-      if (results.length >= 8) break;
-      final matches =
-          customer.name.toLowerCase().contains(query) ||
-          customer.phone.contains(digits.isEmpty ? query : digits) ||
-          (customer.gstin?.toLowerCase().contains(query) ?? false) ||
-          (customer.address?.toLowerCase().contains(query) ?? false);
-      if (!matches) continue;
-      final pending = _pendingAmount(customer);
+    final searchPending = _buildCustomerPendingMaps(
+      _bills.where((bill) => bill.shopId == shop).toList(),
+    );
+    for (final customer in customers.take(5)) {
+      final pending =
+          searchPending.byCustomerId[customer.id] ??
+          searchPending.byPhone[customer.phone] ??
+          0;
       results.add(
         _HomeSearchResult(
           icon: Icons.people_outline_rounded,
@@ -444,12 +488,111 @@ class _HomeScreenState extends State<HomeScreen> {
           trailing: pending > 0
               ? 'Due ${rupees(pending, decimals: 0)}'
               : 'Paid',
-          onTap: _openCustomers,
+          onTap: () => _openSearchCustomer(customer, scope),
         ),
       );
     }
 
     return results;
+  }
+
+  Future<bool> _searchScopeIsCurrent(CheckoutScope scope) async {
+    if (!await isCurrentHomeSearchScope(scope)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Shop changed. Search again.')),
+        );
+        _loadData();
+      }
+      return false;
+    }
+    return mounted;
+  }
+
+  Future<void> _openSearchProduct(Product product, CheckoutScope scope) async {
+    final matches = (await DatabaseHelper.instance.getProductsForHomeSearch(
+      scope.shopId,
+    )).where((p) => p.uuid == product.uuid);
+    if (!await _searchScopeIsCurrent(scope) || !mounted) return;
+    if (matches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This product is no longer available.')),
+      );
+      _loadData();
+      return;
+    }
+    final fresh = matches.single;
+    if (!(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true)) {
+      await showModalBottomSheet<void>(
+        context: context,
+        builder: (_) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(fresh.name, style: AppText.title),
+                if (fresh.itemCode != null)
+                  Text('Code: ${fresh.itemCode}', style: AppText.body),
+                if (fresh.barcode != null)
+                  Text('Barcode: ${fresh.barcode}', style: AppText.body),
+                if (fresh.category != null)
+                  Text('Category: ${fresh.category}', style: AppText.body),
+                Text(
+                  'Selling price: ${rupees(fresh.sellingPrice)}',
+                  style: AppText.body,
+                ),
+                Text('In stock: ${fresh.quantityLabel}', style: AppText.body),
+              ],
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProductsScreen(
+          initialProductUuid: product.uuid,
+          searchScope: scope,
+        ),
+      ),
+    );
+    if (mounted) _loadData();
+  }
+
+  Future<void> _openSearchBill(Bill bill, CheckoutScope scope) async {
+    final db = DatabaseHelper.instance;
+    final fresh = bill.id == null ? null : await db.getBillById(bill.id!);
+    if (!await _searchScopeIsCurrent(scope) || !mounted) return;
+    if (fresh == null ||
+        fresh.uuid != bill.uuid ||
+        fresh.shopId != scope.shopId ||
+        fresh.deletedAt != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This invoice is no longer available.')),
+      );
+      _loadData();
+      return;
+    }
+    if (await showBillQuickSheet(context, fresh) && mounted) _loadData();
+  }
+
+  Future<void> _openSearchCustomer(
+    Customer customer,
+    CheckoutScope scope,
+  ) async {
+    if (!await _searchScopeIsCurrent(scope) || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CustomersScreen(
+          initialCustomerUuid: customer.uuid,
+          searchScope: scope,
+        ),
+      ),
+    );
+    if (mounted) _loadData();
   }
 
   Future<void> _openQrSheet() async {
@@ -502,12 +645,6 @@ class _HomeScreenState extends State<HomeScreen> {
     ).push(MaterialPageRoute<void>(builder: (_) => const PricingScreen()));
     if (mounted) _loadData();
   }
-
-  double _pendingAmount(Customer customer) {
-    final byId = customer.id == null ? null : _pendingByCustomerId[customer.id];
-    if (byId != null) return byId;
-    return _pendingByPhone[customer.phone] ?? 0;
-  }
 }
 
 // ── Home Search ───────────────────────────────────────────────────────────────
@@ -523,12 +660,15 @@ class _HomeSearchField extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: TextField(
+        key: const ValueKey('home-global-search'),
         controller: controller,
+        maxLength: 60,
         autofocus: true,
         textInputAction: TextInputAction.search,
         style: const TextStyle(color: Colors.white, fontSize: 16),
         cursorColor: AppColors.amber,
         decoration: InputDecoration(
+          counterText: '',
           isCollapsed: true,
           filled: false,
           hintText: context.l10n.searchEverything,

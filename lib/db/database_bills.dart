@@ -990,6 +990,18 @@ mixin DatabaseBills {
     return grouped;
   }
 
+  /// Home search reads saved party identities without the legacy cross-shop
+  /// customer repair performed by the general customer-list loader.
+  Future<List<Customer>> getCustomersForHomeSearch(String shopId) async {
+    final db = await database;
+    final rows = await db.query(
+      'customers',
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shopId],
+    );
+    return rows.map(Customer.fromMap).toList();
+  }
+
   Future<List<Customer>> getAllCustomers() async {
     final db = await database;
     await syncCustomersFromBills(db);

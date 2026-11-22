@@ -927,18 +927,21 @@ class _StockTrackingFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SwitchListTile(
-          key: const ValueKey('product-track-stock'),
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Track stock'),
-          subtitle: Text(
-            trackStock
-                ? 'Warns at billing when stock runs out'
-                : 'For services and loose items — no stock count',
-            style: AppText.caption,
+        Material(
+          type: MaterialType.transparency,
+          child: SwitchListTile(
+            key: const ValueKey('product-track-stock'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Track stock'),
+            subtitle: Text(
+              trackStock
+                  ? 'Warns at billing when stock runs out'
+                  : 'For services and loose items — no stock count',
+              style: AppText.caption,
+            ),
+            value: trackStock,
+            onChanged: onTrackStockChanged,
           ),
-          value: trackStock,
-          onChanged: onTrackStockChanged,
         ),
         if (trackStock)
           TextFormField(

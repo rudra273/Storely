@@ -11,6 +11,7 @@ import '../utils/statement_pdf_generator.dart';
 import 'shared/record_payment_dialog.dart';
 import 'customer_profile_sheet.dart';
 import '../utils/money.dart';
+import '../services/home_search.dart';
 
 /// The single Customers page, opened from both Home → Workspace and
 /// Settings → Customers. Full-screen (not a bottom sheet) and dark-mode aware.
@@ -19,13 +20,20 @@ import '../utils/money.dart';
 /// the signed-in cloud user is not an owner/admin (those writes are admin-gated
 /// in the DB layer).
 class CustomersScreen extends StatefulWidget {
-  const CustomersScreen({super.key});
+  final String? initialCustomerUuid;
+  final CheckoutScope? searchScope;
+  const CustomersScreen({
+    super.key,
+    this.initialCustomerUuid,
+    this.searchScope,
+  });
 
   @override
   State<CustomersScreen> createState() => _CustomersScreenState();
 }
 
 class _CustomersScreenState extends State<CustomersScreen> {
+  bool _openedSearchTarget = false;
   List<Customer> _customers = [];
   List<Bill> _bills = [];
   Map<int, double> _pendingById = {};
@@ -48,8 +56,29 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   Future<void> _load() async {
     try {
-      final customers = await DatabaseHelper.instance.getAllCustomers();
-      final bills = await DatabaseHelper.instance.getAllBills();
+      final db = DatabaseHelper.instance;
+      if (widget.searchScope != null &&
+          !await isCurrentHomeSearchScope(widget.searchScope!)) {
+        throw StateError('Shop changed. Return to Home and search again.');
+      }
+      final allCustomers = widget.searchScope == null
+          ? await db.getAllCustomers()
+          : await db.getCustomersForHomeSearch(widget.searchScope!.shopId);
+      final allBills = await db.getAllBills();
+      if (widget.searchScope != null &&
+          !await isCurrentHomeSearchScope(widget.searchScope!)) {
+        throw StateError('Shop changed. Return to Home and search again.');
+      }
+      final customers = widget.searchScope == null
+          ? allCustomers
+          : allCustomers
+                .where((c) => c.shopId == widget.searchScope!.shopId)
+                .toList();
+      final bills = widget.searchScope == null
+          ? allBills
+          : allBills
+                .where((b) => b.shopId == widget.searchScope!.shopId)
+                .toList();
       if (!mounted) return;
       final pending = _buildPendingMaps(bills);
       setState(() {
@@ -59,6 +88,19 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _pendingByPhone = pending.$2;
         _isLoading = false;
       });
+      if (!_openedSearchTarget && widget.initialCustomerUuid != null) {
+        _openedSearchTarget = true;
+        final targets = customers.where(
+          (c) => c.uuid == widget.initialCustomerUuid,
+        );
+        if (targets.isEmpty) {
+          throw StateError('This customer is no longer available.');
+        }
+        if (!await isCurrentHomeSearchScope(widget.searchScope!) || !mounted) {
+          return;
+        }
+        await _openDetail(targets.single);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
