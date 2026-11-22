@@ -140,6 +140,8 @@ The [real Android process-death acceptance](docs/refactor/evidence/E02/slice-2.m
 
 The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.md) and [paired verification](docs/refactor/evidence/E03/stock-valuation.md) are complete. The remaining E03 billing calculations and atomic sync work are tracked below.
 
+[New sale quantity validation](docs/refactor/evidence/E03/sale-quantity.md) passed on localhost, Docker and Android. Payment-method compatibility and remaining quantity policies are still open.
+
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.
 - Web: pricing/review/version conflict recovery and immutable completion; display server-authoritative totals.

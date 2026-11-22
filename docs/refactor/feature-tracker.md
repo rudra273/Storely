@@ -171,7 +171,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D09 | E03 | planned | Not run; paired before/after scenario and regression required. |
-| D10 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D10 | E03 | implementing | New sale quantity validation and recovery verified across clients and API. Return quantities and the broader unit precision review remain open. See `evidence/E03/sale-quantity.md`. |
 | D11 | E03 | planned | Not run; paired before/after scenario and regression required. |
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
 | D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
