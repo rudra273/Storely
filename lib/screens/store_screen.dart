@@ -8,6 +8,8 @@ import '../utils/test_keys.dart';
 import '../models/bill_settings.dart';
 import '../models/product.dart';
 import '../models/low_stock_threshold.dart';
+import '../models/settings_search.dart';
+import '../services/home_search.dart';
 import '../models/pricing.dart';
 import '../models/shop_profile.dart';
 import '../models/supplier.dart';
@@ -47,6 +49,11 @@ class StoreScreen extends StatefulWidget {
 }
 
 class _StoreScreenState extends State<StoreScreen> {
+  final _settingsSearch = TextEditingController();
+  String _settingsQuery = '';
+  int _loadGeneration = 0;
+  CheckoutScope? _loadedScope;
+  late (String?, CloudMembership, String?, String?) _cloudIdentity;
   SettingsEditBaseline? _settingsBaseline;
   String? _shopName;
   ShopProfile? _shopProfile;
@@ -63,8 +70,117 @@ class _StoreScreenState extends State<StoreScreen> {
   @override
   void initState() {
     super.initState();
+    _settingsSearch.addListener(_onSettingsSearch);
+    _cloudIdentity = _identity(CloudService.instance.state.value);
+    CloudService.instance.state.addListener(_onCloudScope);
     _loadStoreData();
     _loadAppVersion();
+  }
+
+  (String?, CloudMembership, String?, String?) _identity(CloudState state) =>
+      (state.user?.id, state.membership, state.shopRole, state.config?.url);
+
+  void _onSettingsSearch() {
+    if (mounted) setState(() => _settingsQuery = _settingsSearch.text.trim());
+  }
+
+  void _onCloudScope() {
+    final next = _identity(CloudService.instance.state.value);
+    if (next == _cloudIdentity || !mounted) return;
+    _cloudIdentity = next;
+    _settingsSearch.clear();
+    _loadStoreData();
+  }
+
+  @override
+  void dispose() {
+    CloudService.instance.state.removeListener(_onCloudScope);
+    _settingsSearch.removeListener(_onSettingsSearch);
+    _settingsSearch.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _canOpenSettingsResult() async {
+    if (_settingsQuery.isEmpty) return mounted;
+    final scope = _loadedScope;
+    if (scope == null || !await isCurrentHomeSearchScope(scope)) {
+      if (mounted) {
+        _settingsSearch.clear();
+        _loadStoreData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Shop changed. Search settings again.')),
+        );
+      }
+      return false;
+    }
+    return mounted;
+  }
+
+  List<Widget> _filterSettings(List<Widget> children) {
+    if (_settingsQuery.isEmpty) return children;
+    final result = <Widget>[];
+    _SectionLabel? section;
+    var needsSection = false;
+    for (final child in children) {
+      if (child is _SectionLabel) {
+        section = child;
+        needsSection = true;
+        continue;
+      }
+      final title = switch (child) {
+        _StoreActionRow() => child.title,
+        _SettingsSearchEntry() => child.title,
+        _ => null,
+      };
+      if (title == null) continue;
+      if (title == 'Account search') {
+        final state = CloudService.instance.state.value;
+        final canMembers =
+            state.isConfigured &&
+            state.isSignedIn &&
+            state.membership == CloudMembership.member &&
+            state.isAdmin;
+        if (!matchesSettingsSearch(
+              _settingsQuery,
+              state.isSignedIn ? 'Account' : 'Sign In',
+            ) &&
+            !matchesSettingsSearch(_settingsQuery, 'Cloud Backup & Sync') &&
+            !(canMembers &&
+                matchesSettingsSearch(_settingsQuery, 'Team Members'))) {
+          continue;
+        }
+      } else if (!matchesSettingsSearch(_settingsQuery, title)) {
+        continue;
+      }
+      if (needsSection && section != null) {
+        if (result.isNotEmpty) {
+          result.add(const SizedBox(height: AppSpacing.xl));
+        }
+        result.add(section);
+        needsSection = false;
+      }
+      result.add(const SizedBox(height: AppSpacing.sm));
+      result.add(
+        child is _StoreActionRow
+            ? _StoreActionRow(
+                title: child.title,
+                subtitle: child.subtitle,
+                icon: child.icon,
+                onTap: () async {
+                  if (await _canOpenSettingsResult()) child.onTap();
+                },
+              )
+            : child,
+      );
+    }
+    return result.isEmpty
+        ? [
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: Text('No matching settings'),
+            ),
+          ]
+        : result;
   }
 
   Future<void> _loadAppVersion() async {
@@ -86,7 +202,9 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   Future<void> _loadStoreData() async {
+    final generation = ++_loadGeneration;
     final db = DatabaseHelper.instance;
+    final scope = await db.captureCheckoutScope();
     final baseline = await db.captureSettingsEditBaseline();
     final shopProfile = await db.getShopProfile();
     final shopName = shopProfile?.name;
@@ -99,8 +217,16 @@ class _StoreScreenState extends State<StoreScreen> {
     final pricingSettings = await db.getGlobalPricingSettings();
     final invoiceSeriesSettings = await db.getDefaultInvoiceSeriesSettings();
     final lowStockThreshold = await db.getLowStockThreshold();
-    if (!mounted) return;
+    if (!mounted || generation != _loadGeneration) return;
+    if (!await isCurrentHomeSearchScope(scope)) return;
+    if (!mounted || generation != _loadGeneration) return;
+    final oldScope = _loadedScope;
+    if (oldScope != null &&
+        (oldScope.shopId != scope.shopId || oldScope.owner != scope.owner)) {
+      _settingsSearch.clear();
+    }
     setState(() {
+      _loadedScope = scope;
       _settingsBaseline = baseline;
       _shopName = shopName;
       _shopProfile = shopProfile;
@@ -495,6 +621,147 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  List<Widget> _settingsRows() => [
+    _SettingsSearchEntry(
+      title: 'Shop Profile',
+      child: ValueListenableBuilder<CloudState>(
+        valueListenable: CloudService.instance.state,
+        builder: (context, cloudState, _) => _ShopPanel(
+          profile: _shopProfile,
+          gstRegistered: _pricingSettings.gstRegistered,
+          onEdit: cloudState.isAdmin
+              ? () async {
+                  if (await _canOpenSettingsResult()) {
+                    _editShopProfile();
+                  }
+                }
+              : null,
+          roleLabel: cloudState.isConfigured && cloudState.isSignedIn
+              ? cloudState.shopRole
+              : null,
+        ),
+      ),
+    ),
+    const SizedBox(height: AppSpacing.xl),
+    const _SectionLabel(title: 'Billing'),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Bill Settings',
+      subtitle: _invoiceSeriesSettings.formatTemplate,
+      icon: Icons.receipt_long_outlined,
+      onTap: _showBillSettings,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Pricing Defaults',
+      subtitle:
+          'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
+      icon: Icons.calculate_outlined,
+      onTap: _showGlobalPricingSettings,
+    ),
+    const SizedBox(height: AppSpacing.xl),
+    const _SectionLabel(title: 'Catalog'),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Categories',
+      subtitle: '${_categories.length} saved',
+      icon: Icons.category_outlined,
+      onTap: _showCategoryManager,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Suppliers',
+      subtitle:
+          '${_suppliers.length} saved${_supplierProfiles.any((supplier) => supplier.phone != null || supplier.email != null || supplier.gstin != null) ? ' • profiles enabled' : ''}',
+      icon: Icons.local_shipping_outlined,
+      onTap: _showSupplierManager,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Low-stock alert',
+      subtitle:
+          'Show stock at ${lowStockThresholdText(_lowStockThreshold)} or below',
+      icon: Icons.inventory_rounded,
+      onTap: _editLowStockThreshold,
+    ),
+    const SizedBox(height: AppSpacing.xl),
+    const _SectionLabel(title: 'Data & security'),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Backup & restore',
+      subtitle: 'Save all data to one file',
+      icon: Icons.backup_outlined,
+      onTap: _showBackup,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _SettingsSearchEntry(
+      title: 'App Settings',
+      child: AnimatedBuilder(
+        animation: AppSettingsService.instance,
+        builder: (context, _) => _StoreActionRow(
+          title: 'App Settings',
+          subtitle:
+              'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'} • ${AppSettingsService.instance.language.label}',
+          icon: Icons.settings_outlined,
+          onTap: () async {
+            if (await _canOpenSettingsResult()) {
+              _showAppSettings();
+            }
+          },
+        ),
+      ),
+    ),
+    const SizedBox(height: AppSpacing.xl),
+    const _SectionLabel(title: 'Account'),
+    const SizedBox(height: AppSpacing.sm),
+    _SettingsSearchEntry(
+      title: 'Account search',
+      child: _AccountSection(
+        query: _settingsQuery,
+        onSetup: () async {
+          if (await _canOpenSettingsResult()) {
+            await _openCloudSetup();
+          }
+        },
+        onSync: () async {
+          if (await _canOpenSettingsResult()) {
+            await _syncCloud();
+          }
+        },
+        onMembers: () async {
+          if (await _canOpenSettingsResult()) {
+            await _openMembers();
+          }
+        },
+      ),
+    ),
+    const SizedBox(height: AppSpacing.xl),
+    const _SectionLabel(title: 'Help & about'),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Report a problem',
+      subtitle: 'Send app details and recent errors to support',
+      icon: Icons.bug_report_outlined,
+      onTap: _reportProblem,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'Privacy policy',
+      subtitle: 'Privacy policy and data usage details',
+      icon: Icons.privacy_tip_outlined,
+      onTap: _openPrivacyPolicy,
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    _StoreActionRow(
+      title: 'About',
+      subtitle: _appVersion == null
+          ? 'App information and version'
+          : 'App information and version $_appVersion',
+      icon: Icons.info_outline_rounded,
+      onTap: _openAboutApp,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -541,118 +808,40 @@ class _StoreScreenState extends State<StoreScreen> {
                   112,
                 ),
                 children: [
-                  ValueListenableBuilder<CloudState>(
-                    valueListenable: CloudService.instance.state,
-                    builder: (context, cloudState, _) => _ShopPanel(
-                      profile: _shopProfile,
-                      gstRegistered: _pricingSettings.gstRegistered,
-                      onEdit: cloudState.isAdmin ? _editShopProfile : null,
-                      roleLabel:
-                          cloudState.isConfigured && cloudState.isSignedIn
-                          ? cloudState.shopRole
-                          : null,
+                  TextField(
+                    key: const ValueKey('store-settings-search'),
+                    controller: _settingsSearch,
+                    maxLength: 60,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      labelText: 'Search settings',
+                      hintText: 'Invoice, tax, stock, theme…',
+                      counterText: '',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      suffixIcon: _settingsQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear settings search',
+                              onPressed: _settingsSearch.clear,
+                              icon: const Icon(Icons.close_rounded),
+                            ),
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Billing'),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Bill Settings',
-                    subtitle: _invoiceSeriesSettings.formatTemplate,
-                    icon: Icons.receipt_long_outlined,
-                    onTap: _showBillSettings,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Pricing Defaults',
-                    subtitle:
-                        'GST ${_pricingSettings.defaultGstPercent.toStringAsFixed(2)}% • Margin ${_pricingSettings.defaultProfitMarginPercent.toStringAsFixed(2)}%',
-                    icon: Icons.calculate_outlined,
-                    onTap: _showGlobalPricingSettings,
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Catalog'),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Categories',
-                    subtitle: '${_categories.length} saved',
-                    icon: Icons.category_outlined,
-                    onTap: _showCategoryManager,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Suppliers',
-                    subtitle:
-                        '${_suppliers.length} saved${_supplierProfiles.any((supplier) => supplier.phone != null || supplier.email != null || supplier.gstin != null) ? ' • profiles enabled' : ''}',
-                    icon: Icons.local_shipping_outlined,
-                    onTap: _showSupplierManager,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Low-stock alert',
-                    subtitle:
-                        'Show stock at ${lowStockThresholdText(_lowStockThreshold)} or below',
-                    icon: Icons.inventory_rounded,
-                    onTap: _editLowStockThreshold,
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Data & security'),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Backup & restore',
-                    subtitle: 'Save all data to one file',
-                    icon: Icons.backup_outlined,
-                    onTap: _showBackup,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  AnimatedBuilder(
-                    animation: AppSettingsService.instance,
-                    builder: (context, _) => _StoreActionRow(
-                      title: 'App Settings',
-                      subtitle:
-                          'Theme: ${AppSettingsService.instance.themePreference.label} • Lock: ${AppSettingsService.instance.appLockEnabled ? 'On' : 'Off'} • ${AppSettingsService.instance.language.label}',
-                      icon: Icons.settings_outlined,
-                      onTap: _showAppSettings,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Account'),
-                  const SizedBox(height: AppSpacing.sm),
-                  _AccountSection(
-                    onSetup: _openCloudSetup,
-                    onSync: _syncCloud,
-                    onMembers: _openMembers,
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _SectionLabel(title: 'Help & about'),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Report a problem',
-                    subtitle: 'Send app details and recent errors to support',
-                    icon: Icons.bug_report_outlined,
-                    onTap: _reportProblem,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'Privacy policy',
-                    subtitle: 'Privacy policy and data usage details',
-                    icon: Icons.privacy_tip_outlined,
-                    onTap: _openPrivacyPolicy,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  _StoreActionRow(
-                    title: 'About',
-                    subtitle: _appVersion == null
-                        ? 'App information and version'
-                        : 'App information and version $_appVersion',
-                    icon: Icons.info_outline_rounded,
-                    onTap: _openAboutApp,
-                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  ..._filterSettings(_settingsRows()),
                 ],
               ),
             ),
     );
   }
+}
+
+class _SettingsSearchEntry extends StatelessWidget {
+  final String title;
+  final Widget child;
+  const _SettingsSearchEntry({required this.title, required this.child});
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 /// Asks what went wrong (optional) before sharing a problem report.
