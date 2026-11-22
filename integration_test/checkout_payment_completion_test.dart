@@ -116,7 +116,10 @@ void main() {
 
         await tap(openCheckout);
         expect(
-          tester.widget<TextField>(key('checkout-cash-received')).controller!.text,
+          tester
+              .widget<TextField>(key('checkout-cash-received'))
+              .controller!
+              .text,
           '200',
         );
         expect(
@@ -158,6 +161,31 @@ void main() {
         await enter(key('checkout-partial-amount'), '50');
         await tap(key('checkout-method-bank'));
         await enter(key('checkout-reference'), 'NEFT-901');
+        await tap(key('checkout-close'));
+        scope = await db.captureCheckoutScope();
+        draft = (await db.loadCheckoutCart(scope))!;
+        await db.writeCheckoutState(draft, {
+          ...draft.state,
+          'raw': {...draft.state['raw'] as Map, 'method': 'bank_transfer'},
+        });
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        await db.close();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StorelyTheme.light(),
+            locale: const Locale('en'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: const ScanScreen(initialMode: BillingEntryMode.manual),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tap(openCheckout);
+        expect(
+          tester.widget<TextField>(key('checkout-reference')).controller!.text,
+          'NEFT-901',
+        );
         await tap(key('checkout-unassigned-consent'));
         await tap(key('checkout-save'));
 

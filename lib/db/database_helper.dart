@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../models/bill.dart';
 import '../models/bill_settings.dart';
 import '../models/bill_totals.dart';
+import '../models/checkout_settlement.dart';
 import '../models/invoice_numbering.dart';
 import '../models/customer.dart';
 import '../models/expense.dart';
