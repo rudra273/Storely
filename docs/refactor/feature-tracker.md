@@ -21,7 +21,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | A09 | App lock / sensitive-action authentication | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A10 | Audit/security history | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A11 | Onboarding tutorial and first invoice | P/P/P | E02 | implementing | Home guidance through a first saved invoice passed paired localhost and Android checks. Broader tutorial scope and human UX review remain open. See `evidence/E02/first-invoice-onboarding.md`. |
-| A12 | Global search / settings search / notification routing | P/P/P | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| A12 | Global search / settings search / notification routing | P/P/P | E02 | implementing | Workspace search and exact record navigation verified on localhost, Docker and Android. Settings search and notification routing remain open. See `evidence/E02/workspace-search.md`. |
 | A13 | Themes / seasonal launcher variants | E/E/— | — | excluded visual scope | Preserve existing theme; no seasonal/visual cloning. |
 | T01 | Sales invoice, B2B/B2C | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T02 | Purchase invoice/stock receipt | P/P/P | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |

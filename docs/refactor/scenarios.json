@@ -368,6 +368,30 @@
           "prerequisites": "Dedicated Android emulator and isolated offline test database."
         }
       ]
+    },
+    {
+      "id": "E02-SEARCH-01",
+      "name": "workspace-search-and-exact-records",
+      "state": "verified",
+      "description": "Find products, invoices and customers by literal text and formatted phone within one shop, and open the selected saved record.",
+      "evidence": "evidence/E02/workspace-search.md",
+      "checks": [
+        {
+          "repository": "storelyapi",
+          "command": "bash scripts/integration-tests.sh tests/test_workspace_search.py",
+          "prerequisites": "Exclusive scratch database window."
+        },
+        {
+          "repository": "storelyweb",
+          "command": "node e2e/workspace-search.cjs",
+          "prerequisites": "Current localhost Vite, Docker API, Chromium and isolated owner/staff fixtures across two premium shops."
+        },
+        {
+          "repository": "Storely",
+          "command": "flutter test --no-pub integration_test/home_global_search_test.dart --no-uninstall -d emulator-5556",
+          "prerequisites": "Separate Android emulator and disposable offline test database."
+        }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
