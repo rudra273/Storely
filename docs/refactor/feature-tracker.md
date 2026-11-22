@@ -176,7 +176,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
 | D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
 | D14 | E02 | deferred | Owner deferred web Hindi localization and portable web language selection. |
-| D15 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D15 | E03 | implementing | Reviewed Android sales capture immutable local posting effects in the acceptance transaction. Atomic cloud posting, legacy-path negotiation and payment/return migration remain open. See `contracts/E03-atomic-sale-sync.md`. |
 
 ## Phase readiness
 

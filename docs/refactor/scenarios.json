@@ -467,6 +467,18 @@
         { "repository": "storelyweb", "command": "node e2e/return-quantity.cjs", "prerequisites": "Local Vite, Docker API, Chromium and a disposable paid shop." },
         { "repository": "Storely", "command": "flutter test --no-pub integration_test/return_quantity_test.dart --no-uninstall -d emulator-5556", "prerequisites": "Disposable emulator and isolated SQLite test database." }
       ]
+    },
+    {
+      "id": "E03-SALE-POSTING-01",
+      "name": "atomic-local-reviewed-sale-snapshot",
+      "state": "verified",
+      "description": "Commit the original invoice, lines, payment and stock effects with checkout acceptance. Verify rollback and immutable local recovery after process death.",
+      "evidence": "evidence/E03/local-sale-posting.md",
+      "checks": [
+        { "repository": "Storely", "command": "flutter test --no-pub test/checkout_acceptance_test.dart test/sync_data_contract_test.dart", "prerequisites": "Isolated SQLite test databases." },
+        { "repository": "Storely", "command": "python3 integration_test/support/checkout_process_recovery.py emulator-5556", "prerequisites": "Dedicated Android emulator and isolated checkout test database." },
+        { "repository": "storelyapi", "command": "bash scripts/integration-tests.sh tests/test_complete_sync.py", "prerequisites": "Exclusive Docker scratch database window." }
+      ]
     }
   ],
   "verification_policy": "A passing scoped check does not close the full cross-client scenario. Commands require the local development stack and run-owned fixtures as documented; no production data."
