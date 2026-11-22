@@ -8,3 +8,9 @@ Run date: 22 November 2026. [Acceptance contract](../../contracts/E02-notificati
 - The Android emulator opened the filtered overdue and seven-day expiry reports and the existing backup and sync sheets. An account transition exposed a missed alert refresh in the first run. The corrected run refreshed the alerts and hid the sync sheet contents after role revocation. The test opened the backup sheet without restoring a file.
 - Six focused Flutter tests verified exact paise, overdue age buckets, the inclusive expiry window, shop isolation, suppression for staff, stale taps and a rejected stale stock adjustment. The analyzer passed.
 - Android commit `257fdaf`. The full Flutter suite passed 521 tests, with 17 opt-in skips.
+
+## E02 exit review
+
+The sales checkout no longer uses the generic expiring draft helper. The dedicated invoice store retains meaningful older drafts, preserves saved work after a storage failure, refuses conflicting tabs, and protects an unconfirmed request from replacement or clearing. `npm test -- --maxWorkers=2 src/billing/checkout/invoiceDraftStore.test.ts src/billing/Billing.test.tsx` passed 122 tests. The generic draft helper still serves product forms.
+
+The Android process-kill and relaunch scenario remains open. Database close and reopen is covered by the existing checkout tests. Human UX review remains open.
