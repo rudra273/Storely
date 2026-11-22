@@ -142,7 +142,7 @@ The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.m
 
 [Sale](docs/refactor/evidence/E03/sale-quantity.md) and [return quantity validation](docs/refactor/evidence/E03/return-quantity.md) passed on localhost, Docker and Android. [Bank transfer compatibility](docs/refactor/evidence/E03/payment-method-aliases.md) passed replay and recovery checks. The broader unit conversion policy and atomic financial sync remain open.
 
-Reviewed Android sales now capture the original posting effects in SQLite. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) records what remains for the cloud command, including offline stock conflicts and avoiding duplicate effects when upgrading from row sync.
+Reviewed Android sales now capture the original posting effects in SQLite. [Server preflight](docs/refactor/evidence/E03/native-sale-preflight.md) checks current stock, invoice identity and recorded amounts. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) tracks the posting and recovery work that follows.
 
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.
