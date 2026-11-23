@@ -1,0 +1,11 @@
+# Native sale historical snapshot verification
+
+Android commit `99403a5` sends the historical purchase price, item cost, profit, HSN code and type, and unit from the accepted invoice. API commit `1c2c9ac` verifies the six fields before posting and checks the stored invoice on replay. Comparison uses exact text and half-up decimal rounding to nine places. A snapshot mismatch rolls back the command and leaves the Android invoice reserved for reconciliation.
+
+- The Android emulator posted through the localhost Docker TLS proxy. The test changed product cost and HSN while leaving the selling price fixed. The rejection left zero cloud invoice, payment, item, and sale movement effects. Restoring the catalog allowed the same request to commit. The test dropped that response, changed the catalog again, and replayed the original command after reopening SQLite. The stored line kept its original cost and HSN, and the single sale movement reduced stock from 10 to 9.
+- The standalone localhost TLS smoke verified a rejected proof, the operation key remaining available, and one invoice after corrected submission and replay. The localhost checks used disposable accounts and shops.
+- Flutter analysis passed. The full Flutter suite passed 605 tests with 24 skips. The opt-in test selection passed 119 tests, including missing acknowledgement proof, mismatched returned line metadata, and unchanged replay of previously reserved commands.
+- Docker passed all 435 API integration tests and 420 API unit tests. Cases cover drift in each historical field, rollback, catalog changes before replay, a changed stored invoice, legacy retry compatibility, and rejection of cost proof from staff. The full integration run reported the existing duplicate health operation ID warning.
+- Web passed 688 tests, typecheck, and generated type consistency. Commit `4bcd74a` updates the contract. Commit `9c8d3b7` fixes three stale quantity assertions in the shop-switch test.
+
+The preview flag defaults to off. New strict requests require a shop owner or admin on their own registered device. Staff continue to use row sync for new sales. Rollout still needs a way to reconcile shortages, mismatched snapshots, and local edits without losing the issued invoice.

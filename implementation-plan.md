@@ -144,6 +144,8 @@ The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.m
 
 Reviewed Android sales capture the original posting effects in SQLite. [Server preflight](docs/refactor/evidence/E03/native-sale-preflight.md), [atomic server posting](docs/refactor/evidence/E03/native-sale-posting.md) and [opt-in Android delivery](docs/refactor/evidence/E03/android-native-sale-delivery.md) are verified. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) tracks rollout, reconciliation and the remaining payment, cancellation and return commands.
 
+[Historical invoice snapshot verification](docs/refactor/evidence/E03/native-sale-snapshot-proof.md) covers purchase price, cost, profit, HSN and unit for new opt-in Android sales. The next E03.2 work is an explicit recovery flow for stock shortages, snapshot conflicts and edits to reserved invoices.
+
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.
 - Web: pricing/review/version conflict recovery and immutable completion; display server-authoritative totals.
