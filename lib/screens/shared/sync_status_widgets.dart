@@ -206,7 +206,9 @@ class _SyncStatusSheet extends StatelessWidget {
                               value: 'retry',
                               child: Text('Try again'),
                             ),
-                            if (c.table != 'purchase_documents')
+                            if (c.table != 'purchase_documents' &&
+                                c.table !=
+                                    CloudSyncEngine.nativeSaleConflictTable)
                               const PopupMenuItem(
                                 value: 'cloud',
                                 child: Text('Use cloud copy'),

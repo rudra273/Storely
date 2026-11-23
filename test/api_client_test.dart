@@ -63,6 +63,46 @@ ApiClient build(
 );
 
 void main() {
+  test('account-bound POST retries with the same key and encoded body', () async {
+    String token(String subject) =>
+        'header.${base64Url.encode(utf8.encode(jsonEncode({'sub': subject})))}.signature';
+    final first = token('u1');
+    final second = token('another-user');
+    final requests = <(String?, String)>[];
+    final script = Script()
+      ..handlers['POST /v1/auth/login'] = ((_) =>
+          json({'access_token': first, 'refresh_token': 'ref'}))
+      ..handlers['GET /v1/me'] = ((_) => json(meJson))
+      ..handlers['POST /v1/test-sale'] = ((request) {
+        requests.add((request.headers['idempotency-key'], request.body));
+        return requests.length.isOdd
+            ? failure(401, 'invalid_token', 'Refresh needed')
+            : json({'ok': true});
+      })
+      ..handlers['POST /v1/auth/refresh'] = ((_) =>
+          json({'access_token': first, 'refresh_token': 'ref'}));
+    final api = build(script, MemoryTokenStore());
+    addTearDown(api.dispose);
+    await api.login('a@b.com', 'pw');
+
+    Future<Map<String, dynamic>> send() => api.postJson(
+      '/v1/test-sale',
+      {'invoice_uuid': 'original'},
+      expectedUserId: 'u1',
+      idempotencyKey: 'original-key',
+    );
+
+    expect(await send(), {'ok': true});
+    expect(requests, hasLength(2));
+    expect(requests.first, ('original-key', '{"invoice_uuid":"original"}'));
+    expect(requests.last, requests.first);
+
+    script.handlers['POST /v1/auth/refresh'] = ((_) =>
+        json({'access_token': second, 'refresh_token': 'ref'}));
+    await expectLater(send(), throwsStateError);
+    expect(requests, hasLength(3));
+  });
+
   test('refuses to talk over plain http', () {
     expect(
       () => ApiClient(

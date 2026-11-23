@@ -718,6 +718,7 @@ void main() {
           find.byKey(const ValueKey('checkout-method-cash')),
         );
         await tapVisible(tester, find.byKey(const ValueKey('checkout-save')));
+        await waitForCompletion(tester);
         await tapVisible(
           tester,
           find.byKey(const ValueKey('checkout-completion-done')),

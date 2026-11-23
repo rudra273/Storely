@@ -273,14 +273,24 @@ class ApiClient {
 
   // ── requests ──
 
-  Future<Map<String, dynamic>> getJson(String path) =>
-      _authed('GET', path, null);
+  Future<Map<String, dynamic>> getJson(String path, {String? expectedUserId}) =>
+      _authed('GET', path, null, expectedUserId: expectedUserId);
 
   Future<Map<String, dynamic>> postJson(
     String path,
     Object? body, {
     bool auth = true,
-  }) => auth ? _authed('POST', path, body) : _request('POST', path, body);
+    String? idempotencyKey,
+    String? expectedUserId,
+  }) => auth
+      ? _authed(
+          'POST',
+          path,
+          body,
+          idempotencyKey: idempotencyKey,
+          expectedUserId: expectedUserId,
+        )
+      : _request('POST', path, body, idempotencyKey: idempotencyKey);
 
   Future<Map<String, dynamic>> patchJson(String path, Object? body) =>
       _authed('PATCH', path, body);
@@ -294,17 +304,43 @@ class ApiClient {
   Future<Map<String, dynamic>> _authed(
     String method,
     String path,
-    Object? body,
-  ) async {
+    Object? body, {
+    String? idempotencyKey,
+    String? expectedUserId,
+  }) async {
+    void checkActor() {
+      if (expectedUserId != null && _user?.id != expectedUserId) {
+        throw StateError(
+          'The account changed before the request could finish.',
+        );
+      }
+    }
+
+    Future<Map<String, dynamic>> send() async {
+      checkActor();
+      final result = await _request(
+        method,
+        path,
+        body,
+        auth: true,
+        idempotencyKey: idempotencyKey,
+        expectedUserId: expectedUserId,
+      );
+      checkActor();
+      return result;
+    }
+
+    checkActor();
     if (_accessIsStale) await _refreshOnce();
     try {
-      return await _request(method, path, body, auth: true);
+      return await send();
     } on ApiException catch (error) {
       if (!error.isUnauthorized) rethrow;
     }
     // The server rejected the token (e.g. clock drift): refresh once and retry.
+    checkActor();
     await _refreshOnce();
-    return _request(method, path, body, auth: true);
+    return send();
   }
 
   Future<Map<String, dynamic>> _request(
@@ -312,13 +348,23 @@ class ApiClient {
     String path,
     Object? body, {
     bool auth = false,
+    String? idempotencyKey,
+    String? expectedUserId,
   }) async {
+    if (expectedUserId != null && !_tokenBelongsTo(expectedUserId)) {
+      throw StateError(
+        'The access token does not match the requested account.',
+      );
+    }
     final request = http.Request(method, baseUrl.resolve(path))
       ..headers['content-type'] = 'application/json'
       ..headers['accept'] = 'application/json'
       ..headers['user-agent'] = userAgent;
     if (auth && _accessToken != null) {
       request.headers['authorization'] = 'Bearer $_accessToken';
+    }
+    if (idempotencyKey != null) {
+      request.headers['idempotency-key'] = idempotencyKey;
     }
     if (body != null) request.body = jsonEncode(body);
 
@@ -330,6 +376,21 @@ class ApiClient {
       return decoded is Map<String, dynamic> ? decoded : {'value': decoded};
     }
     throw _errorFrom(response);
+  }
+
+  // Check the Storely token's subject before sending account-bound data.
+  // The API independently verifies the signature and current membership.
+  bool _tokenBelongsTo(String userId) {
+    final parts = _accessToken?.split('.');
+    if (parts == null || parts.length != 3) return false;
+    try {
+      final claims = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+      return claims is Map && claims['sub'] == userId;
+    } on FormatException {
+      return false;
+    }
   }
 
   ApiException _errorFrom(http.Response response) {

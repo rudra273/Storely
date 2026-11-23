@@ -170,6 +170,21 @@ mixin DatabaseBills {
           if (expectedCart != null) expectedCart.cart.uuid,
         ],
       );
+      final postingSnapshot = await _captureReviewedSalePosting(
+        txn,
+        shopId: expectedShopId,
+        billId: id,
+        billUuid: bill.uuid,
+        originDeviceId: originDeviceId,
+        consumedCartUuids: consumed.map((row) => row['uuid'] as String),
+      );
+      final nativeRequest = await _selectNativeSale(
+        txn,
+        expectedShopId,
+        expectedOwner,
+        originDeviceId,
+        postingSnapshot,
+      );
       await txn.insert('checkout_acceptances', {
         'attempt_id': attemptId,
         'shop_id': expectedShopId,
@@ -177,13 +192,11 @@ mixin DatabaseBills {
         'request_fingerprint': fingerprint,
         'bill_id': id,
         'bill_uuid': bill.uuid,
-        'posting_snapshot': await _captureReviewedSalePosting(
-          txn,
-          shopId: expectedShopId,
-          billId: id,
-          billUuid: bill.uuid,
-          originDeviceId: originDeviceId,
-        ),
+        'posting_snapshot': postingSnapshot,
+        if (nativeRequest != null) ...{
+          'native_sale_request': jsonEncode(nativeRequest),
+          'native_sale_state': 'pending',
+        },
       });
       return id;
     });
@@ -197,6 +210,7 @@ mixin DatabaseBills {
     required int billId,
     required String billUuid,
     required String originDeviceId,
+    required Iterable<String> consumedCartUuids,
   }) async {
     Future<List<Map<String, Object?>>> rows(
       String table,
@@ -224,6 +238,7 @@ mixin DatabaseBills {
     return jsonEncode({
       'version': 1,
       'device_id': originDeviceId,
+      'consumed_cart_uuids': consumedCartUuids.toList(),
       'invoice': snapshot([invoice], ['customer_id']).single,
       'items': snapshot(await rows('bill_items', 'bill_id = ?', billId), [
         'bill_id',

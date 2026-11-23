@@ -1,7 +1,9 @@
+import 'dart:convert';
+
 import '../../db/database_helper.dart';
+import 'native_sale_sync_backend.dart';
 import 'sync_backend.dart';
 import 'purchase_sync_backend.dart';
-import 'dart:convert';
 
 /// How a device's existing local data is handled on its first sync.
 enum FirstSyncMode { uploadExisting, startFresh }
@@ -73,6 +75,7 @@ class CloudSyncEngine {
   });
 
   static const purchaseCursorStateKey = 'purchase_document_sequence';
+  static const nativeSaleConflictTable = 'native_sale_postings';
   static const lastSyncStateKey = 'last_successful_cloud_sync_at';
   static const defaultPageSize = 500;
   static const pushChunkSize = 200;
@@ -111,6 +114,11 @@ class CloudSyncEngine {
         'Review this purchase in Purchase history. Stock and pending documents are preserved.',
       );
     }
+    if (conflict.table == nativeSaleConflictTable) {
+      throw StateError(
+        'The original sale is reserved for atomic sync. Its local records are preserved.',
+      );
+    }
     await database.markRowSynced(conflict.table, conflict.key);
     await database.clearCloudSyncState(_cursorKey(conflict.table));
     final remaining = [
@@ -124,6 +132,7 @@ class CloudSyncEngine {
   static Future<void> resetProgress(DatabaseHelper database) async {
     await database.clearCloudSyncState(lastSyncStateKey);
     await database.clearCloudSyncState(purchaseCursorStateKey);
+    await database.clearNativeSaleScope();
     for (final table in syncedTables) {
       await database.clearCloudSyncState(_cursorKey(table));
     }
@@ -178,6 +187,15 @@ class CloudSyncEngine {
     }
 
     await prepareUserData?.call(firstSync && !hadLocalData);
+    if (firstSync &&
+        firstSyncMode == FirstSyncMode.startFresh &&
+        await database.hasReservedNativeSales(shopId)) {
+      throw StateError('Retry the reserved sales before starting fresh.');
+    }
+    final saleBackend = backend;
+    final saleScope = saleBackend is NativeSaleSyncBackend
+        ? await database.captureCheckoutScope()
+        : null;
     final conflicts = <SyncConflict>[];
     for (final table in syncedTables) {
       conflicts.addAll(await _pull(table, shopId));
@@ -192,6 +210,17 @@ class CloudSyncEngine {
 
     for (final table in syncedTables) {
       if (_adminManagedTables.contains(table) && !canPushAdminTables) continue;
+      if (table == 'audit_log' &&
+          saleBackend is NativeSaleSyncBackend &&
+          saleScope?.owner != null &&
+          saleScope!.shopId == shopId) {
+        conflicts.addAll(
+          await _syncNativeSales(
+            saleBackend as NativeSaleSyncBackend,
+            saleScope,
+          ),
+        );
+      }
       conflicts.addAll(await _push(table));
     }
 
@@ -205,6 +234,18 @@ class CloudSyncEngine {
       );
     }
     await applyUserData?.call();
+    if (nativeSalePostingEnabled &&
+        saleBackend is NativeSaleSyncBackend &&
+        saleScope?.owner != null &&
+        saleScope!.shopId == shopId) {
+      final supported = await (saleBackend as NativeSaleSyncBackend)
+          .supportsNativeSale(saleScope);
+      await database.updateNativeSaleScope(
+        saleScope,
+        supported: supported,
+        isCurrent: _nativeSaleScopeCurrent,
+      );
+    }
     final syncedAt = DateTime.now().toUtc();
     await database.setCloudSyncState(
       lastSyncStateKey,
@@ -212,6 +253,94 @@ class CloudSyncEngine {
     );
     await database.saveSyncConflicts(conflicts);
     return CloudSyncResult.synced(syncedAt, conflicts: conflicts);
+  }
+
+  bool _nativeSaleScopeCurrent() => isUserDataScopeCurrent?.call() != false;
+
+  Future<List<SyncConflict>> _syncNativeSales(
+    NativeSaleSyncBackend transport,
+    CheckoutScope scope,
+  ) async {
+    final conflicts = <SyncConflict>[];
+    for (final sale in await database.pendingNativeSales(scope)) {
+      String? problem;
+      try {
+        final unchanged = await database.checkNativeSale(
+          scope,
+          sale,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+        if (!unchanged) {
+          problem =
+              'The invoice changed on this device and needs reconciliation.';
+        } else {
+          final request = jsonDecode(sale.request) as Map<String, dynamic>;
+          if (request['invoice_uuid'] != sale.billUuid ||
+              request['device_id'] != scope.deviceId) {
+            throw const FormatException(
+              'Saved sale identity or device differs.',
+            );
+          }
+          final receipt = await transport.postNativeSale(
+            scope,
+            sale.attemptId,
+            request,
+          );
+          if (!_matchesNativeSaleReceipt(request, receipt)) {
+            throw const FormatException(
+              'The server did not confirm the saved sale identities.',
+            );
+          }
+          if (!await database.checkNativeSale(
+            scope,
+            sale,
+            isCurrent: _nativeSaleScopeCurrent,
+            acknowledged: true,
+          )) {
+            problem =
+                'The server accepted the sale and local changes need reconciliation.';
+          }
+        }
+      } on SyncRowRejected catch (error) {
+        problem = error.message;
+      } on FormatException catch (error) {
+        problem = error.message;
+      }
+      if (problem != null) {
+        conflicts.add(
+          SyncConflict(
+            table: nativeSaleConflictTable,
+            key: sale.billUuid,
+            message: problem,
+          ),
+        );
+        // Keep checkout order when an earlier sale could have changed stock
+        // available to a later sale on this device.
+        break;
+      }
+    }
+    return conflicts;
+  }
+
+  static bool _matchesNativeSaleReceipt(
+    Map<String, dynamic> request,
+    Map<String, dynamic> receipt,
+  ) {
+    bool sameIds(Object? rows, Iterable<Object?> expected) {
+      if (rows is! List || rows.length != expected.length) return false;
+      final ids = rows.map((row) => row is Map ? row['uuid'] : null).toSet();
+      return ids.length == rows.length && ids.containsAll(expected);
+    }
+
+    final invoice = receipt['bill'];
+    return invoice is Map &&
+        invoice['uuid'] == request['invoice_uuid'] &&
+        invoice['bill_number'] == request['invoice_number'] &&
+        sameIds(
+          receipt['items'],
+          (request['lines'] as List).map((line) => (line as Map)['line_uuid']),
+        ) &&
+        sameIds(receipt['payments'], [?request['payment_uuid']]);
   }
 
   Future<List<SyncConflict>> _syncPurchaseDocuments(
@@ -393,6 +522,7 @@ class CloudSyncEngine {
         : stored.subtract(pullOverlap);
     var afterKey = '';
     DateTime? newest = stored;
+    var skippedReservedSale = false;
     final keyColumn = table == 'app_settings' ? 'key' : 'uuid';
 
     while (true) {
@@ -409,7 +539,13 @@ class CloudSyncEngine {
       if (preferenceScope != null) {
         await database.assertPortablePreferenceCursorScope(preferenceScope);
       }
-      conflicts.addAll(await database.cloudImportRows(table, page));
+      conflicts.addAll(
+        await database.cloudImportRows(
+          table,
+          page,
+          onReservedSale: () => skippedReservedSale = true,
+        ),
+      );
       final last = page.last;
       afterTs = DateTime.parse(last['server_updated_at'].toString());
       afterKey = last[keyColumn]?.toString() ?? '';
@@ -417,7 +553,8 @@ class CloudSyncEngine {
       if (page.length < pageSize) break;
     }
 
-    if (newest != null && newest != stored) {
+    // Keep the last cursor until reserved rows can be applied after replay.
+    if (newest != null && newest != stored && !skippedReservedSale) {
       if (preferenceScope != null) {
         await database.assertPortablePreferenceCursorScope(preferenceScope);
       }

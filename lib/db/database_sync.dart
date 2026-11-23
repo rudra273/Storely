@@ -325,23 +325,27 @@ mixin DatabaseSync {
   /// Rows changed on this device and not yet uploaded, in cloud shape.
   Future<List<Map<String, dynamic>>> cloudDirtyRows(String table) async {
     final db = await database;
-    final shopId = await _activeShopId(db);
-    final rows = await db.query(
-      table,
-      where: table == 'shops'
-          ? 'sync_dirty = 1 AND uuid = ?'
-          : 'sync_dirty = 1 AND shop_id = ?',
-      whereArgs: [shopId],
-      orderBy: 'updated_at ASC',
-    );
-    final owner = await getCloudSyncState('preference_owner');
-    return [
-      for (final row in rows)
-        if ((table != 'held_bills' && table != 'user_preferences') ||
-            (row['owner_user_id'] != null &&
-                (owner == null || row['owner_user_id'] == owner)))
-          await _toCloudMap(db, table, row),
-    ];
+    return db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
+      final rows = await txn.query(
+        table,
+        where: table == 'shops'
+            ? 'sync_dirty = 1 AND uuid = ?'
+            : 'sync_dirty = 1 AND shop_id = ?',
+        whereArgs: [shopId],
+        orderBy: 'updated_at ASC',
+      );
+      final reserved = await _reservedSaleRows(txn, table, shopId);
+      final owner = await _checkoutOwner(txn);
+      return [
+        for (final row in rows)
+          if (!reserved.contains(table, row) &&
+              ((table != 'held_bills' && table != 'user_preferences') ||
+                  (row['owner_user_id'] != null &&
+                      (owner == null || row['owner_user_id'] == owner))))
+            await _toCloudMap(txn, table, row),
+      ];
+    });
   }
 
   /// Marks uploaded rows as in sync — unless they were edited again while
@@ -575,8 +579,9 @@ mixin DatabaseSync {
   /// skipped; it never aborts the rest of the page.
   Future<List<SyncConflict>> cloudImportRows(
     String table,
-    List<Map<String, dynamic>> rows,
-  ) async {
+    List<Map<String, dynamic>> rows, {
+    void Function()? onReservedSale,
+  }) async {
     if (rows.isEmpty) return const [];
     final conflicts = <SyncConflict>[];
     final privateOwner = (table == 'held_bills' || table == 'user_preferences')
@@ -585,8 +590,13 @@ mixin DatabaseSync {
     final db = await database;
     await db.transaction((txn) async {
       final activeShopId = await _activeShopId(txn);
+      final reserved = await _reservedSaleRows(txn, table, activeShopId);
       final touchedBillUuids = <String>{};
       for (final row in rows) {
+        if (reserved.contains(table, row)) {
+          onReservedSale?.call();
+          continue;
+        }
         final key = table == 'app_settings'
             ? row['key']?.toString() ?? ''
             : row['uuid']?.toString() ?? '';

@@ -211,12 +211,19 @@ mixin DatabaseSchema {
         attempt_id TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
         owner TEXT, request_fingerprint TEXT NOT NULL,
         bill_id INTEGER NOT NULL, bill_uuid TEXT NOT NULL,
-        posting_snapshot TEXT
+        posting_snapshot TEXT, native_sale_request TEXT, native_sale_state TEXT
       )
     ''');
     await _ensureColumns(executor, 'checkout_acceptances', {
       'posting_snapshot': 'TEXT',
+      'native_sale_request': 'TEXT',
+      'native_sale_state': 'TEXT',
     });
+    await executor.execute("""
+      CREATE INDEX IF NOT EXISTS idx_checkout_reserved_sales
+      ON checkout_acceptances(shop_id, bill_uuid)
+      WHERE native_sale_state IN ('pending', 'reconcile')
+    """);
     await executor.execute('''
       CREATE TABLE IF NOT EXISTS checkout_draft_state(
         cart_uuid TEXT PRIMARY KEY, shop_id TEXT NOT NULL,
