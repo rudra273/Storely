@@ -131,7 +131,7 @@ class ApiSyncBackend implements SyncBackend, NativeSaleSyncBackend {
       deviceId: scope.deviceId,
       expectedOwner: owner,
     );
-    return capabilities?.supportsNativeSalePosting == true &&
+    return capabilities?.supportsNativeSaleSnapshotProof == true &&
         capabilities?.nativeSaleDeviceRegistered == true;
   }
 

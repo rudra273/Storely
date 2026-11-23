@@ -50,6 +50,53 @@ BigInt _amount(dynamic value) =>
     _scaled(value, 2, max: BigInt.from(10).pow(20) - BigInt.one);
 String? _optional(dynamic value, int max) =>
     value == null ? null : _text(value, max);
+String? _snapshotText(Map<String, dynamic> row, String field, int max) {
+  if (!row.containsKey(field)) _unsupported();
+  final value = row[field];
+  if (value == null) return null;
+  if (value is! String || value.isEmpty || value.runes.length > max) {
+    _unsupported();
+  }
+  return value;
+}
+
+/// Round SQLite REAL values from their shortest decimal spelling so binary
+/// residue does not flip a decimal half tie.
+String _snapshotDecimal(dynamic value, {bool signed = false}) {
+  if (value is! num ||
+      !value.isFinite ||
+      value.abs() > 999999999 ||
+      (!signed && value < 0)) {
+    _unsupported();
+  }
+  final parts = RegExp(
+    r'^(-?)([0-9]+)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$',
+  ).firstMatch(value.toString());
+  if (parts == null) _unsupported();
+  final fraction = parts.group(3) ?? '';
+  final magnitude = BigInt.parse('${parts.group(2)}$fraction');
+  final shift = 9 + int.parse(parts.group(4) ?? '0') - fraction.length;
+  BigInt rounded;
+  if (shift >= 0) {
+    rounded = magnitude * BigInt.from(10).pow(shift);
+  } else {
+    final divisor = BigInt.from(10).pow(-shift);
+    rounded = magnitude ~/ divisor;
+    if ((magnitude % divisor) * BigInt.two >= divisor) rounded += BigInt.one;
+  }
+  if (parts.group(1) == '-') rounded = -rounded;
+  return decimalTextFromScaled(rounded, scale: 9, fixed: true);
+}
+
+Map<String, dynamic> _lineSnapshot(Map<String, dynamic> row) => {
+  'hsn_code_snapshot': _snapshotText(row, 'hsn_code_snapshot', 20),
+  'hsn_type_snapshot': _snapshotText(row, 'hsn_type_snapshot', 20),
+  'unit_name': _snapshotText(row, 'unit_name', 30),
+  'purchase_price_snapshot': _snapshotDecimal(row['purchase_price_snapshot']),
+  'cost_snapshot': _snapshotDecimal(row['cost_snapshot']),
+  'profit_snapshot': _snapshotDecimal(row['profit_snapshot'], signed: true),
+};
+
 void _sameRow(Map<String, dynamic> row, String shop) {
   if (row['shop_id'] != shop || row['deleted_at'] != null) _unsupported();
 }
@@ -162,6 +209,7 @@ Map<String, dynamic> _request(dynamic decoded) {
       'taxable_amount': _money(lineTaxable),
       'tax_amount': _money(lineTax),
       'total_amount': _money(lineTotal),
+      'snapshot': _lineSnapshot(row),
     });
   }
   if (movementByProduct.isNotEmpty) _unsupported();

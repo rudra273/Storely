@@ -28,7 +28,7 @@ Future<Map<String, dynamic>?> _selectNativeSale(
     where: 'key = ? AND value = ?',
     whereArgs: [
       _nativeSaleScopeKey,
-      jsonEncode([shopId, owner, deviceId]),
+      jsonEncode([shopId, owner, deviceId, 1]),
     ],
   );
   return scope.isEmpty ? null : nativeSaleRequest(snapshot);
@@ -59,12 +59,13 @@ extension DatabaseNativeSales on DatabaseHelper {
     await db.transaction((txn) async {
       await _assertCheckoutScope(txn, scope);
       if (!isCurrent()) throw StateError('Account changed during sale sync.');
-      final value = jsonEncode([scope.shopId, scope.owner, scope.deviceId]);
+      final identity = [scope.shopId, scope.owner, scope.deviceId];
+      final value = jsonEncode([...identity, 1]);
       if (!supported) {
         await txn.delete(
           'cloud_sync_state',
-          where: 'key = ? AND value = ?',
-          whereArgs: [_nativeSaleScopeKey, value],
+          where: 'key = ? AND value IN (?, ?)',
+          whereArgs: [_nativeSaleScopeKey, jsonEncode(identity), value],
         );
         return;
       }

@@ -123,6 +123,14 @@ void main() {
           'taxable_amount': '100.00',
           'tax_amount': '18.00',
           'total_amount': '118.00',
+          'snapshot': {
+            'hsn_code_snapshot': null,
+            'hsn_type_snapshot': null,
+            'unit_name': null,
+            'purchase_price_snapshot': '0.000000000',
+            'cost_snapshot': '0.000000000',
+            'profit_snapshot': '0.000000000',
+          },
         },
       ]);
       expect(body['cart']['items'], [
@@ -174,6 +182,133 @@ void main() {
       jsonEncode(nativeSaleRequest(text)),
     );
   });
+  test(
+    'historical nullable text stays exact, with no snapshot cleaner rewriting',
+    () {
+      final raw = capture();
+      final line = raw['items'].single;
+      line['hsn_code_snapshot'] = ' 09-X ';
+      line['hsn_type_snapshot'] = 'legacy sac';
+      line['unit_name'] = '箱  pcs ';
+      final proof = nativeSaleRequest(
+        jsonEncode(raw),
+      )!['lines'].single['snapshot'];
+      expect(proof['hsn_code_snapshot'], ' 09-X ');
+      expect(proof['hsn_type_snapshot'], 'legacy sac');
+      expect(proof['unit_name'], '箱  pcs ');
+      expect(line['hsn_code_snapshot'], ' 09-X ');
+    },
+  );
+  test(
+    'cost proof normalizes nearby SQLite noise without changing line money or terms',
+    () {
+      final raw = capture();
+      final original = nativeSaleRequest(jsonEncode(raw))!;
+      final line = raw['items'].single;
+      line['purchase_price_snapshot'] = 100.00000000000001;
+      line['cost_snapshot'] = 99.99999999999999;
+      line['profit_snapshot'] = -0.0000000004;
+      final updated = nativeSaleRequest(jsonEncode(raw))!;
+      final termsBefore = Map<String, dynamic>.from(original['lines'].single)
+        ..remove('snapshot');
+      final termsAfter = Map<String, dynamic>.from(updated['lines'].single)
+        ..remove('snapshot');
+      expect(termsAfter, termsBefore);
+      expect(updated['cart'], original['cart']);
+      expect(updated['total_amount'], original['total_amount']);
+      expect(updated['lines'].single['snapshot'], {
+        'hsn_code_snapshot': null,
+        'hsn_type_snapshot': null,
+        'unit_name': null,
+        'purchase_price_snapshot': '100.000000000',
+        'cost_snapshot': '100.000000000',
+        'profit_snapshot': '0.000000000',
+      });
+    },
+  );
+  test('historical text length counts Unicode scalars without rewriting', () {
+    final raw = capture();
+    raw['items'].single['unit_name'] = '箱' * 30;
+    final body = nativeSaleRequest(jsonEncode(raw))!;
+    expect(body['lines'].single['snapshot']['unit_name'], '箱' * 30);
+  });
+  test('nonfinite decoded numeric proof fails closed', () {
+    for (final field in [
+      'purchase_price_snapshot',
+      'cost_snapshot',
+      'profit_snapshot',
+    ]) {
+      final raw = jsonEncode(capture());
+      final malformed = raw.replaceFirst(
+        RegExp('"$field":0(?:\\.0)?'),
+        '"$field":1e999',
+      );
+      expect(malformed, isNot(raw));
+      expect(nativeSaleRequest(malformed), isNull);
+    }
+  });
+  final proofNumbers = <num, String>{
+    1.2345678904: '1.234567890',
+    1.2345678905: '1.234567891',
+    -1.2345678904: '-1.234567890',
+    -1.2345678905: '-1.234567891',
+    0.0000000005: '0.000000001',
+    -0.0000000005: '-0.000000001',
+    -0.0: '0.000000000',
+    10000000.1: '10000000.100000000',
+    -10000000.1: '-10000000.100000000',
+    999999999: '999999999.000000000',
+    -999999999: '-999999999.000000000',
+  };
+  for (final entry in proofNumbers.entries) {
+    test('signed profit proof rounds ${entry.key} half up to nine places', () {
+      final raw = capture();
+      raw['items'].single['profit_snapshot'] = entry.key;
+      expect(
+        nativeSaleRequest(
+          jsonEncode(raw),
+        )!['lines'].single['snapshot']['profit_snapshot'],
+        entry.value,
+      );
+    });
+  }
+  for (final field in ['hsn_code_snapshot', 'hsn_type_snapshot', 'unit_name']) {
+    for (final invalid in ['', 123, 'x' * (field == 'unit_name' ? 31 : 21)]) {
+      test('invalid exact historical $field=$invalid remains unsupported', () {
+        final raw = capture();
+        raw['items'].single[field] = invalid;
+        expect(nativeSaleRequest(jsonEncode(raw)), isNull);
+      });
+    }
+    test('missing required nullable historical $field is unsupported', () {
+      final raw = capture();
+      raw['items'].single.remove(field);
+      expect(nativeSaleRequest(jsonEncode(raw)), isNull);
+    });
+  }
+  for (final field in [
+    'purchase_price_snapshot',
+    'cost_snapshot',
+    'profit_snapshot',
+  ]) {
+    for (final invalid in [null, '100.0', 1000000000, -1000000000]) {
+      test(
+        'historical $field rejects unavailable or out-of-range $invalid',
+        () {
+          final raw = capture();
+          raw['items'].single[field] = invalid;
+          expect(nativeSaleRequest(jsonEncode(raw)), isNull);
+        },
+      );
+    }
+  }
+  for (final field in ['purchase_price_snapshot', 'cost_snapshot']) {
+    test('historical $field cannot be negative even if it rounds to zero', () {
+      final raw = capture();
+      raw['items'].single[field] = -0.0000000001;
+      expect(nativeSaleRequest(jsonEncode(raw)), isNull);
+    });
+  }
   final unsupported = <String, void Function(Map<String, dynamic>)>{
     'future version': (r) => r['version'] = 2,
     'custom line': (r) => r['items'].single['product_uuid'] = null,

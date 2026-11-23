@@ -291,6 +291,11 @@ class CloudSyncEngine {
               'The server did not confirm the saved sale identities.',
             );
           }
+          if (!_matchesNativeSaleSnapshot(request, receipt)) {
+            throw const FormatException(
+              'The server did not confirm the saved invoice item snapshots.',
+            );
+          }
           if (!await database.checkNativeSale(
             scope,
             sale,
@@ -341,6 +346,30 @@ class CloudSyncEngine {
           (request['lines'] as List).map((line) => (line as Map)['line_uuid']),
         ) &&
         sameIds(receipt['payments'], [?request['payment_uuid']]);
+  }
+
+  static bool _matchesNativeSaleSnapshot(
+    Map<String, dynamic> request,
+    Map<String, dynamic> receipt,
+  ) {
+    final lines = (request['lines'] as List).cast<Map>();
+    // An earlier app can have reserved a command before snapshot proof existed.
+    if (lines.every((line) => line['snapshot'] == null)) return true;
+    final proof = receipt['native_sale_snapshot_verified'];
+    if (proof is! int || proof != 1) return false;
+    final items = {
+      for (final item in (receipt['items'] as List).cast<Map>())
+        item['uuid']: item,
+    };
+    return lines.every((line) {
+      final snapshot = line['snapshot'];
+      final item = items[line['line_uuid']]!;
+      return snapshot is Map &&
+          item.containsKey('hsn_code') &&
+          item['hsn_code'] == snapshot['hsn_code_snapshot'] &&
+          item.containsKey('unit') &&
+          item['unit'] == snapshot['unit_name'];
+    });
   }
 
   Future<List<SyncConflict>> _syncPurchaseDocuments(

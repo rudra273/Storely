@@ -4,14 +4,19 @@ import 'api_client.dart';
 /// authorize a command; each endpoint still checks current membership/access.
 class ServerCapabilities {
   final Map<String, int> _features;
+  final bool _canVerifyCosts;
   final bool nativeSaleDeviceRegistered;
 
   ServerCapabilities._(
     this._features, {
+    required bool canVerifyCosts,
     required this.nativeSaleDeviceRegistered,
-  });
+  }) : _canVerifyCosts = canVerifyCosts;
 
-  bool get supportsNativeSalePosting => _features['native_sale_posting'] == 1;
+  bool get supportsNativeSaleSnapshotProof =>
+      _canVerifyCosts &&
+      _features['native_sale_posting'] == 1 &&
+      _features['native_sale_snapshot_proof'] == 1;
 
   bool get supportsSupplierPaymentProof {
     final proof = _features['supplier_payment_proof'] ?? 0;
@@ -67,6 +72,7 @@ class ServerCapabilities {
     }
     return ServerCapabilities._(
       features,
+      canVerifyCosts: data['role'] == 'owner' || data['role'] == 'admin',
       nativeSaleDeviceRegistered: data['native_sale_device_registered'] == true,
     );
   }

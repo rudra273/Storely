@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:storely/db/database_helper.dart';
 import 'package:storely/services/api/api_client.dart';
 import 'package:storely/services/api/api_sync_backend.dart';
 import 'package:storely/services/api/token_store.dart';
@@ -26,7 +27,8 @@ Future<(ApiSyncBackend, List<String>, Map<String, Object?>)> backendFor(
     bodies[key] = request.body.isEmpty ? null : jsonDecode(request.body);
     if (key == 'POST /v1/auth/login') {
       return json({
-        'access_token': 'a',
+        'access_token':
+            'header.${base64Url.encode(utf8.encode('{"sub":"u1"}'))}.signature',
         'refresh_token': 'r',
         'expires_in': 900,
       });
@@ -52,6 +54,40 @@ Future<(ApiSyncBackend, List<String>, Map<String, Object?>)> backendFor(
 }
 
 void main() {
+  test(
+    'strict native sale negotiation requires support, role and device proof',
+    () async {
+      var role = 'owner';
+      var registered = true;
+      final features = {'native_sale_posting': 1};
+      final (backend, _, _) = await backendFor({
+        'GET /v1/shops/s/capabilities': (request) {
+          expect(request.url.queryParameters, {'device_id': 'device-1'});
+          return json({
+            'contract_version': 1,
+            'shop_id': 's',
+            'role': role,
+            'features': features,
+            'native_sale_device_registered': registered,
+          });
+        },
+      });
+      addTearDown(backend.api.dispose);
+      const scope = CheckoutScope('s', 'u1', 'device-1');
+
+      expect(await backend.supportsNativeSale(scope), isFalse);
+      features['native_sale_snapshot_proof'] = 1;
+      expect(await backend.supportsNativeSale(scope), isTrue);
+      role = 'admin';
+      expect(await backend.supportsNativeSale(scope), isTrue);
+      role = 'staff';
+      expect(await backend.supportsNativeSale(scope), isFalse);
+      role = 'owner';
+      registered = false;
+      expect(await backend.supportsNativeSale(scope), isFalse);
+    },
+  );
+
   group('resolveMembershipShopId', () {
     test(
       'an existing member checks premium before syncing their first shop',

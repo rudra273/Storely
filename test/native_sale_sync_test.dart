@@ -19,6 +19,8 @@ class NativeBackend extends FakeSyncBackend implements NativeSaleSyncBackend {
   bool loseResponse = false;
   bool reject = false;
   bool wrongReceipt = false;
+  bool omitProof = false;
+  bool wrongSnapshot = false;
   Future<void> Function()? duringPost;
   final sent = <(String, String)>[];
   final committed = <String, Map<String, dynamic>>{};
@@ -34,16 +36,23 @@ class NativeBackend extends FakeSyncBackend implements NativeSaleSyncBackend {
   ) async {
     sent.add((attemptId, jsonEncode(request)));
     if (reject) throw SyncRowRejected('The recorded price differs.');
+    final lines = (request['lines'] as List).cast<Map>();
     final receipt = committed.putIfAbsent(
       attemptId,
       () => {
+        if (lines.any((line) => line['snapshot'] != null))
+          'native_sale_snapshot_verified': 1,
         'bill': {
           'uuid': request['invoice_uuid'],
           'bill_number': request['invoice_number'],
         },
         'items': [
-          for (final line in request['lines'] as List)
-            {'uuid': line['line_uuid']},
+          for (final line in lines)
+            {
+              'uuid': line['line_uuid'],
+              'hsn_code': line['snapshot']?['hsn_code_snapshot'],
+              'unit': line['snapshot']?['unit_name'],
+            },
         ],
         'payments': [
           if (request['payment_uuid'] != null)
@@ -53,7 +62,16 @@ class NativeBackend extends FakeSyncBackend implements NativeSaleSyncBackend {
     );
     if (loseResponse) throw TimeoutException('response lost after commit');
     await duringPost?.call();
-    return wrongReceipt ? {...receipt, 'payments': []} : receipt;
+    return {
+      ...receipt,
+      if (wrongReceipt) 'payments': [],
+      if (omitProof) 'native_sale_snapshot_verified': null,
+      if (wrongSnapshot)
+        'items': [
+          for (final item in receipt['items'] as List)
+            {...item as Map, 'unit': 'Changed cloud unit'},
+        ],
+    };
   }
 }
 
@@ -166,6 +184,18 @@ void main() {
     expect(server.sent, isEmpty);
   });
 
+  test(
+    'the previous enrollment marker cannot select new strict commands',
+    () async {
+      await helper.setCloudSyncState(
+        'native_sale_scope',
+        jsonEncode([scope.shopId, scope.owner, scope.deviceId]),
+      );
+      final invoice = await checkout();
+      expect(await stateOf(invoice), isNull);
+    },
+  );
+
   group('opt-in native delivery', skip: !nativeSalePostingEnabled, () {
     setUp(() async {
       await sync(mode: FirstSyncMode.uploadExisting);
@@ -212,6 +242,55 @@ void main() {
         throwsStateError,
       );
     });
+
+    test(
+      'snapshot proof and returned visible fields are required before acknowledgement',
+      () async {
+        final invoice = await checkout();
+        server.omitProof = true;
+        expect((await sync()).conflicts.single.message, contains('snapshots'));
+        expect(await stateOf(invoice), 'pending');
+        verifyNotSentAsRows(invoice);
+
+        server.omitProof = false;
+        server.wrongSnapshot = true;
+        expect((await sync()).conflicts.single.message, contains('snapshots'));
+        expect(await stateOf(invoice), 'pending');
+        verifyNotSentAsRows(invoice);
+
+        server.wrongSnapshot = false;
+        expect((await sync()).conflicts, isEmpty);
+        expect(await stateOf(invoice), 'posted');
+        expect(server.sent.toSet(), hasLength(1));
+        verifyNotSentAsRows(invoice, posted: true);
+      },
+    );
+
+    test(
+      'a pending proofless command from the prior build replays unchanged',
+      () async {
+        final invoice = await checkout();
+        final pending = (await helper.pendingNativeSales(scope)).single;
+        final v1 = jsonDecode(pending.request) as Map<String, dynamic>;
+        for (final line in (v1['lines'] as List).cast<Map>()) {
+          line.remove('snapshot');
+        }
+        final saved = jsonEncode(v1);
+        final sql = await helper.database;
+        await sql.update(
+          'checkout_acceptances',
+          {'native_sale_request': saved},
+          where: 'attempt_id = ?',
+          whereArgs: [pending.attemptId],
+        );
+        await helper.close();
+        server.supported = false;
+        expect((await sync()).conflicts, isEmpty);
+        expect(server.sent.single, (pending.attemptId, saved));
+        expect(await stateOf(invoice), 'posted');
+        verifyNotSentAsRows(invoice, posted: true);
+      },
+    );
 
     test(
       'legacy backend and another local owner cannot upload reserved rows',
