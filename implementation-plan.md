@@ -142,7 +142,7 @@ The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.m
 
 [Sale](docs/refactor/evidence/E03/sale-quantity.md) and [return quantity validation](docs/refactor/evidence/E03/return-quantity.md) passed on localhost, Docker and Android. [Bank transfer compatibility](docs/refactor/evidence/E03/payment-method-aliases.md) passed replay and recovery checks. The broader unit conversion policy and atomic financial sync remain open.
 
-Reviewed Android sales capture the original posting effects in SQLite. [Server preflight](docs/refactor/evidence/E03/native-sale-preflight.md) and [atomic server posting](docs/refactor/evidence/E03/native-sale-posting.md) are verified. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) tracks Android delivery, legacy-path negotiation and lost-response recovery.
+Reviewed Android sales capture the original posting effects in SQLite. [Server preflight](docs/refactor/evidence/E03/native-sale-preflight.md), [atomic server posting](docs/refactor/evidence/E03/native-sale-posting.md) and [opt-in Android delivery](docs/refactor/evidence/E03/android-native-sale-delivery.md) are verified. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) tracks rollout, reconciliation and the remaining payment, cancellation and return commands.
 
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.

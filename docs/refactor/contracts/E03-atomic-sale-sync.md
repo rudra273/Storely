@@ -1,6 +1,6 @@
 # Atomic sale sync
 
-Android commits a reviewed sale, its initial payment, stock effects, and the cart tombstone in one SQLite transaction. The existing cloud loop pushes tables separately and can expose a header or stock effect before the rest arrives. Web posts the entire sale in one API transaction. A separate purchase document adoption flow verifies previously uploaded stock movements and does not provide atomic sale delivery.
+Android commits a reviewed sale, its initial payment, stock effects, and the cart tombstone in one SQLite transaction. Legacy cloud sync pushes tables separately and can expose a header or stock effect before the rest arrives. Web posts the entire sale in one API transaction. The purchase document adoption flow verifies previously uploaded stock movements.
 
 ## Local posting snapshot
 
@@ -16,11 +16,16 @@ A new reviewed checkout captures a versioned snapshot of the accepted invoice, l
 
 An exact retry returns the existing invoice. A changed payload using the same key receives a conflict. The existing operations endpoint can look up a committed key. The current command accepts sales whose recorded amounts match the current server rules. It does not overwrite a legacy upload or force a shortage through. Server-generated pricing metadata comes from the validated cloud calculation, so client rollout still needs to cover historical snapshot differences and block ambiguous dual delivery.
 
-## Cloud delivery gates
+## Android delivery
 
-1. Map the captured Android sale to the server command without rewriting the locally issued invoice. Decide how an offline sale that now exceeds server stock is reconciled. Android permits negative stock after a warning. The server command leaves a shortage unresolved for review.
-2. Negotiate capability before sending. A lost response leaves the device outcome uncertain until authenticated recovery or exact replay confirms it.
-3. Select the transport before publishing an operation. The command and the legacy row paths must agree on ownership of its invoice, payment and stock effects. Do not send both paths on an ambiguous result. Handle earlier row uploads and edits with explicit identity checks before adopting an invoice. A local-only checkout or a snapshot under a former shop or account requires a separate, explicit adoption decision during first sync.
-4. Apply the same contract to subsequent payments and credit notes with their own identities and revision checks. Confirm that interrupted and competing writes produce exactly one matching ledger result in browser, Android, and exports.
+An opt-in Android build uses `--dart-define=STORELY_NATIVE_SALE_POSTING=true`. A successful sync enables selection for the current shop, account, and device when capabilities advertise `native_sale_posting: 1` and confirm the device belongs to the signed-in account. The flag defaults to off. A checkout selects and saves its request in the SQLite acceptance transaction. Earlier sales and sales outside the supported catalog and settlement cases keep their original row-sync delivery.
 
-Local capture, server preflight and server posting are implemented. Android continues to use legacy row uploads while command transport selection is pending.
+Reserved sales keep the invoice, items, payments, sale movements, related billing changes, and consumed cart tombstone out of legacy uploads until the original command is confirmed. Sync sends the saved body and checkout attempt key. Account-scoped transport checks the current actor before sending and after an authentication retry. If the response is lost, the app replays the same command on the next sync. Acknowledgement verifies the returned invoice number and the original invoice, line, and payment IDs. SQLite then marks the original rows uploaded and releases the tombstone and any eligible dependent rows. Pull cursors stay at their prior position when a reserved row is skipped, so the cloud data can be read after acknowledgement.
+
+Rejection keeps the request and original invoice reserved. A local edit to a reserved sale requires reconciliation and keeps its effects out of both delivery paths. The existing sync status shows the problem and preserves the reservation across restart and capability changes.
+
+## Rollout gates
+
+1. Resolve offline stock shortages, catalog and pricing snapshot differences, and edited pending invoices. The opt-in command validates recorded amounts against current stock and pricing. The rollout needs an explicit resolution flow, including exact verification of cost, HSN and unit snapshots.
+2. Verify safe upgrade, restore, downgrade, and mixed-version operation before enabling selection in release builds. Each device needs to preserve its operation reservation, and adopting previously synced or restored invoices needs an explicit decision.
+3. Apply atomic commands and recovery to later payments, cancellations, and credit notes. Compare interrupted and competing writes across Android, web and exports before the final human UX review.
