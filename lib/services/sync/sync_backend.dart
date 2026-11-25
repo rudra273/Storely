@@ -33,7 +33,9 @@ class SyncRowRejected implements Exception {
 
   final bool isConflict;
 
-  const SyncRowRejected(this.message, {this.isConflict = false});
+  final String? code;
+
+  const SyncRowRejected(this.message, {this.isConflict = false, this.code});
 
   @override
   String toString() => message;

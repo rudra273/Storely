@@ -152,7 +152,72 @@ class ApiSyncBackend implements SyncBackend, NativeSaleSyncBackend {
       );
     } on ApiException catch (error) {
       if (const {400, 403, 404, 405, 409, 422}.contains(error.status)) {
-        throw SyncRowRejected(error.message);
+        throw SyncRowRejected(
+          error.message,
+          isConflict: error.status == 409,
+          code: error.code,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> inspectNativeSaleReconciliation(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request,
+  ) async {
+    final owner = scope.owner;
+    if (owner == null) throw StateError('Sign in as the original sale owner.');
+    try {
+      return await api.postJson(
+        '/v1/shops/${scope.shopId}/bills/native/reconcile/inspect',
+        {'attempt_id': attemptId, 'sale': request},
+        expectedUserId: owner,
+      );
+    } on ApiException catch (error) {
+      if (const {400, 403, 404, 405, 409, 422}.contains(error.status)) {
+        throw SyncRowRejected(
+          error.message,
+          isConflict: error.status == 409,
+          code: error.code,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> reconcileNativeSale(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request, {
+    required bool allowStockShortage,
+    required bool acceptRecordedSnapshot,
+    required String reason,
+  }) async {
+    final owner = scope.owner;
+    if (owner == null) throw StateError('Sign in as the original sale owner.');
+    try {
+      return await api.postJson(
+        '/v1/shops/${scope.shopId}/bills/native/reconcile',
+        {
+          'sale': request,
+          'allow_stock_shortage': allowStockShortage,
+          'accept_recorded_snapshot': acceptRecordedSnapshot,
+          'reason': reason,
+        },
+        idempotencyKey: attemptId,
+        expectedUserId: owner,
+      );
+    } on ApiException catch (error) {
+      if (const {400, 403, 404, 405, 409, 422}.contains(error.status)) {
+        throw SyncRowRejected(
+          error.message,
+          isConflict: error.status == 409,
+          code: error.code,
+        );
       }
       rethrow;
     }

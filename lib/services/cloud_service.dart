@@ -24,6 +24,7 @@ import 'cloud/premium_request_service.dart';
 import 'backup_service.dart';
 import 'portable_preferences_service.dart';
 import 'sync/cloud_sync_engine.dart';
+import 'sync/native_sale_sync_backend.dart';
 
 export 'cloud/cloud_backend.dart'
     show
@@ -33,7 +34,8 @@ export 'cloud/cloud_backend.dart'
         ShopInvite,
         ShopMember,
         SignUpOutcome;
-export 'sync/cloud_sync_engine.dart' show FirstSyncMode, CloudSyncResult;
+export 'sync/cloud_sync_engine.dart'
+    show FirstSyncMode, CloudSyncResult, NativeSaleReconciliationReport;
 
 /// Storely's API is the only supported cloud backend.
 enum CloudBackendMode { storelyApi }
@@ -607,6 +609,85 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
           SyncStatus.instance.refresh();
         });
     return _syncInFlight!;
+  }
+
+  Future<NativeSaleReconciliationReport> inspectReservedNativeSale(
+    String billUuid,
+  ) async {
+    final backend = _requireBackend();
+    final user = backend.currentUser;
+    if (user == null) {
+      throw StateError('Sign in to review this reserved sale.');
+    }
+    final syncBackend = backend.sync;
+    if (syncBackend is! NativeSaleSyncBackend) {
+      throw StateError(
+        'This backend does not support native sale reconciliation.',
+      );
+    }
+    final scope = await DatabaseHelper.instance.captureCheckoutScope();
+    if (scope.owner != user.id) {
+      throw StateError(
+        'Sign in as the original sale owner to reconcile this invoice.',
+      );
+    }
+    final engine = CloudSyncEngine(
+      backend: syncBackend,
+      database: DatabaseHelper.instance,
+      isUserDataScopeCurrent: () =>
+          _backend == backend && backend.currentUser?.id == user.id,
+    );
+    return engine.inspectReservedNativeSale(
+      syncBackend as NativeSaleSyncBackend,
+      scope,
+      billUuid,
+    );
+  }
+
+  Future<void> resolveReservedNativeSale(
+    NativeSaleReconciliationReport report, {
+    bool allowStockShortage = false,
+    bool acceptRecordedSnapshot = false,
+    bool postOriginalBeforeLocalEdits = false,
+    String? reason,
+  }) async {
+    if (_syncInFlight != null) {
+      await _syncInFlight;
+    }
+    final backend = _requireBackend();
+    final user = backend.currentUser;
+    if (user == null) {
+      throw StateError('Sign in to reconcile this reserved sale.');
+    }
+    final syncBackend = backend.sync;
+    if (syncBackend is! NativeSaleSyncBackend) {
+      throw StateError(
+        'This backend does not support native sale reconciliation.',
+      );
+    }
+    final scope = await DatabaseHelper.instance.captureCheckoutScope();
+    if (scope.owner != user.id) {
+      throw StateError(
+        'Sign in as the original sale owner to reconcile this invoice.',
+      );
+    }
+    final engine = CloudSyncEngine(
+      backend: syncBackend,
+      database: DatabaseHelper.instance,
+      isUserDataScopeCurrent: () =>
+          _backend == backend && backend.currentUser?.id == user.id,
+    );
+    await engine.resolveReservedNativeSale(
+      syncBackend as NativeSaleSyncBackend,
+      scope,
+      report,
+      allowStockShortage: allowStockShortage,
+      acceptRecordedSnapshot: acceptRecordedSnapshot,
+      postOriginalBeforeLocalEdits: postOriginalBeforeLocalEdits,
+      reason: reason,
+    );
+    await SyncStatus.instance.refresh();
+    await syncNow(reason: 'Reconciled reserved sale');
   }
 
   Future<void> _sync({String? reason, FirstSyncMode? firstSyncMode}) async {

@@ -8,4 +8,19 @@ abstract interface class NativeSaleSyncBackend {
     String attemptId,
     Map<String, dynamic> request,
   );
+
+  Future<Map<String, dynamic>> inspectNativeSaleReconciliation(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request,
+  );
+
+  Future<Map<String, dynamic>> reconcileNativeSale(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request, {
+    required bool allowStockShortage,
+    required bool acceptRecordedSnapshot,
+    required String reason,
+  });
 }
