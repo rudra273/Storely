@@ -146,19 +146,22 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
           const SizedBox(height: AppSpacing.lg),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            secondary: const _PanelIcon(icon: Icons.lock_outline_rounded),
-            title: const Text('App Lock'),
-            subtitle: Text(
-              _appLockEnabled
-                  ? 'Fingerprint or device lock is required.'
-                  : 'Use fingerprint, PIN, pattern, or passcode.',
-              style: AppText.caption,
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: const _PanelIcon(icon: Icons.lock_outline_rounded),
+              title: const Text('App Lock'),
+              subtitle: Text(
+                _appLockEnabled
+                    ? 'Fingerprint or device lock is required.'
+                    : 'Use fingerprint, PIN, pattern, or passcode.',
+                style: AppText.caption,
+              ),
+              value: _appLockEnabled,
+              activeThumbColor: AppColors.brandOf(context),
+              onChanged: _checkingAppLock ? null : _setAppLock,
             ),
-            value: _appLockEnabled,
-            activeThumbColor: AppColors.brandOf(context),
-            onChanged: _checkingAppLock ? null : _setAppLock,
           ),
           if (_checkingAppLock) ...[
             const SizedBox(height: AppSpacing.xs),
@@ -174,21 +177,24 @@ class _AppSettingsSheetState extends State<_AppSettingsSheet> {
           const SizedBox(height: AppSpacing.sm),
           ListenableBuilder(
             listenable: ThermalPrinterService.instance,
-            builder: (context, _) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const _PanelIcon(icon: Icons.print_outlined),
-              title: const Text('Receipt printer'),
-              subtitle: Text(
-                printerLabel(ThermalPrinterService.instance),
-                style: AppText.caption,
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => showModalBottomSheet<void>(
-                context: context,
-                isScrollControlled: true,
-                useSafeArea: true,
-                backgroundColor: AppColors.surfaceOf(context),
-                builder: (_) => const PrinterSetupSheet(),
+            builder: (context, _) => Material(
+              type: MaterialType.transparency,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const _PanelIcon(icon: Icons.print_outlined),
+                title: const Text('Receipt printer'),
+                subtitle: Text(
+                  printerLabel(ThermalPrinterService.instance),
+                  style: AppText.caption,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  backgroundColor: AppColors.surfaceOf(context),
+                  builder: (_) => const PrinterSetupSheet(),
+                ),
               ),
             ),
           ),

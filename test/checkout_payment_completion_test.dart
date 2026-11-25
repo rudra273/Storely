@@ -81,6 +81,7 @@ void main() {
       expect(paymentMethodLabel('upi'), 'UPI');
       expect(paymentMethodLabel('card'), 'Card');
       expect(paymentMethodLabel('bank'), 'Bank transfer');
+      expect(paymentMethodLabel('bank_transfer'), 'Bank transfer');
       expect(paymentMethodLabel('online'), 'Online');
       expect(paymentMethodLabel(''), 'Cash');
       expect(paymentMethodLabel('wallet'), 'wallet');
@@ -93,6 +94,9 @@ void main() {
           expect(normalizeCheckoutPaymentMethod(method), method);
         }
         expect(normalizeCheckoutPaymentMethod(null), 'cash');
+        expect(normalizeCheckoutPaymentMethod('bank_transfer'), 'bank');
+        expect(supplierPaymentMethodCode('bank'), 'bank_transfer');
+        expect(supplierPaymentMethodCode('bank_transfer'), 'bank_transfer');
         expect(normalizeCheckoutPaymentMethod(''), 'cash');
         expect(normalizeCheckoutPaymentMethod('cheque'), 'cash');
         expect(normalizeCheckoutPaymentMethod(42), 'cash');
@@ -714,6 +718,7 @@ void main() {
           find.byKey(const ValueKey('checkout-method-cash')),
         );
         await tapVisible(tester, find.byKey(const ValueKey('checkout-save')));
+        await waitForCompletion(tester);
         await tapVisible(
           tester,
           find.byKey(const ValueKey('checkout-completion-done')),

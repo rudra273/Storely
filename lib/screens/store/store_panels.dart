@@ -15,11 +15,13 @@ class _SectionLabel extends StatelessWidget {
 /// owners/admins) team members — rendered as standard [_StoreActionRow]s so it
 /// matches the rest of the Store screen instead of a one-off panel.
 class _AccountSection extends StatelessWidget {
+  final String query;
   final VoidCallback onSetup;
   final Future<void> Function() onSync;
   final VoidCallback onMembers;
 
   const _AccountSection({
+    this.query = '',
     required this.onSetup,
     required this.onSync,
     required this.onMembers,
@@ -80,20 +82,23 @@ class _AccountSection extends StatelessWidget {
 
         return Column(
           children: [
-            _StoreActionRow(
-              title: accountTitle,
-              subtitle: accountSubtitle,
-              icon: Icons.person_outline_rounded,
-              onTap: onSetup,
-            ),
+            if (matchesSettingsSearch(query, accountTitle))
+              _StoreActionRow(
+                title: accountTitle,
+                subtitle: accountSubtitle,
+                icon: Icons.person_outline_rounded,
+                onTap: onSetup,
+              ),
             const SizedBox(height: AppSpacing.sm),
-            _StoreActionRow(
-              title: 'Cloud Backup & Sync',
-              subtitle: syncSubtitle,
-              icon: Icons.cloud_sync_outlined,
-              onTap: canSync ? () => showSyncStatusSheet(context) : onSetup,
-            ),
-            if (canManageMembers) ...[
+            if (matchesSettingsSearch(query, 'Cloud Backup & Sync'))
+              _StoreActionRow(
+                title: 'Cloud Backup & Sync',
+                subtitle: syncSubtitle,
+                icon: Icons.cloud_sync_outlined,
+                onTap: canSync ? () => showSyncStatusSheet(context) : onSetup,
+              ),
+            if (canManageMembers &&
+                matchesSettingsSearch(query, 'Team Members')) ...[
               const SizedBox(height: AppSpacing.sm),
               _StoreActionRow(
                 title: 'Team Members',

@@ -21,6 +21,7 @@ import '../services/cloud_service.dart';
 import 'qr_sheet_screen.dart';
 import 'purchase_history_screen.dart';
 import '../utils/money.dart';
+import '../services/home_search.dart';
 
 part 'products/product_models.dart';
 part 'products/product_formatters.dart';
@@ -57,6 +58,8 @@ Future<Product?> showCheckoutQuickAdd(
 }
 
 class ProductsScreen extends StatefulWidget {
+  final String? initialProductUuid;
+  final CheckoutScope? searchScope;
   final int refreshToken;
   final bool isActiveMainTab;
   final int openPurchaseFlowToken;
@@ -65,6 +68,8 @@ class ProductsScreen extends StatefulWidget {
 
   const ProductsScreen({
     super.key,
+    this.initialProductUuid,
+    this.searchScope,
     this.refreshToken = 0,
     this.isActiveMainTab = true,
     this.openPurchaseFlowToken = 0,
@@ -77,6 +82,7 @@ class ProductsScreen extends StatefulWidget {
 }
 
 class _ProductsScreenState extends State<ProductsScreen> {
+  bool _openedSearchTarget = false;
   List<Product> _allProducts = [];
   List<Product> _filtered = [];
   List<String> _categories = [];
@@ -137,8 +143,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
     });
     final db = DatabaseHelper.instance;
     try {
-      await db.refreshAllProductSellingPrices();
-      final products = await db.getAllProducts();
+      if (widget.searchScope != null) {
+        if (!await isCurrentHomeSearchScope(widget.searchScope!)) {
+          throw StateError('Shop changed. Return to Home and search again.');
+        }
+      } else {
+        await db.refreshAllProductSellingPrices();
+      }
+      final allProducts = widget.searchScope == null
+          ? await db.getAllProducts()
+          : await db.getProductsForHomeSearch(widget.searchScope!.shopId);
+      if (widget.searchScope != null &&
+          !await isCurrentHomeSearchScope(widget.searchScope!)) {
+        throw StateError('Shop changed. Return to Home and search again.');
+      }
+      final products = widget.searchScope == null
+          ? allProducts
+          : allProducts
+                .where((p) => p.shopId == widget.searchScope!.shopId)
+                .toList();
       final categories = await db.getCategories();
       final suppliers = await db.getSuppliers();
       final units = await db.getUnits();
@@ -147,6 +170,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
           ? <int>{}
           : await db.getProductIdsPurchasedOn(_selectedPurchaseDate!);
       final lowStockThreshold = await db.getLowStockThreshold();
+      if (widget.searchScope != null &&
+          !await isCurrentHomeSearchScope(widget.searchScope!)) {
+        throw StateError('Shop changed. Return to Home and search again.');
+      }
       if (!mounted) return;
       setState(() {
         _allProducts = products;
@@ -169,6 +196,19 @@ class _ProductsScreenState extends State<ProductsScreen> {
         _isUpdatingPrices = false;
       });
       _applyFilter();
+      if (!_openedSearchTarget && widget.initialProductUuid != null) {
+        _openedSearchTarget = true;
+        final targets = products.where(
+          (p) => p.uuid == widget.initialProductUuid,
+        );
+        if (targets.isEmpty) {
+          throw StateError('This product is no longer available.');
+        }
+        if (!await isCurrentHomeSearchScope(widget.searchScope!) || !mounted) {
+          return;
+        }
+        await _showAddEditSheet(product: targets.single);
+      }
     } catch (e) {
       // Never leave the screen stuck on the loading spinner: clear the loading
       // flags and surface the failure instead of swallowing it.
@@ -1020,6 +1060,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
     var selectedCategoryPricing = product?.category == null
         ? null
         : await db.getCategoryPricing(product!.category!);
+    if (widget.searchScope != null &&
+        (!(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true) ||
+            !await isCurrentHomeSearchScope(widget.searchScope!))) {
+      return null;
+    }
     if (!mounted) return null;
 
     final nameCtrl = TextEditingController(text: product?.name ?? '');
@@ -2234,6 +2279,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.searchScope != null &&
+        !(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true)) {
+      return Scaffold(
+        appBar: navyAppBar(title: 'Product'),
+        body: const Center(child: Text('Return to Home and search again.')),
+      );
+    }
+
     return PopScope(
       canPop:
           !widget.isActiveMainTab ||

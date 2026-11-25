@@ -170,6 +170,21 @@ mixin DatabaseBills {
           if (expectedCart != null) expectedCart.cart.uuid,
         ],
       );
+      final postingSnapshot = await _captureReviewedSalePosting(
+        txn,
+        shopId: expectedShopId,
+        billId: id,
+        billUuid: bill.uuid,
+        originDeviceId: originDeviceId,
+        consumedCartUuids: consumed.map((row) => row['uuid'] as String),
+      );
+      final nativeRequest = await _selectNativeSale(
+        txn,
+        expectedShopId,
+        expectedOwner,
+        originDeviceId,
+        postingSnapshot,
+      );
       await txn.insert('checkout_acceptances', {
         'attempt_id': attemptId,
         'shop_id': expectedShopId,
@@ -177,8 +192,70 @@ mixin DatabaseBills {
         'request_fingerprint': fingerprint,
         'bill_id': id,
         'bill_uuid': bill.uuid,
+        'posting_snapshot': postingSnapshot,
+        if (nativeRequest != null) ...{
+          'native_sale_request': jsonEncode(nativeRequest),
+          'native_sale_state': 'pending',
+        },
       });
       return id;
+    });
+  }
+
+  /// Freeze the accepted effects while the invoice transaction still owns them.
+  /// The transport must separately negotiate how these effects are published.
+  Future<String> _captureReviewedSalePosting(
+    Transaction txn, {
+    required String shopId,
+    required int billId,
+    required String billUuid,
+    required String originDeviceId,
+    required Iterable<String> consumedCartUuids,
+  }) async {
+    Future<List<Map<String, Object?>>> rows(
+      String table,
+      String filter,
+      Object reference,
+    ) => txn.query(
+      table,
+      where: '$filter AND shop_id = ?',
+      whereArgs: [reference, shopId],
+      orderBy: 'id',
+    );
+
+    final invoice = (await rows('bills', 'id = ?', billId)).single;
+    List<Map<String, Object?>> snapshot(
+      List<Map<String, Object?>> records,
+      List<String> localKeys,
+    ) => [
+      for (final row in records)
+        Map<String, Object?>.of(row)
+          ..remove('id')
+          ..remove('sync_dirty')
+          ..remove('server_updated_at')
+          ..removeWhere((key, _) => localKeys.contains(key)),
+    ];
+    return jsonEncode({
+      'version': 1,
+      'device_id': originDeviceId,
+      'consumed_cart_uuids': consumedCartUuids.toList(),
+      'invoice': snapshot([invoice], ['customer_id']).single,
+      'items': snapshot(await rows('bill_items', 'bill_id = ?', billId), [
+        'bill_id',
+        'product_id',
+      ]),
+      'payments': snapshot(
+        await rows('bill_payments', 'bill_uuid = ?', billUuid),
+        [],
+      ),
+      'movements': snapshot(
+        await rows(
+          'stock_movements',
+          "source_document_uuid = ? AND source_document_type = 'bill' AND movement_type = 'sale'",
+          billUuid,
+        ),
+        ['product_id', 'source_document_id', 'supplier_id'],
+      ),
     });
   }
 
@@ -255,6 +332,24 @@ mixin DatabaseBills {
       notifyDatabaseChanged();
       return billId;
     }
+  }
+
+  /// Saved milestones are tenant-scoped and independent of today's totals.
+  /// Cancelled originals still count; draft carts and credit notes do not.
+  Future<({bool hasProducts, bool hasInvoice})>
+  getFirstInvoiceProgress() async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final shop = await _activeShopId(txn);
+      final row = (await txn.rawQuery(
+        "SELECT EXISTS(SELECT 1 FROM products WHERE shop_id = ? AND deleted_at IS NULL) AS products, EXISTS(SELECT 1 FROM bills WHERE shop_id = ? AND COALESCE(document_type, 'invoice') = 'invoice') AS invoice",
+        [shop, shop],
+      )).single;
+      return (
+        hasProducts: row['products'] == 1,
+        hasInvoice: row['invoice'] == 1,
+      );
+    });
   }
 
   Future<List<Bill>> getAllBills() async {
@@ -593,9 +688,9 @@ mixin DatabaseBills {
     );
     return {
       for (final row in rows)
-        row['uuid'] as String: roundMoney(
-          (row['sold'] as num).toDouble() - (row['returned'] as num).toDouble(),
-        ),
+        row['uuid'] as String:
+            (row['sold'] as num).toDouble() -
+            (row['returned'] as num).toDouble(),
     };
   }
 
@@ -613,6 +708,11 @@ mixin DatabaseBills {
     DateTime? createdAt,
   }) async {
     await _requireAdminMutation();
+    if (quantities.values.any(
+      (quantity) => saleQuantityThousandths(quantity.toString()) == null,
+    )) {
+      throw ArgumentError(saleQuantityGuidance);
+    }
     final when = createdAt ?? DateTime.now();
     final db = await database;
     final settings = await getBillSettings();
@@ -634,12 +734,15 @@ mixin DatabaseBills {
         whereArgs: [billId],
       );
       final returnable = await _returnableQuantities(txn, billId);
+      if (quantities.keys.any((key) => !returnable.containsKey(key))) {
+        throw ArgumentError('A selected line is no longer returnable.');
+      }
       final lines = <BillItem>[];
       for (final row in itemRows) {
         final item = BillItem.fromMap(row);
         final qty = quantities[item.uuid] ?? 0;
         if (qty <= 0) continue;
-        if (qty > (returnable[item.uuid] ?? 0) + stockQuantityEpsilon) {
+        if (qty > returnQuantityLimit(returnable[item.uuid] ?? 0)) {
           throw ArgumentError(
             'Only ${_formatDbQuantity(returnable[item.uuid] ?? 0)} of '
             '"${item.productName}" can be returned',
@@ -970,6 +1073,18 @@ mixin DatabaseBills {
       }
     }
     return grouped;
+  }
+
+  /// Home search reads saved party identities without the legacy cross-shop
+  /// customer repair performed by the general customer-list loader.
+  Future<List<Customer>> getCustomersForHomeSearch(String shopId) async {
+    final db = await database;
+    final rows = await db.query(
+      'customers',
+      where: 'shop_id = ? AND deleted_at IS NULL',
+      whereArgs: [shopId],
+    );
+    return rows.map(Customer.fromMap).toList();
   }
 
   Future<List<Customer>> getAllCustomers() async {

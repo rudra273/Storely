@@ -14,14 +14,21 @@ String paymentMethodLabel(String method) => switch (method) {
   'cash' => 'Cash',
   'upi' => 'UPI',
   'card' => 'Card',
-  'bank' => 'Bank transfer',
+  'bank' || 'bank_transfer' => 'Bank transfer',
   'online' => 'Online',
   _ => method.isEmpty ? 'Cash' : method,
 };
 
 /// Normalizes persisted/raw payment method values to a canonical code.
-String normalizeCheckoutPaymentMethod(Object? raw) =>
-    raw is String && checkoutPaymentMethods.contains(raw) ? raw : 'cash';
+String normalizeCheckoutPaymentMethod(Object? raw) => raw == 'bank_transfer'
+    ? 'bank'
+    : raw is String && checkoutPaymentMethods.contains(raw)
+    ? raw
+    : 'cash';
+
+/// Supplier commands retain their existing wire spelling for bank payments.
+String supplierPaymentMethodCode(String method) =>
+    method == 'bank' ? 'bank_transfer' : method;
 
 /// Counter-only change due in paise when [cashText] parses as a valid
 /// 2-decimal amount strictly above [totalPaise]; otherwise null.

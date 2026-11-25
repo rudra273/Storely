@@ -7,6 +7,8 @@ import '../utils/test_keys.dart';
 import '../db/database_helper.dart';
 import '../models/bill.dart';
 import '../models/bill_totals.dart';
+import '../models/checkout_settlement.dart';
+import '../models/sale_quantity.dart';
 import '../models/shop_profile.dart';
 import '../services/cloud_service.dart';
 import '../services/bill_share.dart';

@@ -243,7 +243,25 @@ void main() {
         ),
       );
       await settle(tester);
-      await tester.ensureVisible(find.text('Low-stock alert'));
+      for (
+        var attempt = 0;
+        attempt < 150 &&
+            find
+                .byKey(const ValueKey('store-settings-search'))
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.scrollUntilVisible(
+        find.text('Low-stock alert'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Low-stock alert'));
       await settle(tester);
       final input = find.byKey(const ValueKey('low-stock-threshold-input'));
@@ -260,7 +278,11 @@ void main() {
       expect(await tester.runAsync(db.getLowStockThreshold), 3);
       await tester.tap(find.text('Cancel'));
       await settle(tester);
-      await tester.ensureVisible(find.text('Low-stock alert'));
+      await tester.scrollUntilVisible(
+        find.text('Low-stock alert'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Low-stock alert'));
       await settle(tester);
       await tester.enterText(input, '1.2345');

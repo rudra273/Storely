@@ -4,8 +4,19 @@ import 'api_client.dart';
 /// authorize a command; each endpoint still checks current membership/access.
 class ServerCapabilities {
   final Map<String, int> _features;
+  final bool _canVerifyCosts;
+  final bool nativeSaleDeviceRegistered;
 
-  ServerCapabilities._(this._features);
+  ServerCapabilities._(
+    this._features, {
+    required bool canVerifyCosts,
+    required this.nativeSaleDeviceRegistered,
+  }) : _canVerifyCosts = canVerifyCosts;
+
+  bool get supportsNativeSaleSnapshotProof =>
+      _canVerifyCosts &&
+      _features['native_sale_posting'] == 1 &&
+      _features['native_sale_snapshot_proof'] == 1;
 
   bool get supportsSupplierPaymentProof {
     final proof = _features['supplier_payment_proof'] ?? 0;
@@ -19,11 +30,20 @@ class ServerCapabilities {
 
   /// Fetches fresh support metadata for this call. A missing route on an older
   /// server returns null so existing exact-body proof probing can continue.
-  static Future<ServerCapabilities?> load(ApiClient api, String shopId) async {
-    final actor = api.user?.id;
+  static Future<ServerCapabilities?> load(
+    ApiClient api,
+    String shopId, {
+    String? deviceId,
+    String? expectedOwner,
+  }) async {
+    final actor = expectedOwner ?? api.user?.id;
+    final path = Uri(
+      path: '/v1/shops/$shopId/capabilities',
+      queryParameters: deviceId == null ? null : {'device_id': deviceId},
+    ).toString();
     Map<String, dynamic> data;
     try {
-      data = await api.getJson('/v1/shops/$shopId/capabilities');
+      data = await api.getJson(path, expectedUserId: expectedOwner);
     } on ApiException catch (error) {
       if ((error.status == 404 && error.code == 'http_404') ||
           (error.status == 405 && error.code == 'http_405')) {
@@ -50,6 +70,10 @@ class ServerCapabilities {
       }
       features[entry.key as String] = entry.value as int;
     }
-    return ServerCapabilities._(features);
+    return ServerCapabilities._(
+      features,
+      canVerifyCosts: data['role'] == 'owner' || data['role'] == 'admin',
+      nativeSaleDeviceRegistered: data['native_sale_device_registered'] == true,
+    );
   }
 }

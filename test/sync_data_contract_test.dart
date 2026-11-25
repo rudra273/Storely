@@ -198,6 +198,9 @@ void main() {
         'request_fingerprint',
         'bill_id',
         'bill_uuid',
+        'posting_snapshot',
+        'native_sale_request',
+        'native_sale_state',
       },
     );
     expect(
@@ -207,7 +210,7 @@ void main() {
       {'cart_uuid', 'shop_id', 'owner', 'device_id', 'revision', 'payload'},
     );
     final result = {
-      'version': 7,
+      'version': 9,
       'local_checkout_drafts': {
         'table': 'checkout_draft_state',
         'policy':
@@ -224,7 +227,7 @@ void main() {
       'local_checkout_acceptance': {
         'table': 'checkout_acceptances',
         'policy':
-            'Device-only exact retry ledger; never sync or portable restore. Invoice and matching origin cart tombstone commit atomically.',
+            'Device-only exact retry ledger, original sale effects and optional native delivery reservation; never row-sync or portable restore. Invoice, snapshot, reservation and matching origin cart tombstone commit atomically. Reserved effects stay out of legacy row sync until acknowledged.',
         'fields': [
           'attempt_id',
           'shop_id',
@@ -232,6 +235,9 @@ void main() {
           'request_fingerprint',
           'bill_id',
           'bill_uuid',
+          'posting_snapshot',
+          'native_sale_request',
+          'native_sale_state',
         ],
       },
       'local_payment_tables': {

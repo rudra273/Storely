@@ -1,0 +1,7 @@
+# Native sale preflight verification
+
+API commit `7008d35` adds the read-only native sale preflight described in the [atomic sale sync contract](../../contracts/E03-atomic-sale-sync.md). It checks paid membership, custom-line permission, invoice UUID and number collisions, stock availability, and whether the recorded line and invoice amounts match current server pricing. A conflict leaves the offline invoice available for reconciliation. A match describes the checked amounts and does not reserve stock.
+
+- PostgreSQL tests verified repeated matching requests, amount mismatch, malformed settlement totals, insufficient stock, UUID and invoice-number collisions, and outsider denial. They confirmed the preflight produces no invoice, payment, customer, sale movement or idempotency entry. All 425 API integration tests and `make lint` passed. The integration suite retained its existing duplicate health operation ID warning.
+- Localhost TLS smoke against the disposable Docker shop confirmed repeated matches and a recorded-amount conflict with zero invoices. The test shop, owner and mail were removed. The production Docker smoke passed.
+- Web commit `d7c2ce0` updates the generated API contract. Typecheck and `make api-types-check` passed. The browser editor and Android sync engine do not call the endpoint yet. Atomic acceptance, lost-response recovery and client transport selection remain open.

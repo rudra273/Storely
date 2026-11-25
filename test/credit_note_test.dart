@@ -40,11 +40,15 @@ void main() {
   );
 
   /// A 3-unit invoice the way checkout saves it. 157.50 each incl. 5% GST.
-  Future<Bill> sell(int productId, {bool paid = true}) async {
+  Future<Bill> sell(
+    int productId, {
+    bool paid = true,
+    double quantity = 3,
+  }) async {
     final cart = await db.buildBillItemForProduct(
       (await db.getProductById(productId))!,
     );
-    cart.quantity = 3;
+    cart.quantity = quantity;
     final item = BillTotals.taxedItem(
       cart,
       discountPercent: 0,
@@ -102,7 +106,11 @@ void main() {
     expect(await db.kpiCollected(), 473 - 158);
     expect(await db.kpiGstCollected(), closeTo(22.5 - 7.5, 0.011));
     expect(await db.kpiGrossProfit(), 100); // 2 units x 50
-    expect(await db.getTodayBillCount(), 1, reason: 'credit notes are not bills');
+    expect(
+      await db.getTodayBillCount(),
+      1,
+      reason: 'credit notes are not bills',
+    );
   });
 
   test('cannot return more than was sold minus earlier returns', () async {
@@ -122,6 +130,32 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test(
+    'fractional returns retain exact remaining stock without money rounding',
+    () async {
+      final productId = await product();
+      final bill = await sell(productId, quantity: 1.1239995);
+      final line = bill.items.single;
+      Future<int> issue(double quantity) => db.createCreditNote(
+        billId: bill.id!,
+        quantities: {line.uuid: quantity},
+        settlement: DatabaseBills.creditNoteSettleRefund,
+      );
+      await expectLater(issue(1.1239), throwsArgumentError);
+      await issue(1.123);
+      expect(
+        (await db.returnableQuantities(bill.id!))[line.uuid],
+        closeTo(0.0009995, 1e-12),
+      );
+      await expectLater(issue(0.001), throwsArgumentError);
+      expect(await db.getAllBills(), hasLength(2));
+      expect(
+        (await db.getProductById(productId))!.quantity,
+        closeTo(9.9990005, 1e-10),
+      );
+    },
+  );
 
   test('adjusting against dues reduces what the customer owes', () async {
     final bill = await sell(await product(), paid: false); // owes 473

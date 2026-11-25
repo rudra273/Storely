@@ -1,6 +1,6 @@
 # Storely refactor — implementation and verification plan
 
-**Date:** 18 November 2026. **Status:** planned; implementation and test runs have not started under this plan.
+**Started:** 18 November 2026. **Status as of 26 November 2026:** E01 foundations complete. E00 and E02 have verified deliverables with phase-exit checks still open. E03 has verified the opt-in sale posting and historical snapshot safeguards. Continue with E03.2 reconciliation and the remaining E02 exit checks. See [verified milestones](docs/refactor/feature-tracker.md#verified-delivery-milestones) and the [continuation prompt](docs/refactor/handoff-prompt.md).
 
 **Scope:** `/Users/rudra/projects/Storely` (mobile), `/Users/rudra/projects/storelyweb` (web), `/Users/rudra/projects/storelyapi` (API). Preserve the current UI/theme and existing local-only mobile operation. Deliver matching business workflows across mobile and web, including validation, calculations, permissions, results and recovery. Final flow/UX acceptance belongs to the user.
 
@@ -10,7 +10,7 @@ Read [refractor.md](refractor.md) first. The preserved [comparison](<refactor pl
 
 This document governs the implementation order. Its **E00–E18** identifiers are deliberately distinct from the comparison's broader **P0–P10** groups. Each E phase ends with tested, integrated work across the affected repositories. Do not implement all backend changes first and postpone mobile/web integration until the end.
 
-This turn creates work plans only. After implementation is authorized, the coordinator carries approved work through implementation, automated verification, repairs and evidence collection without repeatedly requesting permission for ordinary engineering steps. Do not interpret this plan as authorization to merge into production, spend on external providers or mark human UX acceptance passed. Existing repository verification requirements are satisfied by investigating each slice before changing it and using the already-authorized scope; genuinely unresolved product decisions remain explicit.
+The coordinator carries authorized work through implementation, automated verification, repairs and evidence collection. Production release, external-provider spend and final human UX acceptance require explicit user authorization. Investigate each slice against repository requirements before changing it and record unresolved product decisions.
 
 ### Completion states
 
@@ -118,7 +118,11 @@ Every phase below inherits steps A–G. Existing capability rows mean preserve/r
 
 **Execution update (21 November 2026).** The shop-wide [low-stock threshold](docs/refactor/contracts/E02-slice-3-low-stock-threshold.md) now uses the same decimal settings contract across API, web and Android. Catalog and dashboard consume the same effective setting, with product reorder levels taking precedence. Android Store and Home and web Shop details passed runtime checks, including live Android and REST sync in both directions. [Low-stock evidence](docs/refactor/evidence/E02/slice-3-low-stock-threshold.md).
 
-Next isolate portable preferences by account and shop. Verify that an account whose cloud preference rows are absent receives defaults after switching. Check EN/HI and theme parity across clients, then onboarding, search and notifications before E02 phase exit.
+**Execution update (21 November 2026).** [Portable preferences](docs/refactor/contracts/E02-slice-3-portable-preferences.md) now follow the active Android account and shop, including defaults for absent settings. The web Appearance picker syncs with Android for the active paid workspace. [Preference verification](docs/refactor/evidence/E02/slice-3-portable-preferences.md).
+
+**Execution update (21 November 2026).** [First-invoice onboarding](docs/refactor/contracts/E02-first-invoice-onboarding.md) now guides owners from Home to their first product and saved invoice. The [paired tests](docs/refactor/evidence/E02/first-invoice-onboarding.md) verified recovery and a single stock movement on localhost and offline Android.
+
+**Execution update (22 November 2026).** [Workspace search](docs/refactor/evidence/E02/workspace-search.md), [settings search](docs/refactor/evidence/E02/settings-search.md), and [in-app notification routing](docs/refactor/evidence/E02/notification-routing.md) passed on localhost, Docker and Android. The next increment is the E02 phase-exit checks. Web Hindi localization and portable web language selection are deferred by the owner.
 
 - API: expose/validate shared settings and capability responses where necessary; preserve existing account/security and entitlement behavior.
 - Mobile: unified sale steps and explicit payment choice, complete checkout draft persistence, hold/resume/discard, safe child-editor return, validation/focus/error states.
@@ -128,9 +132,19 @@ Next isolate portable preferences by account and shop. Verify that an account wh
 
 **Exit:** paired browser/emulator recordings show equivalent steps; kill/relaunch/reload restores complete drafts; switch tenant/role safely; expiry and failed save do not discard work.
 
+The [real Android process-death acceptance](docs/refactor/evidence/E02/slice-2.md) passed two force-stops and three processes. The remaining phase-exit work includes the paired logical checkout sequence review. Human UX review remains pending.
+
 ### E03 — Billing, calculation and atomic sync correctness
 
 **Dependency:** E01/E02. **Comparison groups:** P2.
+
+The D03 [stock valuation contract](docs/refactor/contracts/E03-stock-valuation.md) and [paired verification](docs/refactor/evidence/E03/stock-valuation.md) are complete. The remaining E03 billing calculations and atomic sync work are tracked below.
+
+[Sale](docs/refactor/evidence/E03/sale-quantity.md) and [return quantity validation](docs/refactor/evidence/E03/return-quantity.md) passed on localhost, Docker and Android. [Bank transfer compatibility](docs/refactor/evidence/E03/payment-method-aliases.md) passed replay and recovery checks. The broader unit conversion policy and atomic financial sync remain open.
+
+Reviewed Android sales capture the original posting effects in SQLite. [Server preflight](docs/refactor/evidence/E03/native-sale-preflight.md), [atomic server posting](docs/refactor/evidence/E03/native-sale-posting.md) and [opt-in Android delivery](docs/refactor/evidence/E03/android-native-sale-delivery.md) are verified. The [atomic sale sync contract](docs/refactor/contracts/E03-atomic-sale-sync.md) tracks rollout, reconciliation and the remaining payment, cancellation and return commands.
+
+[Historical invoice snapshot verification](docs/refactor/evidence/E03/native-sale-snapshot-proof.md) covers purchase price, cost, profit, HSN and unit for new opt-in Android sales. The next E03.2 work is an explicit recovery flow for stock shortages, snapshot conflicts and edits to reserved invoices.
 
 - API: canonical sale/return/payment calculations, numbering/stock locks, versioned snapshots, aggregate command sync and safe legacy-row compatibility.
 - Mobile: equivalent offline calculation and queue; migrate eligible financial writes from independent rows to atomic aggregate commands without duplicating historical effects.

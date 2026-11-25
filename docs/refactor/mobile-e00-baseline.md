@@ -55,3 +55,23 @@ Define complete sale draft fields and continuation state, including calculation/
 ## Scope and remaining gates
 
 No application logic was changed during baseline capture. The coordinator must still run emulator, live API, browser and cross-client scenarios before E00 can close. Test harness presence alone is not evidence that those gates passed.
+
+## E02 actual Android process recovery acceptance — 22 November 2026
+
+Added `integration_test/checkout_process_recovery_test.dart` and its host runner `integration_test/support/checkout_process_recovery.py`. Run from the mobile repo:
+
+```sh
+python3 integration_test/support/checkout_process_recovery.py emulator-5556
+```
+
+This check mounts the actual `ScanScreen` workflow in an integration-test application. It does not change or certify Home startup navigation. Checkout fields restore when the checkout is opened after cold process launch, as permitted by the workflow contract.
+
+Executed on dedicated emulator **emulator-5556**, with no access to coordinator emulator 5554. The runner uses `--no-uninstall` for every stage, resets only its own `checkout-process-recovery.db` at preparation, and never clears app data or Keystore.
+
+1. **Prepare:** selected a real product through the UI, entered customer `Process Survivor`, partial amount `50.001`, Bank transfer and reference `SURVIVE-REF`. Verified the persisted checkout step and raw fields, no bill posted. Host `adb am force-stop com.storely` terminated PID **8739** and verified no app PID remained.
+2. **Restore in a fresh Android process:** opened checkout, verified customer/invalid raw partial amount/reference survived. Save with invalid precision refused and left zero bills/stock 10. Changed partial to 50, explicitly consented to unassigned credit and saved through the UI. Verified one bill, paid 50, due 68, matching reference and stock 9. Host force-stop terminated PID **8871**, again with no remaining app PID.
+3. **Verify in a third process:** confirmed no active cart, exactly one bill, exactly one payment, paid 50/due 68 and stock 9. Removed only the dedicated fixture database at success.
+
+Result: **passed**, runner exit 0; final Flutter verification stage passed 1 test. `flutter analyze` passed with no issues (3.7 seconds). Runner Python syntax checked. Local execution log: `/tmp/storely-process-recovery.log`; analyzer log: `/tmp/storely-process-analyze.log` (untracked). Both deliberate force-stop stages terminate the test VM by design; the runner requires their persisted checkpoint before killing and relies on the third process's assertions for final acceptance.
+
+No production recovery defect was exposed by this scenario, so no app behavior or theme was changed. Existing Gradle/Kotlin plugin future-compatibility warnings remain a toolchain concern; they did not prevent this debug build or test. This case establishes local process-death durability and exactly-once local posting, not remote sync/provider delivery or every possible kill timing.

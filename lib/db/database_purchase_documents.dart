@@ -80,7 +80,14 @@ mixin DatabasePurchaseDocuments {
         date.compareTo(_dateOnly(DateTime.now())) > 0) {
       throw ArgumentError('Choose a valid payment date up to today.');
     }
-    if (!['cash', 'upi', 'card', 'bank_transfer', 'online'].contains(method)) {
+    final paymentMethod = supplierPaymentMethodCode(method);
+    if (![
+      'cash',
+      'upi',
+      'card',
+      'bank_transfer',
+      'online',
+    ].contains(paymentMethod)) {
       throw ArgumentError('Choose a payment method.');
     }
     BigInt cents(String value) => decimalScaledInteger(value, scale: 2);
@@ -115,7 +122,7 @@ mixin DatabasePurchaseDocuments {
           'request_key': key,
           'amount': purchaseCentsText(paid),
           'payment_date': date,
-          'payment_method': method,
+          'payment_method': paymentMethod,
           'reference': null,
           'notes': null,
         }),

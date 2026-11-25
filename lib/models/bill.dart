@@ -315,6 +315,9 @@ class BillItem {
   final bool wasDirectPrice;
   double quantity;
 
+  /// Invalid editor text kept with a draft. Issued invoice rows store quantity only.
+  String? draftQuantityInput;
+
   /// On a credit note line: the invoice line being returned.
   final String? originalItemUuid;
 

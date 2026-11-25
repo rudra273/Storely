@@ -1,9 +1,12 @@
+import '../../db/database_helper.dart';
+import '../sync/native_sale_sync_backend.dart';
 import '../sync/sync_backend.dart';
 import 'api_client.dart';
+import 'server_capabilities.dart';
 
 /// [SyncBackend] for the Storely API. Same contract the sync engine had with
 /// the sync engine: server-clock cursors, per-row rejections, idempotent uploads.
-class ApiSyncBackend implements SyncBackend {
+class ApiSyncBackend implements SyncBackend, NativeSaleSyncBackend {
   ApiSyncBackend(this.api, {this.preferredShopId});
 
   final Future<String> Function()? preferredShopId;
@@ -116,6 +119,43 @@ class ApiSyncBackend implements SyncBackend {
       'device_id': deviceId,
     });
     return data['code']?.toString() ?? '';
+  }
+
+  @override
+  Future<bool> supportsNativeSale(CheckoutScope scope) async {
+    final owner = scope.owner;
+    if (owner == null) return false;
+    final capabilities = await ServerCapabilities.load(
+      api,
+      scope.shopId,
+      deviceId: scope.deviceId,
+      expectedOwner: owner,
+    );
+    return capabilities?.supportsNativeSaleSnapshotProof == true &&
+        capabilities?.nativeSaleDeviceRegistered == true;
+  }
+
+  @override
+  Future<Map<String, dynamic>> postNativeSale(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request,
+  ) async {
+    final owner = scope.owner;
+    if (owner == null) throw StateError('Sign in as the original sale owner.');
+    try {
+      return await api.postJson(
+        '/v1/shops/${scope.shopId}/bills/native',
+        request,
+        idempotencyKey: attemptId,
+        expectedUserId: owner,
+      );
+    } on ApiException catch (error) {
+      if (const {400, 403, 404, 405, 409, 422}.contains(error.status)) {
+        throw SyncRowRejected(error.message);
+      }
+      rethrow;
+    }
   }
 
   static String _shopIdOf(String table, Map<String, dynamic> row) =>

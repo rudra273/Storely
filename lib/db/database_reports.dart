@@ -470,35 +470,84 @@ mixin DatabaseReports {
   /// Tracked products with stock, highest cost value first.
   Future<List<StockValueRow>> stockValuation() async {
     final db = await database;
-    final shopId = await _activeShopId(db);
-    final rows = await db.rawQuery(
-      '''
-      SELECT p.name, c.name AS category, u.name AS unit, p.quantity_cache AS qty,
-             p.purchase_price, p.selling_price
+    return db.transaction((txn) async {
+      final shopId = await _activeShopId(txn);
+      final pricing = await _getGlobalPricingSettingsFromExecutor(txn);
+      final rows = await txn.rawQuery(
+        '''
+      SELECT p.*, c.name AS category_name, u.name AS unit_name,
+             c.gst_percent AS category_gst, c.overhead_cost AS category_overhead
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN units u ON u.id = p.unit_id
       WHERE p.shop_id = ? AND p.deleted_at IS NULL AND p.track_stock = 1
-        AND p.quantity_cache > 0
+        AND p.quantity_cache <> 0
     ''',
-      [shopId],
-    );
-    return [
-      for (final r in rows)
-        StockValueRow(
-          name: r['name'] as String,
-          category: r['category'] as String?,
-          unit: r['unit'] as String?,
-          quantity: (r['qty'] as num).toDouble(),
-          costValue: roundMoney(
-            ((r['qty'] as num) * (r['purchase_price'] as num)).toDouble(),
+        [shopId],
+      );
+      return rows.map((row) {
+        final product = Product.fromMap(row);
+        final category = product.category == null
+            ? null
+            : CategoryPricingSettings(
+                name: product.category!,
+                gstPercent: (row['category_gst'] as num?)?.toDouble(),
+                overheadCost: (row['category_overhead'] as num?)?.toDouble(),
+              );
+        final price = _resolveProductPrice(product, pricing, category);
+        final quantity = _reportDecimal(product.quantity);
+        final purchase = _reportDecimal(price.purchasePrice);
+        final overhead = _reportDecimal(price.overheadCost);
+        final gst = _reportDecimal(price.gstRegistered ? 0 : price.gstPercent);
+        final selling = _reportDecimal(product.sellingPrice);
+        final taxDivisor = gst.$2 * BigInt.from(100);
+        final costNumerator =
+            purchase.$1 * (taxDivisor + gst.$1) * overhead.$2 +
+            overhead.$1 * purchase.$2 * taxDivisor;
+        final costDivisor = purchase.$2 * taxDivisor * overhead.$2;
+        return StockValueRow(
+          name: product.name,
+          category: product.category,
+          unit: product.unit,
+          quantity: product.quantity,
+          costValue: _reportAmount(
+            quantity.$1 * costNumerator,
+            quantity.$2 * costDivisor,
           ),
-          saleValue: roundMoney(
-            ((r['qty'] as num) * (r['selling_price'] as num)).toDouble(),
+          saleValue: _reportAmount(
+            quantity.$1 * selling.$1,
+            quantity.$2 * selling.$2,
           ),
-        ),
-    ]..sort((a, b) => b.costValue.compareTo(a.costValue));
+        );
+      }).toList()..sort((a, b) {
+        final cost = b.costValue.compareTo(a.costValue);
+        return cost == 0
+            ? a.name.toLowerCase().compareTo(b.name.toLowerCase())
+            : cost;
+      });
+    });
   }
+}
+
+// Convert SQLite's shortest decimal representation to an exact fraction.
+(BigInt, BigInt) _reportDecimal(num value) {
+  final parts = value.toString().toLowerCase().split('e');
+  final mantissa = parts.first;
+  final exponent = parts.length == 1 ? 0 : int.parse(parts.last);
+  final point = mantissa.indexOf('.');
+  final places = point < 0 ? 0 : mantissa.length - point - 1;
+  final scale = places - exponent;
+  final coefficient = decimalScaledInteger(mantissa, scale: places);
+  final ten = BigInt.from(10);
+  return scale < 0
+      ? (coefficient * ten.pow(-scale), BigInt.one)
+      : (coefficient, ten.pow(scale));
+}
+
+double _reportAmount(BigInt numerator, BigInt divisor) {
+  final paise =
+      (numerator.abs() * BigInt.from(200) + divisor) ~/ (divisor * BigInt.two);
+  return (numerator.isNegative ? -paise : paise).toDouble() / 100;
 }
 
 /// Inclusive yyyy-MM-dd range on a local-time text column.

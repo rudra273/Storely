@@ -50,51 +50,72 @@ class SyncStatusIcon extends StatelessWidget {
   }
 }
 
-Future<void> showSyncStatusSheet(BuildContext context) async {
+Future<void> showSyncStatusSheet(
+  BuildContext context, {
+  Future<void> Function()? assertWorkspace,
+  Widget Function(Widget child)? wrap,
+}) async {
+  await assertWorkspace?.call();
   await SyncStatus.instance.refresh();
+  await assertWorkspace?.call();
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (_) => const _SyncStatusSheet(),
+    builder: (_) =>
+        wrap?.call(_SyncStatusSheet(assertWorkspace: assertWorkspace)) ??
+        _SyncStatusSheet(assertWorkspace: assertWorkspace),
   );
 }
 
 class _SyncStatusSheet extends StatelessWidget {
-  const _SyncStatusSheet();
+  final Future<void> Function()? assertWorkspace;
+  const _SyncStatusSheet({this.assertWorkspace});
 
   Future<void> _resolve(
     BuildContext context,
     SyncConflict conflict,
     String action,
   ) async {
-    if (action == 'cloud') {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Use the cloud copy?'),
-          content: const Text(
-            "This phone's version of this record stops syncing. The "
-            "cloud's version replaces it on the next sync (if the cloud has "
-            'one). Use this when the record keeps failing to sync.',
+    try {
+      await assertWorkspace?.call();
+      if (!context.mounted) return;
+      if (action == 'cloud') {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Use the cloud copy?'),
+            content: const Text(
+              "This phone's version of this record stops syncing. The "
+              "cloud's version replaces it on the next sync (if the cloud has "
+              'one). Use this when the record keeps failing to sync.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Use cloud copy'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Use cloud copy'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true) return;
-      await CloudSyncEngine.useCloudCopy(DatabaseHelper.instance, conflict);
+        );
+        if (ok != true) return;
+        await assertWorkspace?.call();
+        await CloudSyncEngine.useCloudCopy(DatabaseHelper.instance, conflict);
+      }
+      await assertWorkspace?.call();
+      await CloudService.instance.syncNow(reason: 'Retry sync problems');
+      await SyncStatus.instance.refresh();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
     }
-    await CloudService.instance.syncNow(reason: 'Retry sync problems');
-    await SyncStatus.instance.refresh();
   }
 
   @override
@@ -185,7 +206,9 @@ class _SyncStatusSheet extends StatelessWidget {
                               value: 'retry',
                               child: Text('Try again'),
                             ),
-                            if (c.table != 'purchase_documents')
+                            if (c.table != 'purchase_documents' &&
+                                c.table !=
+                                    CloudSyncEngine.nativeSaleConflictTable)
                               const PopupMenuItem(
                                 value: 'cloud',
                                 child: Text('Use cloud copy'),

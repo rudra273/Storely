@@ -58,47 +58,51 @@ class HomeSectionPrefs extends ChangeNotifier {
 
   Future<void> setUnpaidCount(int value) async {
     if (_unpaidCount == value) return;
+    final persisted = PortablePreferenceChanges.record(_unpaidCountKey, value);
     _unpaidCount = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_unpaidCountKey, value);
-    await PortablePreferenceChanges.record(_unpaidCountKey, value);
+    await persisted;
   }
 
   Future<void> setUnpaidSort(UnpaidBillsSort value) async {
     if (_unpaidSort == value) return;
+    final persisted = PortablePreferenceChanges.record(
+      _unpaidSortKey,
+      value.storageValue,
+    );
     _unpaidSort = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_unpaidSortKey, value.storageValue);
-    await PortablePreferenceChanges.record(_unpaidSortKey, value.storageValue);
+    await persisted;
   }
 
   Future<void> setUnpaidHidden(bool value) async {
     if (_unpaidHidden == value) return;
+    final persisted = PortablePreferenceChanges.record(_unpaidHiddenKey, value);
     _unpaidHidden = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_unpaidHiddenKey, value);
-    await PortablePreferenceChanges.record(_unpaidHiddenKey, value);
+    await persisted;
   }
 
   Future<void> setAttentionCount(int value) async {
     if (_attentionCount == value) return;
+    final persisted = PortablePreferenceChanges.record(
+      _attentionCountKey,
+      value,
+    );
     _attentionCount = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_attentionCountKey, value);
-    await PortablePreferenceChanges.record(_attentionCountKey, value);
+    await persisted;
   }
 
   Future<void> setAttentionHidden(bool value) async {
     if (_attentionHidden == value) return;
+    final persisted = PortablePreferenceChanges.record(
+      _attentionHiddenKey,
+      value,
+    );
     _attentionHidden = value;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_attentionHiddenKey, value);
-    await PortablePreferenceChanges.record(_attentionHiddenKey, value);
+    await persisted;
   }
 
   Future<void> reload() async {

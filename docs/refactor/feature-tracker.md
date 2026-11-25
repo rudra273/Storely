@@ -4,7 +4,7 @@ Created 18 November 2026. Status reflects execution under the [implementation pl
 
 One accountable completion phase is assigned to each of the 145 audit rows. Earlier phases can deliver prerequisites or basic parity, but the owner phase must close the entire row or record an explicit user-approved scope decision. E00/E01 are shared prerequisites; E17 performs final regression and E18 records human acceptance. Some rows contain multiple capabilities: expand them into sub-IDs in the phase contract before coding.
 
-**Baseline** is copied from the audit as M/W/A (mobile/web/API), with E existing, P partial, N not found, D divergent, U unknown. It is not current test evidence. All nonexcluded execution rows start planned. No Docker/browser/emulator test was run to produce this tracker.
+**Baseline** is copied from the original audit as M/W/A (mobile/web/API), with E existing, P partial, N not found, D divergent, U unknown. Execution states reflect scoped verification through 26 November 2026. A verified milestone can complete part of an audit row while its broader scope remains open.
 
 For each row, record four separate gates: repo/domain checks; Docker integration; localhost browser; Android emulator. Cross-client reconciliation is also required. Add provider/hardware gates where applicable; explicitly state not-applicable reasons. A parent phase pass alone does not prove every row.
 
@@ -20,16 +20,16 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | A08 | Configurable permissions / category access | N/N/N | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A09 | App lock / sensitive-action authentication | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A10 | Audit/security history | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| A11 | Onboarding tutorial and first invoice | P/P/P | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| A12 | Global search / settings search / notification routing | P/P/P | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| A11 | Onboarding tutorial and first invoice | P/P/P | E02 | implementing | Home guidance through a first saved invoice passed paired localhost and Android checks. Broader tutorial scope and human UX review remain open. See `evidence/E02/first-invoice-onboarding.md`. |
+| A12 | Global search / settings search / notification routing | P/P/P | E02 | verified | Workspace search, settings search, and in-app alert routing passed on localhost, Docker and Android. Human UX review remains open. See `evidence/E02/notification-routing.md` and the search evidence records. |
 | A13 | Themes / seasonal launcher variants | E/E/— | — | excluded visual scope | Preserve existing theme; no seasonal/visual cloning. |
-| T01 | Sales invoice, B2B/B2C | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T01 | Sales invoice, B2B/B2C | E/E/E | E03 | implementing | Reviewed checkout and opt-in Android posting with historical snapshot verification passed. Resolve conflicts and finish rollout and full invoice parity. See the verified delivery milestones below. |
 | T02 | Purchase invoice/stock receipt | P/P/P | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T03 | Customer payment-in | E/E/E | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T04 | Supplier payment-out | P/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T05 | Expense | E/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T06 | Other income | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| T07 | Sales return / credit note | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T07 | Sales return / credit note | E/E/E | E03 | implementing | Fractional return validation and exact remaining quantities verified. Atomic Android credit-note publication and recovery remain open. See [return quantity](evidence/E03/return-quantity.md). |
 | T08 | Purchase return / debit note | N/N/N | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T09 | Full purchase/payment reversal | P/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T10 | Quotation/estimate | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -142,7 +142,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | O12 | Local backup/restore | E/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O13 | Automatic backup and reminder/retention | P/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O14 | Encrypted portable backups | U/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | implementing | Owner-scoped Android preferences and opted-in sale reservation/replay are verified. Explicit reconciliation, mixed-version restore and broader sync parity remain open. See [Android delivery](evidence/E03/android-native-sale-delivery.md). |
 | O16 | Cross-device draft handoff | P/N/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O17 | Vyapar/MyBillBook/Tally interoperability | N/N/N | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O18 | Automatic transaction messaging | N/N/N | E14 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -164,28 +164,41 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|---|
 | D01 | E02 | planned | Not run; paired before/after scenario and regression required. |
 | D02 | E02 | verified | Both clients require an explicit settlement decision. A new or duplicated invoice starts unsettled. See evidence/E02/slice-1.md and evidence/E02/slice-3-payment-completion.md. |
-| D03 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D03 | E03 | verified | Android uses the same stock cost basis, signed quantities and row rounding as API/web. Shared fixture and emulator/browser/CSV evidence in `evidence/E03/stock-valuation.md`. |
 | D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
-| D05 | E02 | implementing | Raw checkout and frozen identity recover on browser reload and Android DB reopen. Android records checkout and items steps. Hard process interruption remains in E02 regression. See evidence/E02/slice-2.md. |
+| D05 | E02 | verified | Browser reload and Android database reopen preserve checkout. Two Android force-stops and cold launches preserved fields and step, then verified one invoice, payment and stock deduction. See `evidence/E02/slice-2.md`. |
 | D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D09 | E03 | planned | Not run; paired before/after scenario and regression required. |
-| D10 | E03 | planned | Not run; paired before/after scenario and regression required. |
-| D11 | E03 | planned | Not run; paired before/after scenario and regression required. |
-| D12 | E02 | planned | Not run; paired before/after scenario and regression required. |
+| D10 | E03 | implementing | New sale and return quantity validation verified across clients and API, including exact remaining-stock guards. Broader unit conversion precision remains open. See `evidence/E03/sale-quantity.md` and `evidence/E03/return-quantity.md`. |
+| D11 | E03 | verified | Bank transfer aliases accepted with compatible wire codes and same-key replay. Android recovery, web history display and Docker integration passed. See `evidence/E03/payment-method-aliases.md`. |
+| D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
 | D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
-| D14 | E02 | planned | Not run; paired before/after scenario and regression required. |
-| D15 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D14 | E02 | deferred | Owner deferred web Hindi localization and portable web language selection. |
+| D15 | E03 | implementing | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, and historical snapshot proof verified. Conflict reconciliation, rollout compatibility, and later payment/cancellation/credit-note commands remain open. See [snapshot proof](evidence/E03/native-sale-snapshot-proof.md). |
+
+## Verified delivery milestones
+
+| Scope | State | Evidence |
+|---|---|---|
+| E00 API baseline repairs, localhost onboarding, Android security checks and paid restore/roundtrip | verified | [Baseline and outstanding gates](evidence/E00/initial/summary.md) |
+| E01 compatibility, command/recovery/settings, jobs and financial posting foundations | complete | [Closing audit](evidence/E01/closing-audit.md) |
+| E02 checkout settlement, durable drafts, held carts, process-death recovery, catalog entry, payment and completion | verified | [Settlement](evidence/E02/slice-1.md), [drafts](evidence/E02/slice-2.md), [catalog entry](evidence/E02/slice-3-catalog.md), [payment/completion](evidence/E02/slice-3-payment-completion.md) |
+| E02 pricing and GST defaults, low-stock threshold, portable preferences and first-invoice guidance | verified | [Pricing](evidence/E02/slice-3-pricing-settings.md), [low stock](evidence/E02/slice-3-low-stock-threshold.md), [preferences](evidence/E02/slice-3-portable-preferences.md), [first invoice](evidence/E02/first-invoice-onboarding.md) |
+| E02 workspace search, settings search and in-app notification routing | verified | [Workspace search](evidence/E02/workspace-search.md), [settings search](evidence/E02/settings-search.md), [notifications](evidence/E02/notification-routing.md) |
+| E03 stock valuation, sale and return quantities, bank-transfer aliases | verified | [Valuation](evidence/E03/stock-valuation.md), [sales](evidence/E03/sale-quantity.md), [returns](evidence/E03/return-quantity.md), [bank transfer](evidence/E03/payment-method-aliases.md) |
+| E03.2 immutable local sale capture, API preflight and atomic sale publication | verified | [Local capture](evidence/E03/local-sale-posting.md), [API preflight](evidence/E03/native-sale-preflight.md), [API posting](evidence/E03/native-sale-posting.md) |
+| E03.2 opt-in Android delivery, same-key replay and historical invoice line proof | verified | [Android delivery](evidence/E03/android-native-sale-delivery.md), [historical snapshot proof](evidence/E03/native-sale-snapshot-proof.md) |
 
 ## Phase readiness
 
 | Phase | State | Blocking prerequisite |
 |---|---|---|
-| E00 | implementing | Baselines running; see evidence/E00/initial/summary.md and repo reports. |
-| E01 | complete | Foundation scope accepted; see evidence/E01/closing-audit.md and contracts/E01-command-foundations.md. Independent fixtures, recovery/compatibility fixes and final API/mobile/web/localhost/emulator/Docker checks passed; advanced domain and UX parity remain with owning phases. |
-| E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Next isolate portable preferences by account and shop, then complete broader account, locale and phase-exit checks. |
-| E03 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
+| E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
+| E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
+| E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Android preference isolation and web/Android theme sync verified in `evidence/E02/slice-3-portable-preferences.md`. First-invoice onboarding verified in `evidence/E02/first-invoice-onboarding.md`. Workspace search, settings search and in-app alert routing are verified. Phase-exit checks remain open. Web Hindi localization is deferred. |
+| E03 | implementing | Verified milestones above are complete for their documented scope. Next is E03.2 reconciliation for shortages, snapshot conflicts and local edits, followed by release compatibility and subsequent financial commands. E02 phase-exit checks remain open. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
