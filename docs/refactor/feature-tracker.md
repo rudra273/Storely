@@ -142,7 +142,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | O12 | Local backup/restore | E/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O13 | Automatic backup and reminder/retention | P/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O14 | Encrypted portable backups | U/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | implementing | Owner-scoped Android preferences and opted-in sale reservation/replay are verified. Explicit reconciliation, mixed-version restore and broader sync parity remain open. See [Android delivery](evidence/E03/android-native-sale-delivery.md). |
+| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | implementing | Owner-scoped Android preferences, opted-in sale reservation/replay, and explicit reconciliation (shortages, snapshot drift, local edits, lost responses) are verified. Mixed-version restore and broader sync parity remain open. See [reconciliation](evidence/E03/native-sale-reconciliation.md). |
 | O16 | Cross-device draft handoff | P/N/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O17 | Vyapar/MyBillBook/Tally interoperability | N/N/N | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O18 | Automatic transaction messaging | N/N/N | E14 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -176,7 +176,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
 | D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
 | D14 | E02 | deferred | Owner deferred web Hindi localization and portable web language selection. |
-| D15 | E03 | implementing | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, and historical snapshot proof verified. Conflict reconciliation, rollout compatibility, and later payment/cancellation/credit-note commands remain open. See [snapshot proof](evidence/E03/native-sale-snapshot-proof.md). |
+| D15 | E03 | implementing | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, historical snapshot proof, and explicit reconciliation verified. Rollout compatibility and later payment/cancellation/credit-note commands remain open. See [reconciliation](evidence/E03/native-sale-reconciliation.md). |
 
 ## Verified delivery milestones
 
@@ -190,6 +190,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03 stock valuation, sale and return quantities, bank-transfer aliases | verified | [Valuation](evidence/E03/stock-valuation.md), [sales](evidence/E03/sale-quantity.md), [returns](evidence/E03/return-quantity.md), [bank transfer](evidence/E03/payment-method-aliases.md) |
 | E03.2 immutable local sale capture, API preflight and atomic sale publication | verified | [Local capture](evidence/E03/local-sale-posting.md), [API preflight](evidence/E03/native-sale-preflight.md), [API posting](evidence/E03/native-sale-posting.md) |
 | E03.2 opt-in Android delivery, same-key replay and historical invoice line proof | verified | [Android delivery](evidence/E03/android-native-sale-delivery.md), [historical snapshot proof](evidence/E03/native-sale-snapshot-proof.md) |
+| E03.2 reconciliation of reserved Android sales (shortages, snapshot drift, local edits, lost responses) | verified | [Reconciliation](evidence/E03/native-sale-reconciliation.md) |
 
 ## Phase readiness
 
@@ -198,7 +199,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
 | E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Android preference isolation and web/Android theme sync verified in `evidence/E02/slice-3-portable-preferences.md`. First-invoice onboarding verified in `evidence/E02/first-invoice-onboarding.md`. Workspace search, settings search and in-app alert routing are verified. Phase-exit checks remain open. Web Hindi localization is deferred. |
-| E03 | implementing | Verified milestones above are complete for their documented scope. Next is E03.2 reconciliation for shortages, snapshot conflicts and local edits, followed by release compatibility and subsequent financial commands. E02 phase-exit checks remain open. |
+| E03 | implementing | Verified milestones above are complete for their documented scope, including E03.2 reconciliation. Next are E02 phase-exit checks, E03.2 release/restore compatibility, and subsequent atomic payment, cancellation, and credit-note commands. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
