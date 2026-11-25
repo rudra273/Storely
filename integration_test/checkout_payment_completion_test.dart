@@ -115,6 +115,7 @@ void main() {
         expect(draft.state['raw']['cash'], '200');
 
         await tap(openCheckout);
+        await waitFor(key('checkout-cash-received'));
         expect(
           tester
               .widget<TextField>(key('checkout-cash-received'))
@@ -182,6 +183,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tap(openCheckout);
+        await waitFor(key('checkout-reference'));
         expect(
           tester.widget<TextField>(key('checkout-reference')).controller!.text,
           'NEFT-901',

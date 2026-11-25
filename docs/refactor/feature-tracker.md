@@ -162,7 +162,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 
 | ID | Owner phase | State | Closure evidence |
 |---|---|---|---|
-| D01 | E02 | planned | Not run; paired before/after scenario and regression required. |
+| D01 | E02 | verified | Paired localhost browser (`checkout-payment-completion.cjs`) and Android emulator (`checkout_payment_completion_test.dart`) verified the same logical Item → Party/details → Settlement/review → Save/result sequence on the ₹118 fixture. See `evidence/E02/phase-exit.md`. |
 | D02 | E02 | verified | Both clients require an explicit settlement decision. A new or duplicated invoice starts unsettled. See evidence/E02/slice-1.md and evidence/E02/slice-3-payment-completion.md. |
 | D03 | E03 | verified | Android uses the same stock cost basis, signed quantities and row rounding as API/web. Shared fixture and emulator/browser/CSV evidence in `evidence/E03/stock-valuation.md`. |
 | D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
@@ -198,7 +198,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 |---|---|---|
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
-| E02 | implementing | E02.1 settlement, E02.2 drafts, E02.3 catalog entry, payment and completion, web workspace selection and catalog return recovery verified. GST scheme precedence and pricing defaults verified in `evidence/E02/slice-3-pricing-settings.md`. Shop low-stock threshold verified in `evidence/E02/slice-3-low-stock-threshold.md`. Android preference isolation and web/Android theme sync verified in `evidence/E02/slice-3-portable-preferences.md`. First-invoice onboarding verified in `evidence/E02/first-invoice-onboarding.md`. Workspace search, settings search and in-app alert routing are verified. Phase-exit checks remain open. Web Hindi localization is deferred. |
+| E02 | agent-verified | Paired checkout sequence (`D01`) and E02 phase-exit checks passed on localhost browser and Android emulator (`evidence/E02/phase-exit.md`), joining verified E02.1–E02.3 deliverables (settlement, drafts, held carts, process-death recovery, catalog entry, payment/completion, pricing/GST defaults, low-stock threshold, portable preferences, first-invoice onboarding, workspace/settings search, notification routing). Web Hindi localization (`D14`) is deferred by owner. Human UX review belongs to E18. |
 | E03 | implementing | Verified milestones above are complete for their documented scope, including E03.2 reconciliation. Next are E02 phase-exit checks, E03.2 release/restore compatibility, and subsequent atomic payment, cancellation, and credit-note commands. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
