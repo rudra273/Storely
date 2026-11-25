@@ -1,6 +1,6 @@
 # Storely refactor — implementation and verification plan
 
-**Date:** 18 November 2026. **Status:** planned; implementation and test runs have not started under this plan.
+**Started:** 18 November 2026. **Status as of 26 November 2026:** E01 foundations complete. E00 and E02 have verified deliverables with phase-exit checks still open. E03 has verified the opt-in sale posting and historical snapshot safeguards. Continue with E03.2 reconciliation and the remaining E02 exit checks. See [verified milestones](docs/refactor/feature-tracker.md#verified-delivery-milestones) and the [continuation prompt](docs/refactor/handoff-prompt.md).
 
 **Scope:** `/Users/rudra/projects/Storely` (mobile), `/Users/rudra/projects/storelyweb` (web), `/Users/rudra/projects/storelyapi` (API). Preserve the current UI/theme and existing local-only mobile operation. Deliver matching business workflows across mobile and web, including validation, calculations, permissions, results and recovery. Final flow/UX acceptance belongs to the user.
 
@@ -10,7 +10,7 @@ Read [refractor.md](refractor.md) first. The preserved [comparison](<refactor pl
 
 This document governs the implementation order. Its **E00–E18** identifiers are deliberately distinct from the comparison's broader **P0–P10** groups. Each E phase ends with tested, integrated work across the affected repositories. Do not implement all backend changes first and postpone mobile/web integration until the end.
 
-This turn creates work plans only. After implementation is authorized, the coordinator carries approved work through implementation, automated verification, repairs and evidence collection without repeatedly requesting permission for ordinary engineering steps. Do not interpret this plan as authorization to merge into production, spend on external providers or mark human UX acceptance passed. Existing repository verification requirements are satisfied by investigating each slice before changing it and using the already-authorized scope; genuinely unresolved product decisions remain explicit.
+The coordinator carries authorized work through implementation, automated verification, repairs and evidence collection. Production release, external-provider spend and final human UX acceptance require explicit user authorization. Investigate each slice against repository requirements before changing it and record unresolved product decisions.
 
 ### Completion states
 
