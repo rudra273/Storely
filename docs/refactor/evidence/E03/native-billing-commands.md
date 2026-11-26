@@ -1,0 +1,15 @@
+# Atomic billing follow-up commands verification
+
+Run date: 27 November 2026. [Atomic billing commands contract](../../contracts/E03-atomic-billing-commands.md).
+
+API commit `50a8f4e` adds `native_billing_commands: 1` to shop capabilities and three atomic, idempotent native endpoints: `POST /v1/shops/{shop_id}/bills/{bill_id}/payments/native`, `POST /v1/shops/{shop_id}/bills/{bill_id}/cancel/native`, and `POST /v1/shops/{shop_id}/bills/{bill_id}/credit-note/native` (preserving original durable UUIDs, enforcing device ownership and role guards, rolling back keys on conflict/overpayment/over-return, and replaying cleanly with `200 Idempotent-Replay: true`). Web commit `b3a3f47` regenerates `openapi.json` and `src/api/schema.d.ts`. Android commit `c4f1d38` adds the device-only `native_billing_commands` SQLite table (sync data contract v10, byte-identical with API), atomic enqueue inside `recordBillPayment`, `cancelBill`, and `createCreditNote`, legacy row-sync isolation and pull-cursor holdback, ordered delivery in `CloudSyncEngine` after `_syncNativeSales`, and `Use cloud copy` refusal.
+
+- **Android emulator (`emulator-5554`, `storely_pixel`)**: `integration_test/native_billing_commands_test.dart` passed (`00:44 +1: All tests passed!`) against the live localhost Docker TLS API (`https://10.0.2.2` -> `api.storely.localhost`) using a disposable Premium shop and account (cleaned up after the run):
+  - Created an offline unpaid invoice (qty 2, ₹200), then recorded an offline bank payment (₹50, `NEFT-101`) and an offline `adjust` credit note (qty 1, ₹100) before syncing.
+  - Injected lost-response `TimeoutException`s on payment and credit note delivery; replays converged with `paid_amount == 150`, `balance_due == 50`, 2 payments, 1 credit note with original UUID, and exact stock `10 - 2 + 1 = 9`.
+  - Cancelled a second invoice offline, injected a lost response on cancellation, replayed cleanly, and verified `cancelled == true` and exact stock `9 - 1 + 1 = 9`.
+- **Flutter repo checks**: `flutter analyze` passed with zero issues. Full default-build Flutter suite passed (`STORELY_NATIVE_SALE_POSTING` remains `false` by default). Opt-in suite (`--dart-define=STORELY_NATIVE_SALE_POSTING=true test/native_sale_sync_test.dart test/native_sale_reconciliation_test.dart test/native_billing_commands_test.dart`) passed all 25 tests; `test/sync_data_contract_test.dart` passed and regenerated v10 byte-identically across Android and API.
+- **Docker API checks**: `make lint` (`ruff`, strict `mypy`, `bandit`) passed cleanly across 206 files. `make test` passed all 420 unit tests. `make test-integration` passed all 443 PostgreSQL integration tests, including `tests/test_native_billing_commands.py`, `tests/test_authorization_matrix.py`, `tests/test_command_capabilities.py`, and `tests/test_complete_sync.py`.
+- **Web checks**: `make api-types`, `make typecheck`, `make test` (57 files, 688/688 tests), and `make api-types-check` all passed.
+
+`STORELY_NATIVE_SALE_POSTING` remains off by default pending mixed-version upgrade/restore verification and remaining E03.3 billing controls.
