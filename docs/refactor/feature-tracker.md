@@ -142,7 +142,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | O12 | Local backup/restore | E/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O13 | Automatic backup and reminder/retention | P/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O14 | Encrypted portable backups | U/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | implementing | Owner-scoped Android preferences, opted-in sale reservation/replay, and explicit reconciliation (shortages, snapshot drift, local edits, lost responses) are verified. Mixed-version restore and broader sync parity remain open. See [reconciliation](evidence/E03/native-sale-reconciliation.md). |
+| O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | implementing | Owner-scoped Android preferences, opted-in sale reservation/replay, explicit reconciliation, atomic payment/cancel/credit-note commands, and mixed-version upgrade/restore safety are verified. Broader sync parity remains open. See [mixed-version restore](evidence/E03/native-mixed-version-restore.md). |
 | O16 | Cross-device draft handoff | P/N/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O17 | Vyapar/MyBillBook/Tally interoperability | N/N/N | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O18 | Automatic transaction messaging | N/N/N | E14 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -176,7 +176,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
 | D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
 | D14 | E02 | deferred | Owner deferred web Hindi localization and portable web language selection. |
-| D15 | E03 | implementing | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, historical snapshot proof, explicit reconciliation, and atomic payment/cancel/credit-note commands verified. Mixed-version upgrade/restore verification remains open before enabling by default. See [billing commands](evidence/E03/native-billing-commands.md). |
+| D15 | E03 | verified | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, historical snapshot proof, explicit reconciliation, atomic payment/cancel/credit-note commands, and mixed-version upgrade/downgrade/restore compatibility verified (`STORELY_NATIVE_SALE_POSTING` remains opt-in until E17/E18 release gate). See [mixed-version restore](evidence/E03/native-mixed-version-restore.md). |
 
 ## Verified delivery milestones
 
@@ -192,6 +192,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03.2 opt-in Android delivery, same-key replay and historical invoice line proof | verified | [Android delivery](evidence/E03/android-native-sale-delivery.md), [historical snapshot proof](evidence/E03/native-sale-snapshot-proof.md) |
 | E03.2 reconciliation of reserved Android sales (shortages, snapshot drift, local edits, lost responses) | verified | [Reconciliation](evidence/E03/native-sale-reconciliation.md) |
 | E03.2 atomic Android payment, cancellation, and credit-note commands | verified | [Billing commands](evidence/E03/native-billing-commands.md) |
+| E03.2 mixed-version upgrade, downgrade, and backup/restore compatibility | verified | [Mixed-version restore](evidence/E03/native-mixed-version-restore.md) |
 
 ## Phase readiness
 
@@ -200,7 +201,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
 | E02 | agent-verified | Paired checkout sequence (`D01`) and E02 phase-exit checks passed on localhost browser and Android emulator (`evidence/E02/phase-exit.md`), joining verified E02.1–E02.3 deliverables (settlement, drafts, held carts, process-death recovery, catalog entry, payment/completion, pricing/GST defaults, low-stock threshold, portable preferences, first-invoice onboarding, workspace/settings search, notification routing). Web Hindi localization (`D14`) is deferred by owner. Human UX review belongs to E18. |
-| E03 | implementing | Verified milestones above include E03.2 reconciliation and atomic payment, cancellation, and credit-note commands. Next are E03.2 mixed-version upgrade/restore verification and E03.3 remaining billing controls (discounts, round-off, date/series, posted-doc edits, handoff). |
+| E03 | implementing | All E03.2 rollout gates (capture, preflight/post, snapshot proof, reconciliation, atomic payment/cancel/credit-note commands, and mixed-version upgrade/restore) are verified (`D15` closed). Next is E03.3 remaining billing controls (`F02`, `F03`, `F10–F13`, `F17`, `T19`, `O16`, `D09`) before E04. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
