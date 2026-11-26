@@ -24,3 +24,28 @@ abstract interface class NativeSaleSyncBackend {
     required String reason,
   });
 }
+
+abstract interface class NativeBillingCommandSyncBackend {
+  Future<bool> supportsNativeBillingCommands(CheckoutScope scope);
+
+  Future<Map<String, dynamic>> postNativePayment(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  );
+
+  Future<Map<String, dynamic>> postNativeCancel(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  );
+
+  Future<Map<String, dynamic>> postNativeCreditNote(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  );
+}

@@ -831,30 +831,52 @@ mixin DatabaseBills {
         whereArgs: [creditNoteId],
         limit: 1,
       )).single;
+      final creditNoteUuid = creditNote['uuid'] as String;
 
       // Returned goods back to stock.
+      final commandLines =
+          <
+            ({
+              String lineUuid,
+              String originalItemUuid,
+              String? movementUuid,
+              double quantity,
+            })
+          >[];
       for (final line in lines) {
-        if (line.productId == null || line.productUuid == null) continue;
-        await _insertBillStockMovement(
-          txn,
-          productId: line.productId!,
-          productUuid: line.productUuid!,
-          movementType: StockMovementType.returnIn,
-          quantityDelta: -line.quantity,
-          sourceType: 'credit_note',
-          sourceDocumentType: 'bill',
-          sourceDocumentId: creditNoteId,
-          sourceDocumentUuid: creditNote['uuid'] as String,
-          createdAt: when,
-        );
-        await _syncProductQuantityCache(txn, line.productId!);
+        String? movementUuid;
+        if (line.productId != null && line.productUuid != null) {
+          movementUuid = _newUuid();
+          await _insertBillStockMovement(
+            txn,
+            uuid: movementUuid,
+            productId: line.productId!,
+            productUuid: line.productUuid!,
+            movementType: StockMovementType.returnIn,
+            quantityDelta: -line.quantity,
+            sourceType: 'credit_note',
+            sourceDocumentType: 'bill',
+            sourceDocumentId: creditNoteId,
+            sourceDocumentUuid: creditNoteUuid,
+            createdAt: when,
+          );
+          await _syncProductQuantityCache(txn, line.productId!);
+        }
+        commandLines.add((
+          lineUuid: line.uuid,
+          originalItemUuid: line.originalItemUuid!,
+          movementUuid: movementUuid,
+          quantity: -line.quantity,
+        ));
       }
 
       // Settle: refund money, or reduce what is owed on the invoice. The
       // two adjustment rows cancel out in 'collected', since no cash moves.
+      String? notePaymentUuid;
+      String? invoiceAdjustmentPaymentUuid;
       if (refund > 0.005) {
         final isAdjust = settlement == creditNoteSettleAdjust;
-        await _insertPayment(
+        final notePayment = await _insertPayment(
           txn,
           billId: creditNoteId,
           bill: creditNote,
@@ -864,8 +886,9 @@ mixin DatabaseBills {
           notes: isAdjust ? 'Adjusted against invoice' : 'Refund',
           receivedAt: when,
         );
+        notePaymentUuid = notePayment.uuid;
         if (isAdjust) {
-          await _insertPayment(
+          final adjPayment = await _insertPayment(
             txn,
             billId: billId,
             bill: rows.single,
@@ -875,6 +898,7 @@ mixin DatabaseBills {
             notes: 'Credit note',
             receivedAt: when,
           );
+          invoiceAdjustmentPaymentUuid = adjPayment.uuid;
         }
       }
       await _logBillAudit(
@@ -887,6 +911,53 @@ mixin DatabaseBills {
             '${_normaliseName(reason) == null ? '' : ' · ${_normaliseName(reason)}'}',
       );
       await syncCustomersFromBills(txn);
+      final cmdScope = await _currentNativeBillingCommandScope(txn, shopId);
+      if (cmdScope != null) {
+        final isAdjust = settlement == creditNoteSettleAdjust;
+        await _enqueueNativeBillingCommand(
+          txn,
+          commandId: _newUuid(),
+          shopId: shopId,
+          owner: cmdScope.owner,
+          deviceId: cmdScope.deviceId,
+          commandType: 'credit_note',
+          billUuid: original.uuid,
+          targetUuid: creditNoteUuid,
+          request: {
+            'credit_note_uuid': creditNoteUuid,
+            'credit_note_number': number,
+            'device_id': cmdScope.deviceId,
+            'created_at': _localIso(when),
+            'settlement': settlement,
+            'refund_method': refundMethod,
+            'reason': _normaliseName(reason),
+            'lines': [
+              for (final entry in commandLines)
+                {
+                  'line_uuid': entry.lineUuid,
+                  'original_item_uuid': entry.originalItemUuid,
+                  if (entry.movementUuid != null)
+                    'movement_uuid': entry.movementUuid,
+                  'quantity': _formatNativeQuantity(entry.quantity),
+                },
+            ],
+            'note_payment_uuid': notePaymentUuid,
+            'invoice_adjustment_payment_uuid': invoiceAdjustmentPaymentUuid,
+          },
+          reservedUuids: {
+            'bills': [creditNoteUuid, if (isAdjust) original.uuid],
+            'bill_items': [for (final line in lines) line.uuid],
+            'bill_payments': [
+              ?notePaymentUuid,
+              ?invoiceAdjustmentPaymentUuid,
+            ],
+            'stock_movements': [
+              for (final entry in commandLines)
+                if (entry.movementUuid != null) entry.movementUuid!,
+            ],
+          },
+        );
+      }
       notifyDatabaseChanged();
       return creditNoteId;
     });
@@ -1161,14 +1232,17 @@ mixin DatabaseBills {
     return db.transaction((txn) async {
       final rows = await txn.query(
         'bills',
-        columns: ['uuid', 'customer_id', 'total_amount', 'deleted_at'],
+        columns: ['uuid', 'shop_id', 'customer_id', 'total_amount', 'deleted_at'],
         where: 'id = ?',
         whereArgs: [id],
         limit: 1,
       );
       if (rows.isEmpty || rows.single['deleted_at'] != null) return 0;
       final now = _nowIso();
+      final cancelledAtLocal = _localIso();
       final billUuid = rows.single['uuid'] as String;
+      final shopId =
+          rows.single['shop_id'] as String? ?? await _activeShopId(txn);
       final activeCreditNotes = await txn.query(
         'bills',
         columns: ['bill_number'],
@@ -1182,6 +1256,7 @@ mixin DatabaseBills {
           'Cancel the credit note first.',
         );
       }
+      final reservedPaymentUuids = <String>[];
       // Cancelling a credit note also undoes its adjustment on the invoice.
       final creditNoteNumber = await txn.query(
         'bills',
@@ -1193,6 +1268,17 @@ mixin DatabaseBills {
       if (creditNoteNumber.isNotEmpty) {
         final originalUuid =
             creditNoteNumber.single['original_bill_uuid'] as String?;
+        final adjPayments = await txn.query(
+          'bill_payments',
+          columns: ['uuid'],
+          where:
+              "bill_uuid = ? AND payment_method = 'credit_note' "
+              'AND payment_reference = ? AND deleted_at IS NULL',
+          whereArgs: [originalUuid, creditNoteNumber.single['bill_number']],
+        );
+        for (final p in adjPayments) {
+          reservedPaymentUuids.add(p['uuid'] as String);
+        }
         await txn.update(
           'bill_payments',
           {'deleted_at': now, 'updated_at': now},
@@ -1224,14 +1310,19 @@ mixin DatabaseBills {
         where: 'deleted_at IS NULL AND bill_id = ?',
         whereArgs: [id],
       );
+      final reservedItemUuids = <String>[];
+      final reservedVoidMovementUuids = <String>[];
       for (final row in itemRows) {
         final item = BillItem.fromMap(row);
+        reservedItemUuids.add(item.uuid);
         if (item.productId != null && item.productUuid != null) {
+          final voidMovementUuid = 'void-$billUuid-${item.uuid}';
+          reservedVoidMovementUuids.add(voidMovementUuid);
           await _insertBillStockMovement(
             txn,
             // Same id on every device: if two phones cancel the same bill,
             // sync keeps one stock return instead of restoring it twice.
-            uuid: 'void-$billUuid-${item.uuid}',
+            uuid: voidMovementUuid,
             productId: item.productId!,
             productUuid: item.productUuid!,
             movementType: StockMovementType.voidSale,
@@ -1243,6 +1334,15 @@ mixin DatabaseBills {
           );
           await _syncProductQuantityCache(txn, item.productId!);
         }
+      }
+      final billPaymentRows = await txn.query(
+        'bill_payments',
+        columns: ['uuid'],
+        where: 'bill_uuid = ?',
+        whereArgs: [billUuid],
+      );
+      for (final p in billPaymentRows) {
+        reservedPaymentUuids.add(p['uuid'] as String);
       }
       await txn.update(
         'bill_items',
@@ -1284,6 +1384,30 @@ mixin DatabaseBills {
           billCountDelta: -1,
         );
         await syncCustomersFromBills(txn);
+      }
+      final cmdScope = await _currentNativeBillingCommandScope(txn, shopId);
+      if (cmdScope != null) {
+        await _enqueueNativeBillingCommand(
+          txn,
+          commandId: _newUuid(),
+          shopId: shopId,
+          owner: cmdScope.owner,
+          deviceId: cmdScope.deviceId,
+          commandType: 'cancel',
+          billUuid: billUuid,
+          targetUuid: billUuid,
+          request: {
+            'device_id': cmdScope.deviceId,
+            'cancelled_at': cancelledAtLocal,
+            'reason': _normaliseName(reason),
+          },
+          reservedUuids: {
+            'bills': [billUuid],
+            'bill_items': reservedItemUuids,
+            'bill_payments': reservedPaymentUuids,
+            'stock_movements': reservedVoidMovementUuids,
+          },
+        );
       }
       notifyDatabaseChanged();
       return count;
@@ -1385,7 +1509,7 @@ mixin DatabaseBills {
       if (amount > balance + 0.005) {
         throw ArgumentError('Payment cannot exceed balance due');
       }
-      await _insertPayment(
+      final inserted = await _insertPayment(
         txn,
         billId: billId,
         bill: rows.single,
@@ -1395,6 +1519,35 @@ mixin DatabaseBills {
         notes: notes,
         receivedAt: receivedAt,
       );
+      final shopId =
+          rows.single['shop_id'] as String? ?? await _activeShopId(txn);
+      final billUuid = rows.single['uuid'] as String;
+      final cmdScope = await _currentNativeBillingCommandScope(txn, shopId);
+      if (cmdScope != null) {
+        await _enqueueNativeBillingCommand(
+          txn,
+          commandId: _newUuid(),
+          shopId: shopId,
+          owner: cmdScope.owner,
+          deviceId: cmdScope.deviceId,
+          commandType: 'payment',
+          billUuid: billUuid,
+          targetUuid: inserted.uuid,
+          request: {
+            'payment_uuid': inserted.uuid,
+            'device_id': cmdScope.deviceId,
+            'received_at': inserted.receivedAt,
+            'amount': _formatNativeMoney(amount),
+            'method': paymentMethod,
+            'reference': _normaliseName(paymentReference),
+            'notes': _normaliseName(notes),
+          },
+          reservedUuids: {
+            'bill_payments': [inserted.uuid],
+            'bills': [billUuid],
+          },
+        );
+      }
       notifyDatabaseChanged();
       return 1;
     });
@@ -1454,7 +1607,7 @@ mixin DatabaseBills {
     });
   }
 
-  Future<void> _insertPayment(
+  Future<({String uuid, String receivedAt})> _insertPayment(
     DatabaseExecutor txn, {
     required int billId,
     required Map<String, Object?> bill,
@@ -1465,16 +1618,18 @@ mixin DatabaseBills {
     DateTime? receivedAt,
   }) async {
     final now = _nowIso();
+    final paymentUuid = _newUuid();
+    final receivedAtIso = _localIso(receivedAt);
     final billUuid = bill['uuid'] as String;
     await txn.insert('bill_payments', {
-      'uuid': _newUuid(),
+      'uuid': paymentUuid,
       'shop_id': bill['shop_id'] as String? ?? await _activeShopId(txn),
       'bill_uuid': billUuid,
       'amount': amount,
       'payment_method': paymentMethod,
       'payment_reference': _normaliseName(paymentReference),
       'notes': _normaliseName(notes),
-      'received_at': _localIso(receivedAt),
+      'received_at': receivedAtIso,
       'created_at': now,
       'updated_at': now,
     });
@@ -1491,6 +1646,7 @@ mixin DatabaseBills {
       );
     }
     await _updateBillPaymentSummary(txn, billId, billUuid);
+    return (uuid: paymentUuid, receivedAt: receivedAtIso);
   }
 
   static String _auditMethod(String method) => switch (method) {

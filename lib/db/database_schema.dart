@@ -231,6 +231,27 @@ mixin DatabaseSchema {
         payload TEXT NOT NULL
       )
     ''');
+    await executor.execute('''
+      CREATE TABLE IF NOT EXISTS native_billing_commands(
+        command_id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        command_type TEXT NOT NULL,
+        bill_uuid TEXT NOT NULL,
+        target_uuid TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        reserved_uuids_json TEXT NOT NULL,
+        state TEXT NOT NULL,
+        last_error TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await executor.execute("""
+      CREATE INDEX IF NOT EXISTS idx_native_billing_commands_pending
+      ON native_billing_commands(shop_id, state)
+      WHERE state = 'pending'
+    """);
     await _createShopTables(executor);
     await _createSettingsTable(executor);
     await _createBillSettingsTable(executor);

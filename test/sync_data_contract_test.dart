@@ -32,6 +32,7 @@ void main() {
         'supplier_payment_queue',
         'checkout_acceptances',
         'checkout_draft_state',
+        'native_billing_commands',
       },
       reason:
           'A new persistent table needs an explicit cloud or device-only classification.',
@@ -209,8 +210,46 @@ void main() {
       )).map((column) => column['name']).toSet(),
       {'cart_uuid', 'shop_id', 'owner', 'device_id', 'revision', 'payload'},
     );
+    expect(
+      (await db.rawQuery(
+        'PRAGMA table_info(native_billing_commands)',
+      )).map((column) => column['name']).toSet(),
+      {
+        'command_id',
+        'shop_id',
+        'owner',
+        'device_id',
+        'command_type',
+        'bill_uuid',
+        'target_uuid',
+        'request_json',
+        'reserved_uuids_json',
+        'state',
+        'last_error',
+        'created_at',
+      },
+    );
     final result = {
-      'version': 9,
+      'version': 10,
+      'local_native_billing_commands': {
+        'table': 'native_billing_commands',
+        'policy':
+            'Device-only durable queue for atomic billing follow-up commands (payments, cancellations, credit notes); never row-sync or portable restore. Reserved rows stay out of legacy row sync until acknowledged.',
+        'fields': [
+          'command_id',
+          'shop_id',
+          'owner',
+          'device_id',
+          'command_type',
+          'bill_uuid',
+          'target_uuid',
+          'request_json',
+          'reserved_uuids_json',
+          'state',
+          'last_error',
+          'created_at',
+        ],
+      },
       'local_checkout_drafts': {
         'table': 'checkout_draft_state',
         'policy':
@@ -278,6 +317,7 @@ void main() {
         'supplier_payment_queue',
         'checkout_acceptances',
         'checkout_draft_state',
+        'native_billing_commands',
       ],
       'server_managed_public_tables': {
         'shop_members': 'Membership and roles via authenticated API',

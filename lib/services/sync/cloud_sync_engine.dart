@@ -111,6 +111,7 @@ class CloudSyncEngine {
 
   static const purchaseCursorStateKey = 'purchase_document_sequence';
   static const nativeSaleConflictTable = 'native_sale_postings';
+  static const nativeBillingCommandConflictTable = 'native_billing_commands';
   static const lastSyncStateKey = 'last_successful_cloud_sync_at';
   static const defaultPageSize = 500;
   static const pushChunkSize = 200;
@@ -154,6 +155,11 @@ class CloudSyncEngine {
         'The original sale is reserved for atomic sync. Its local records are preserved.',
       );
     }
+    if (conflict.table == nativeBillingCommandConflictTable) {
+      throw StateError(
+        'This billing follow-up is reserved for atomic sync. Its local records are preserved.',
+      );
+    }
     await database.markRowSynced(conflict.table, conflict.key);
     await database.clearCloudSyncState(_cursorKey(conflict.table));
     final remaining = [
@@ -168,6 +174,7 @@ class CloudSyncEngine {
     await database.clearCloudSyncState(lastSyncStateKey);
     await database.clearCloudSyncState(purchaseCursorStateKey);
     await database.clearNativeSaleScope();
+    await database.clearNativeBillingCommandsScope();
     for (final table in syncedTables) {
       await database.clearCloudSyncState(_cursorKey(table));
     }
@@ -224,11 +231,16 @@ class CloudSyncEngine {
     await prepareUserData?.call(firstSync && !hadLocalData);
     if (firstSync &&
         firstSyncMode == FirstSyncMode.startFresh &&
-        await database.hasReservedNativeSales(shopId)) {
-      throw StateError('Retry the reserved sales before starting fresh.');
+        (await database.hasReservedNativeSales(shopId) ||
+            await database.hasReservedNativeBillingCommands(shopId))) {
+      throw StateError(
+        'Retry the reserved sales and billing commands before starting fresh.',
+      );
     }
     final saleBackend = backend;
-    final saleScope = saleBackend is NativeSaleSyncBackend
+    final saleScope =
+        (saleBackend is NativeSaleSyncBackend ||
+            saleBackend is NativeBillingCommandSyncBackend)
         ? await database.captureCheckoutScope()
         : null;
     final conflicts = <SyncConflict>[];
@@ -246,15 +258,24 @@ class CloudSyncEngine {
     for (final table in syncedTables) {
       if (_adminManagedTables.contains(table) && !canPushAdminTables) continue;
       if (table == 'audit_log' &&
-          saleBackend is NativeSaleSyncBackend &&
           saleScope?.owner != null &&
           saleScope!.shopId == shopId) {
-        conflicts.addAll(
-          await _syncNativeSales(
-            saleBackend as NativeSaleSyncBackend,
-            saleScope,
-          ),
-        );
+        if (saleBackend is NativeSaleSyncBackend) {
+          conflicts.addAll(
+            await _syncNativeSales(
+              saleBackend as NativeSaleSyncBackend,
+              saleScope,
+            ),
+          );
+        }
+        if (saleBackend is NativeBillingCommandSyncBackend) {
+          conflicts.addAll(
+            await _syncNativeBillingCommands(
+              saleBackend as NativeBillingCommandSyncBackend,
+              saleScope,
+            ),
+          );
+        }
       }
       conflicts.addAll(await _push(table));
     }
@@ -270,16 +291,26 @@ class CloudSyncEngine {
     }
     await applyUserData?.call();
     if (nativeSalePostingEnabled &&
-        saleBackend is NativeSaleSyncBackend &&
         saleScope?.owner != null &&
         saleScope!.shopId == shopId) {
-      final supported = await (saleBackend as NativeSaleSyncBackend)
-          .supportsNativeSale(saleScope);
-      await database.updateNativeSaleScope(
-        saleScope,
-        supported: supported,
-        isCurrent: _nativeSaleScopeCurrent,
-      );
+      if (saleBackend is NativeSaleSyncBackend) {
+        final supported = await (saleBackend as NativeSaleSyncBackend)
+            .supportsNativeSale(saleScope);
+        await database.updateNativeSaleScope(
+          saleScope,
+          supported: supported,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      }
+      if (saleBackend is NativeBillingCommandSyncBackend) {
+        final supported = await (saleBackend as NativeBillingCommandSyncBackend)
+            .supportsNativeBillingCommands(saleScope);
+        await database.updateNativeBillingCommandsScope(
+          saleScope,
+          supported: supported,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      }
     }
     final syncedAt = DateTime.now().toUtc();
     await database.setCloudSyncState(
@@ -534,6 +565,131 @@ class CloudSyncEngine {
       }
     }
     return conflicts;
+  }
+
+  Future<List<SyncConflict>> _syncNativeBillingCommands(
+    NativeBillingCommandSyncBackend transport,
+    CheckoutScope scope,
+  ) async {
+    final conflicts = <SyncConflict>[];
+    for (final cmd in await database.pendingNativeBillingCommands(scope)) {
+      String? problem;
+      try {
+        final request = cmd.decodedRequest;
+        if (request['device_id'] != scope.deviceId) {
+          throw const FormatException('Saved billing command device differs.');
+        }
+        final Map<String, dynamic> receipt;
+        switch (cmd.commandType) {
+          case 'payment':
+            receipt = await transport.postNativePayment(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativePaymentReceipt(cmd, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the saved payment identity.',
+              );
+            }
+          case 'cancel':
+            receipt = await transport.postNativeCancel(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativeCancelReceipt(cmd, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the bill cancellation.',
+              );
+            }
+          case 'credit_note':
+            receipt = await transport.postNativeCreditNote(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativeCreditNoteReceipt(cmd, request, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the saved credit note identities.',
+              );
+            }
+          default:
+            throw FormatException(
+              'Unsupported billing command type: ${cmd.commandType}',
+            );
+        }
+        await database.acknowledgeNativeBillingCommand(
+          scope,
+          cmd,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      } on SyncRowRejected catch (error) {
+        problem = error.message;
+      } on FormatException catch (error) {
+        problem = error.message;
+      }
+      if (problem != null) {
+        await database.recordNativeBillingCommandError(cmd.commandId, problem);
+        conflicts.add(
+          SyncConflict(
+            table: nativeBillingCommandConflictTable,
+            key: cmd.commandId,
+            message: problem,
+          ),
+        );
+        // Keep creation order so later follow-up commands on the same bill or
+        // stock do not overtake an earlier rejected command.
+        break;
+      }
+    }
+    return conflicts;
+  }
+
+  static bool _matchesNativePaymentReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    final payments = receipt['payments'];
+    if (bill is! Map || bill['uuid'] != cmd.billUuid) return false;
+    if (payments is! List) return false;
+    return payments.any((p) => p is Map && p['uuid'] == cmd.targetUuid);
+  }
+
+  static bool _matchesNativeCancelReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    return bill is Map &&
+        bill['uuid'] == cmd.billUuid &&
+        bill['cancelled'] == true;
+  }
+
+  static bool _matchesNativeCreditNoteReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> request,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    final items = receipt['items'];
+    if (bill is! Map ||
+        bill['uuid'] != cmd.targetUuid ||
+        bill['bill_number'] != request['credit_note_number']) {
+      return false;
+    }
+    if (items is! List) return false;
+    final returnedIds = items
+        .map((item) => item is Map ? item['uuid'] : null)
+        .toSet();
+    final expectedIds = (request['lines'] as List)
+        .map((line) => (line as Map)['line_uuid'])
+        .toList();
+    return expectedIds.isNotEmpty && returnedIds.containsAll(expectedIds);
   }
 
   static bool _matchesNativeSaleReceipt(

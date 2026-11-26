@@ -6,7 +6,11 @@ import 'server_capabilities.dart';
 
 /// [SyncBackend] for the Storely API. Same contract the sync engine had with
 /// the sync engine: server-clock cursors, per-row rejections, idempotent uploads.
-class ApiSyncBackend implements SyncBackend, NativeSaleSyncBackend {
+class ApiSyncBackend
+    implements
+        SyncBackend,
+        NativeSaleSyncBackend,
+        NativeBillingCommandSyncBackend {
   ApiSyncBackend(this.api, {this.preferredShopId});
 
   final Future<String> Function()? preferredShopId;
@@ -222,6 +226,88 @@ class ApiSyncBackend implements SyncBackend, NativeSaleSyncBackend {
       rethrow;
     }
   }
+
+  @override
+  Future<bool> supportsNativeBillingCommands(CheckoutScope scope) async {
+    final owner = scope.owner;
+    if (owner == null) return false;
+    final capabilities = await ServerCapabilities.load(
+      api,
+      scope.shopId,
+      deviceId: scope.deviceId,
+      expectedOwner: owner,
+    );
+    return capabilities?.supportsNativeBillingCommands == true &&
+        capabilities?.nativeSaleDeviceRegistered == true;
+  }
+
+  Future<Map<String, dynamic>> _postNativeBillingCommand(
+    CheckoutScope scope,
+    String commandId,
+    String path,
+    Map<String, dynamic> request,
+  ) async {
+    final owner = scope.owner;
+    if (owner == null) {
+      throw StateError('Sign in as the original billing command owner.');
+    }
+    try {
+      return await api.postJson(
+        path,
+        request,
+        idempotencyKey: commandId,
+        expectedUserId: owner,
+      );
+    } on ApiException catch (error) {
+      if (const {400, 403, 404, 405, 409, 422}.contains(error.status)) {
+        throw SyncRowRejected(
+          error.message,
+          isConflict: error.status == 409,
+          code: error.code,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> postNativePayment(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  ) => _postNativeBillingCommand(
+    scope,
+    commandId,
+    '/v1/shops/${scope.shopId}/bills/$billUuid/payments/native',
+    request,
+  );
+
+  @override
+  Future<Map<String, dynamic>> postNativeCancel(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  ) => _postNativeBillingCommand(
+    scope,
+    commandId,
+    '/v1/shops/${scope.shopId}/bills/$billUuid/cancel/native',
+    request,
+  );
+
+  @override
+  Future<Map<String, dynamic>> postNativeCreditNote(
+    CheckoutScope scope,
+    String commandId,
+    String billUuid,
+    Map<String, dynamic> request,
+  ) => _postNativeBillingCommand(
+    scope,
+    commandId,
+    '/v1/shops/${scope.shopId}/bills/$billUuid/credit-note/native',
+    request,
+  );
 
   static String _shopIdOf(String table, Map<String, dynamic> row) =>
       (table == 'shops' ? row['uuid'] : row['shop_id']).toString();

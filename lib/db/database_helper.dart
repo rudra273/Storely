@@ -35,6 +35,7 @@ part 'database_purchase_drafts.dart';
 part 'database_bills.dart';
 part 'database_checkout_drafts.dart';
 part 'database_native_sales.dart';
+part 'database_native_billing_commands.dart';
 part 'database_sync.dart';
 part 'database_kpi.dart';
 part 'database_expenses.dart';

@@ -225,7 +225,10 @@ class _SyncStatusSheet extends StatelessWidget {
                             ),
                             if (c.table != 'purchase_documents' &&
                                 c.table !=
-                                    CloudSyncEngine.nativeSaleConflictTable)
+                                    CloudSyncEngine.nativeSaleConflictTable &&
+                                c.table !=
+                                    CloudSyncEngine
+                                        .nativeBillingCommandConflictTable)
                               const PopupMenuItem(
                                 value: 'cloud',
                                 child: Text('Use cloud copy'),

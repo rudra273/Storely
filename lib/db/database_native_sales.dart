@@ -506,6 +506,14 @@ extension DatabaseNativeSales on DatabaseHelper {
   }
 }
 
+const _derivedBillPaymentFields = {
+  'paid_amount',
+  'balance_due',
+  'payment_status',
+  'is_paid',
+  'payment_method',
+};
+
 Future<bool> _matchesNativeSale(
   Transaction txn,
   String shopId,
@@ -518,10 +526,25 @@ Future<bool> _matchesNativeSale(
         where: 'shop_id = ? AND uuid = ?',
         whereArgs: [shopId, effect['uuid']],
       );
-      if (rows.isEmpty ||
-          effect.entries.any(
-            (field) => rows.single[field.key] != field.value,
-          )) {
+      if (rows.isEmpty) return false;
+      var allowDerivedPaymentShift = false;
+      if (entry.key == 'bills') {
+        final followUps = await txn.query(
+          'native_billing_commands',
+          columns: ['command_id'],
+          where:
+              "shop_id = ? AND bill_uuid = ? AND state = 'pending' AND command_type IN ('payment', 'credit_note')",
+          whereArgs: [shopId, effect['uuid']],
+          limit: 1,
+        );
+        allowDerivedPaymentShift = followUps.isNotEmpty;
+      }
+      if (effect.entries.any(
+        (field) =>
+            !(allowDerivedPaymentShift &&
+                _derivedBillPaymentFields.contains(field.key)) &&
+            rows.single[field.key] != field.value,
+      )) {
         return false;
       }
     }
@@ -532,19 +555,24 @@ Future<bool> _matchesNativeSale(
 class _ReservedSaleRows {
   final bills = <Object?>{};
   final carts = <Object?>{};
+  final uuids = <Object?>{};
 
-  bool contains(String table, Map<String, Object?> row) => switch (table) {
-    'bills' =>
-      bills.contains(row['uuid']) || bills.contains(row['original_bill_uuid']),
-    'bill_items' || 'bill_payments' => bills.contains(row['bill_uuid']),
-    'stock_movements' =>
-      row['source_document_type'] == 'bill' &&
-          bills.contains(row['source_document_uuid']),
-    'audit_log' =>
-      row['entity_type'] == 'bill' && bills.contains(row['entity_uuid']),
-    'held_bills' => carts.contains(row['uuid']),
-    _ => false,
-  };
+  bool contains(String table, Map<String, Object?> row) {
+    if (uuids.contains(row['uuid'])) return true;
+    return switch (table) {
+      'bills' =>
+        bills.contains(row['uuid']) ||
+            bills.contains(row['original_bill_uuid']),
+      'bill_items' || 'bill_payments' => bills.contains(row['bill_uuid']),
+      'stock_movements' =>
+        row['source_document_type'] == 'bill' &&
+            bills.contains(row['source_document_uuid']),
+      'audit_log' =>
+        row['entity_type'] == 'bill' && bills.contains(row['entity_uuid']),
+      'held_bills' => carts.contains(row['uuid']),
+      _ => false,
+    };
+  }
 }
 
 Future<_ReservedSaleRows> _reservedSaleRows(
@@ -554,6 +582,21 @@ Future<_ReservedSaleRows> _reservedSaleRows(
 ) async {
   final reserved = _ReservedSaleRows();
   if (!_nativeSaleTables.contains(table)) return reserved;
+  if (_nativeBillingCommandReservedTables.contains(table)) {
+    final commandRows = await txn.query(
+      'native_billing_commands',
+      columns: ['reserved_uuids_json'],
+      where: "shop_id = ? AND state = 'pending'",
+      whereArgs: [shopId],
+    );
+    for (final row in commandRows) {
+      final decoded = jsonDecode(row['reserved_uuids_json'] as String) as Map;
+      final list = decoded[table];
+      if (list is List) {
+        reserved.uuids.addAll(list);
+      }
+    }
+  }
   final rows = await txn.query(
     'checkout_acceptances',
     columns: ['bill_uuid', 'posting_snapshot'],
