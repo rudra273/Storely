@@ -81,14 +81,20 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
       await ThermalPrinterService.instance.printBill(bill);
     } on PrinterException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.message),
+            action: SnackBarAction(label: 'Retry', onPressed: () => _print()),
+          ),
+        );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Printing failed. Try again.')),
+          SnackBar(
+            content: const Text('Printing failed. Try again.'),
+            action: SnackBarAction(label: 'Retry', onPressed: () => _print()),
+          ),
         );
       }
     } finally {
@@ -101,7 +107,7 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
     if (bill == null || _sharing) return;
     setState(() => _sharing = true);
     try {
-      await BillShare.sharePdf(bill);
+      await BillShare.showShareSheet(context, bill);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

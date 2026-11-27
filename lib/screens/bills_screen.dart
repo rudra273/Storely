@@ -332,7 +332,13 @@ class _BillsScreenState extends State<BillsScreen> {
     }
   }
 
-  Future<void> _shareBillPdf(Bill bill) => BillShare.sharePdf(bill);
+  Future<void> _shareBillPdf(Bill bill) => BillShare.showShareSheet(
+    context,
+    bill,
+    onWhatsApp: _whatsAppPhone(bill.customerPhone) != null
+        ? () => _sendBillOnWhatsApp(bill)
+        : null,
+  );
 
   String? _whatsAppPhone(String? value) {
     final phone = value?.replaceAll(RegExp(r'[^0-9]'), '');
@@ -341,45 +347,8 @@ class _BillsScreenState extends State<BillsScreen> {
     return phone;
   }
 
-  String _buildBillMessage(Bill bill, ShopProfile? shop) {
-    final buffer = StringBuffer()
-      ..writeln(shop?.name ?? 'Storely')
-      ..writeln(_billDisplayId(bill))
-      ..writeln('Customer: ${bill.customerName}')
-      ..writeln(
-        'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)}',
-      );
-    if (shop?.gstin != null) buffer.writeln('GSTIN: ${shop!.gstin}');
-    if (shop?.address != null) buffer.writeln(shop!.address);
-    buffer
-      ..writeln('')
-      ..writeln('Items:');
-    for (final item in bill.items) {
-      buffer.writeln(
-        '- ${item.productName} ${item.quantityLabel} x ${item.priceLabel}: ${rupees(item.subtotal)}',
-      );
-    }
-    buffer
-      ..writeln('')
-      ..writeln('Subtotal: ${rupees(bill.subtotalAmount)}');
-    if (bill.discountAmount > 0) {
-      buffer.writeln(
-        'Discount (${bill.discountPercent.toStringAsFixed(2)}%): -${rupees(bill.discountAmount)}',
-      );
-    }
-    if (bill.roundOffAmount != 0) {
-      buffer.writeln('Round off: ${signedRupees(bill.roundOffAmount)}');
-    }
-    buffer
-      ..writeln('Total: ${rupees(bill.totalAmount)}')
-      ..writeln('Paid: ${rupees(bill.paidAmount)}')
-      ..writeln('Balance: ${rupees(bill.balanceDue)}')
-      ..writeln('Status: ${_paymentStatusLabel(bill.paymentStatus)}');
-    if (bill.paidAmount > 0) {
-      buffer.writeln('Payment: ${_paymentMethodLabel(bill.paymentMethod)}');
-    }
-    return buffer.toString();
-  }
+  String _buildBillMessage(Bill bill, ShopProfile? shop) =>
+      BillShare.buildWhatsAppMessage(bill, shop);
 
   @override
   Widget build(BuildContext context) {

@@ -62,6 +62,7 @@ class Bill {
   final String? originalBillNumber;
 
   bool get isCreditNote => documentType == documentCreditNote;
+  bool get isCancelled => lifecycleStatus == lifecycleCancelled;
 
   /// The same document with every amount and quantity sign-flipped, so a
   /// credit note can be printed with positive figures.

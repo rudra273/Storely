@@ -24,14 +24,14 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | A12 | Global search / settings search / notification routing | P/P/P | E02 | verified | Workspace search, settings search, and in-app alert routing passed on localhost, Docker and Android. Human UX review remains open. See `evidence/E02/notification-routing.md` and the search evidence records. |
 | A13 | Themes / seasonal launcher variants | E/E/— | — | excluded visual scope | Preserve existing theme; no seasonal/visual cloning. |
 | T01 | Sales invoice, B2B/B2C | E/E/E | E03 | verified | Reviewed checkout, exact decimal math (`D09`), line/doc discounts, inclusive/exclusive tax modes, round-off modes/increments, backdating, series settings, notes/metadata edit, and opt-in atomic Android posting/reconciliation verified. (`STORELY_NATIVE_SALE_POSTING` stays opt-in until E17/E18.) See E03 evidence records. |
-| T02 | Purchase invoice/stock receipt | P/P/P | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T02 | Purchase invoice/stock receipt | P/P/P | E04 | implementing | E04.1 receipt parity, `status=reversed` filter, and native duplicate-after-reversal fix verified (`evidence/E04/purchase-supplier-parity.md`). Typed line-level purchase GST/SAC charges remain E04.2 (M1). |
 | T03 | Customer payment-in | E/E/E | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| T04 | Supplier payment-out | P/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T04 | Supplier payment-out | P/E/E | E04 | verified | Mobile/web field parity (`purchase_uuid`, `reference`, `notes`), confirmed-vs-pending separation (`D07`/`D08`), and payment reversal verified across API, web, and Android. See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
 | T05 | Expense | E/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T06 | Other income | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T07 | Sales return / credit note | E/E/E | E03 | verified | Fractional return validation, exact remaining quantities, original bill tax/round-off/discount snapshot carry-over, opt-in atomic Android credit-note delivery/replay, and mixed-version compatibility verified. See [return quantity](evidence/E03/return-quantity.md), [billing commands](evidence/E03/native-billing-commands.md), and [billing controls](evidence/E03/billing-controls.md). |
-| T08 | Purchase return / debit note | N/N/N | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| T09 | Full purchase/payment reversal | P/E/E | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T08 | Purchase return / debit note | N/N/N | E04 | verified | Partial/full purchase returns (`DN/{FY}/{seq}`), stock-out, WAC removal, payable credit + refund settlement, reversal guard (`409 returns_recorded`), and supplier statement integration verified across API, web, and Android. See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
+| T09 | Full purchase/payment reversal | P/E/E | E04 | verified | Full purchase and supplier payment reversal actions, reason dialogs, and stock/payment/return guards aligned across API, web, and Android (`D06`). See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
 | T10 | Quotation/estimate | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T11 | Proforma invoice | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T12 | Sales order | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -128,10 +128,10 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | R25 | Financial year closing / period locks | N/N/N | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | R26 | E-invoice generation/status/cancel | N/N/N | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | R27 | E-way bill generation/status/cancel | N/N/N | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O01 | Invoice PDF/preview/share/print | E/E/E | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O02 | PDF/image sharing choice | P/P/P | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| O01 | Invoice PDF/preview/share/print | E/E/E | E12 | verified | A4/A5/80mm/58mm PDF and thermal output aligned across API, web, and Android with E03.3 line/doc discounts, tax mode, notes, and VOID banner. See [E12 evidence](evidence/E12/invoice-output-parity.md). |
+| O02 | PDF/image sharing choice | P/P/P | E12 | verified | Android unified Share sheet (PDF / WhatsApp-ready PNG image / WhatsApp text + paper choice) and Web native `Share PDF` + updated WhatsApp message verified. See [E12 evidence](evidence/E12/invoice-output-parity.md). |
 | O03 | Original/duplicate/triplicate copies | U/U/U | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O04 | Logo/signature, header/footer, columns | E/E/E | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| O04 | Logo/signature, header/footer, columns | E/E/E | E12 | verified | All 39 `show_*` flags (including `show_customer_trade_name`, `show_gst_breakdown`, `show_gst_total`), 4 paper sizes, logo, signature, and terms aligned across API, web, and Android. See [E12 evidence](evidence/E12/invoice-output-parity.md). |
 | O05 | Custom document titles/per-type print settings | P/P/P | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O06 | Table headers/widths/min rows/header repeat/page numbers | P/P/P | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O07 | Bluetooth thermal | E/N/— | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -167,14 +167,14 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D03 | E03 | verified | Android uses the same stock cost basis, signed quantities and row rounding as API/web. Shared fixture and emulator/browser/CSV evidence in `evidence/E03/stock-valuation.md`. |
 | D04 | E02 | verified | Paired localhost and offline Android hold/swap, safe discard and failed-write retention. See evidence/E02/slice-2.md. |
 | D05 | E02 | verified | Browser reload and Android database reopen preserve checkout. Two Android force-stops and cold launches preserved fields and step, then verified one invoice, payment and stock deduction. See `evidence/E02/slice-2.md`. |
-| D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
-| D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
-| D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
+| D06 | E04 | verified | Mobile `PurchaseHistoryScreen` now exposes `Pay supplier`, `Record payment terms`, `Return items (Debit note)`, and `Reverse purchase` with server guard parity. See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
+| D07 | E04 | verified | Mobile `SupplierPaymentsScreen` supports `purchase_uuid`, `reference`, `notes`, confirmed-vs-pending badges, and confirmed payment reversal; Web adds `notes`. See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
+| D08 | E04 | verified | Mobile separates Confirmed balance, Pending on this device, and Projected balance after sync, excludes reversed receipts, and converges to `0.00` diff against API/Web. See [E04.1 evidence](evidence/E04/purchase-supplier-parity.md). |
 | D09 | E03 | verified | Exact decimal/rational math across API (`Decimal`), Mobile (`ExactDecimal`), and Web (`BigInt` paise) verified against 12 v1 + 14 v2 independent oracle fixtures and 91 shared vectors at 0.00 tolerance. See [billing controls](evidence/E03/billing-controls.md). |
 | D10 | E03 | implementing | New sale and return quantity validation verified across clients and API, including exact remaining-stock guards. Broader unit conversion precision remains open. See `evidence/E03/sale-quantity.md` and `evidence/E03/return-quantity.md`. |
 | D11 | E03 | verified | Bank transfer aliases accepted with compatible wire codes and same-key replay. Android recovery, web history display and Docker integration passed. See `evidence/E03/payment-method-aliases.md`. |
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
-| D13 | E12 | planned | Not run; paired before/after scenario and regression required. |
+| D13 | E12 | verified | Print/share intent, settings (A4/A5/80mm/58mm), E03.3 receipt fields, and actionable Retry error states aligned across Web (browser/PDF/Web Share) and Android (Bluetooth ESC/POS + 203 dpi raster). Physical printer hardware verification remains E18. See [E12 evidence](evidence/E12/invoice-output-parity.md). |
 | D14 | E02 | deferred | Owner deferred web Hindi localization and portable web language selection. |
 | D15 | E03 | verified | Local capture, API preflight/post, opt-in Android command transport, device negotiation, exact replay, historical snapshot proof, explicit reconciliation, atomic payment/cancel/credit-note commands, and mixed-version upgrade/downgrade/restore compatibility verified (`STORELY_NATIVE_SALE_POSTING` remains opt-in until E17/E18 release gate). See [mixed-version restore](evidence/E03/native-mixed-version-restore.md). |
 

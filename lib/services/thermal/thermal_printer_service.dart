@@ -100,7 +100,7 @@ class ThermalPrinterService extends ChangeNotifier {
     final shop = await db.getShopProfile();
     final settings = await db.getBillSettings();
     final profile = await CapabilityProfile.load();
-    final bytes = ReceiptBuilder.needsImageMode(bill, shop)
+    final bytes = ReceiptBuilder.needsImageMode(bill, shop, settings)
         ? await ReceiptImage.build(
             bill: bill,
             shop: shop,

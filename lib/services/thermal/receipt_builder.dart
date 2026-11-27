@@ -26,11 +26,19 @@ enum ReceiptPaper {
 /// image instead (see [needsImageMode]).
 class ReceiptBuilder {
   /// True when any text on the receipt can't be printed in a Latin code page.
-  static bool needsImageMode(Bill bill, ShopProfile? shop) {
+  static bool needsImageMode(
+    Bill bill,
+    ShopProfile? shop, [
+    BillSettings? settings,
+  ]) {
     final texts = [
       shop?.name,
       shop?.address,
       bill.customerName,
+      bill.notes,
+      bill.cancelReason,
+      settings?.footerText,
+      settings?.termsText,
       for (final item in bill.items) item.productName,
     ];
     return texts.any((text) => text != null && text.runes.any((r) => r > 0xFF));
@@ -100,6 +108,15 @@ class ReceiptBuilder {
         styles: const PosStyles(align: PosAlign.center, bold: true),
       ),
     );
+    if (bill.isCancelled) {
+      final reason = (bill.cancelReason ?? '').trim();
+      bytes.addAll(
+        gen.text(
+          _latin(reason.isEmpty ? '*** VOID ***' : '*** VOID: $reason ***'),
+          styles: const PosStyles(align: PosAlign.center, bold: true),
+        ),
+      );
+    }
     bytes.addAll(gen.text('No: ${bill.billNumber}'));
     if (bill.isCreditNote && bill.originalBillNumber != null) {
       bytes.addAll(gen.text('Against: ${bill.originalBillNumber}'));
@@ -107,6 +124,15 @@ class ReceiptBuilder {
     bytes.addAll(
       gen.text(DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt)),
     );
+    if (hasGst) {
+      bytes.addAll(
+        gen.text(
+          bill.taxMode == Bill.taxModeExclusive
+              ? 'Prices excl. GST'
+              : 'Prices incl. GST',
+        ),
+      );
+    }
     if (bill.customerName.trim().isNotEmpty) {
       bytes.addAll(gen.text('Customer: ${_latin(bill.customerName)}'));
     }
@@ -134,6 +160,9 @@ class ReceiptBuilder {
           ),
         ]),
       );
+      if (settings.showDiscount && item.discountAmount > 0.005) {
+        bytes.addAll(gen.text('  Disc: ${money(item.discountAmount)}'));
+      }
     }
     bytes.addAll(gen.hr());
 
@@ -147,7 +176,13 @@ class ReceiptBuilder {
       kv('Subtotal', money(bill.subtotalAmount));
     }
     if (bill.discountAmount > 0.005) {
-      kv('Discount', '-${money(bill.discountAmount)}');
+      final discLabel =
+          bill.discountMode == Bill.discountModeAmount && bill.discountValue > 0
+          ? 'Disc (${money(bill.discountValue)} off)'
+          : bill.discountPercent > 0
+          ? 'Discount (${bill.discountPercent.toStringAsFixed(0)}%)'
+          : 'Discount';
+      kv(discLabel, '-${money(bill.discountAmount)}');
     }
     if (bill.roundOffAmount.abs() > 0.004) {
       kv('Round off', money(bill.roundOffAmount));
@@ -184,19 +219,21 @@ class ReceiptBuilder {
     }
 
     // Payment
+    final live = !bill.isCancelled;
     if (bill.isCreditNote) {
       kv(
         bill.paymentMethod == 'credit_note' ? 'Adjusted' : 'Refunded',
         money(bill.paidAmount),
       );
-    } else if (settings.showPaymentDetails) {
+    } else if (live && settings.showPaymentDetails) {
       kv('Paid', money(bill.paidAmount));
       if (bill.balanceDue > 0.005) {
         kv('Balance due', money(bill.balanceDue), bold: true);
       }
     }
     final upiId = settings.upiId.trim();
-    if (!bill.isCreditNote &&
+    if (live &&
+        !bill.isCreditNote &&
         settings.showUpiQr &&
         bill.balanceDue > 0.005 &&
         Upi.isValidId(upiId)) {
@@ -224,7 +261,12 @@ class ReceiptBuilder {
       );
     }
 
-    // Footer
+    // Notes & Footer
+    final billNotes = (bill.notes ?? '').trim();
+    if (billNotes.isNotEmpty) {
+      bytes.addAll(gen.hr());
+      bytes.addAll(gen.text('Notes: ${_latin(billNotes)}'));
+    }
     final footer = [
       if (settings.showFooterText) settings.footerText.trim(),
       settings.termsText.trim(),

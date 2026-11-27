@@ -69,11 +69,12 @@ class BillSettings {
   static const roundOffDown = 'down';
   static const roundOffIncrements = <double>[0.50, 1.00, 5.00, 10.00];
 
-  /// PDF page size: [paperA4] or [paperA5].
+  /// PDF page size: [paperA4], [paperA5], [paper80mm], or [paper58mm].
   final String paperSize;
+  static const paper80mm = '80mm';
+  static const paper58mm = '58mm';
 
-  /// A valid persisted size unsupported by this editor's A4/A5 projection.
-  /// Retain it through unrelated edits; an explicit paper choice replaces it.
+  /// Retained for backward-compatible constructor signatures; all 4 sizes are now first-class.
   final String? _preservedPaperSize;
 
   /// Shop UPI id (name@bank). When set, unpaid invoices carry a UPI QR for
@@ -258,10 +259,8 @@ class BillSettings {
           ? _cleanRoundOffMode(map['round_off_mode'])
           : null,
       roundOffIncrement: _cleanRoundOffIncrement(map['round_off_increment']),
-      paperSize: map['paper_size'] == paperA5 ? paperA5 : paperA4,
-      preservedPaperSize: {'80mm', '58mm'}.contains(map['paper_size'])
-          ? map['paper_size'] as String
-          : null,
+      paperSize: _cleanPaperSize(map['paper_size']),
+      preservedPaperSize: null,
       upiId: map['upi_id']?.toString().trim() ?? '',
       showUpiQr: _flag(map['show_upi_qr'], fallback: true),
       showAmountInWords: _flag(map['show_amount_in_words'], fallback: true),
@@ -583,6 +582,14 @@ double _cleanRoundOffIncrement(Object? value) {
     if ((parsed - allowed).abs() < 1e-6) return allowed;
   }
   return 1.0;
+}
+
+String _cleanPaperSize(Object? value) {
+  final text = value?.toString().toLowerCase();
+  if (text == BillSettings.paperA5) return BillSettings.paperA5;
+  if (text == BillSettings.paper80mm) return BillSettings.paper80mm;
+  if (text == BillSettings.paper58mm) return BillSettings.paper58mm;
+  return BillSettings.paperA4;
 }
 
 DateTime _date(Object? value) {

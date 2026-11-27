@@ -1,11 +1,5 @@
 part of '../bills_screen.dart';
 
-String _paymentStatusLabel(String status) => switch (status) {
-  Bill.statusPaid => 'Paid',
-  Bill.statusPartial => 'Partial',
-  _ => 'Unpaid',
-};
-
 String _paymentMethodLabel(String method) => paymentMethodLabel(method);
 
 String _billDisplayId(Bill bill) {

@@ -368,7 +368,15 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                           ),
                           ButtonSegment(
                             value: BillSettings.paperA5,
-                            label: Text('A5 (half page)'),
+                            label: Text('A5'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paper80mm,
+                            label: Text('80mm'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paper58mm,
+                            label: Text('58mm'),
                           ),
                         ],
                         selected: {_settings.paperSize},
