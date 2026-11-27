@@ -139,7 +139,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | O09 | Feed/copies/cut/drawer/custom width/local-language raster | P/P/— | E12 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O10 | Shared settings registry | P/P/P | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O11 | Currency/date/quantity/amount display preferences | P/P/P | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| O12 | Local backup/restore | E/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| O12 | Local backup/restore | E/N/P | E13 | implementing | Android SQLite v30 local backup/restore and cross-account isolation verified (`evidence/E17/pilot-release-hardening.md`). Cloud/web business backup belongs to E13 (M1). |
 | O13 | Automatic backup and reminder/retention | P/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O14 | Encrypted portable backups | U/N/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | O15 | Sync/conflicts/account-owned drafts | E/P/E | E03 | verified | Owner-scoped Android preferences, opted-in sale reservation/replay, explicit reconciliation, atomic payment/cancel/credit-note commands, mixed-version upgrade/restore safety, and complete sync field contract verified. See [mixed-version restore](evidence/E03/native-mixed-version-restore.md) and [draft handoff](evidence/E03/draft-handoff.md). |
@@ -196,6 +196,9 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03.3A billing controls (line/doc discounts, inclusive/exclusive tax modes, round-off modes/increments, exact decimal `D09`) | verified | [Billing controls](evidence/E03/billing-controls.md) |
 | E03.3B document date/series, posted-bill metadata edit, audit history, and shop stock ledger (`F02`, `F03`, `T19`, `A10`, `I10`) | verified | [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md) |
 | E03.3C cross-device single-consumer draft handoff (`O16`) and E03 phase exit | verified | [Draft handoff](evidence/E03/draft-handoff.md) |
+| E04.1 purchase & supplier parity (`D06–D08`, `T04`, `T08`, `T09`) and purchase returns / debit notes | verified | [Purchase & supplier parity](evidence/E04/purchase-supplier-parity.md) |
+| E12.1–E12.2 invoice PDF, print & share parity (`O01`, `O02`, `O04`, `D13`) across A4/A5/80mm/58mm | verified | [Invoice output parity](evidence/E12/invoice-output-parity.md) |
+| E17 (lite) Base v1 pilot release hardening (PG 18.6 migration `0029`, `O12` backup/restore, clean release APK) | verified | [Pilot release hardening](evidence/E17/pilot-release-hardening.md) |
 
 ## Phase readiness
 
@@ -204,22 +207,22 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
 | E02 | agent-verified | Paired checkout sequence (`D01`) and E02 phase-exit checks passed on localhost browser and Android emulator (`evidence/E02/phase-exit.md`), joining verified E02.1–E02.3 deliverables (settlement, drafts, held carts, process-death recovery, catalog entry, payment/completion, pricing/GST defaults, low-stock threshold, portable preferences, first-invoice onboarding, workspace/settings search, notification routing). Web Hindi localization (`D14`) is deferred by owner. Human UX review belongs to E18. |
-| E03 | agent-verified | All E03.1–E03.3 deliverables (`D03`, `D09`, `D11`, `D15`, `T01`, `T07`, `T19`, `T20`, `F02`, `F03`, `F10–F13`, `F17`, `A10`, `I10`, `O15`, `O16`) are verified across API, web, and Android (`STORELY_NATIVE_SALE_POSTING` remains opt-in until E17/E18; unit conversion precision under `D10` continues in E08). Human UX review belongs to E18. Ready for E04. |
-| E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E07 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E08 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E09 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E10 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E11 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E12 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E13 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E14 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E15 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E16 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E17 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
-| E18 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
+| E03 | agent-verified | All E03.1–E03.3 deliverables (`D03`, `D09`, `D11`, `D15`, `T01`, `T07`, `T19`, `T20`, `F02`, `F03`, `F10–F13`, `F17`, `A10`, `I10`, `O15`, `O16`) are verified across API, web, and Android (`STORELY_NATIVE_SALE_POSTING` remains opt-in until E17/E18; unit conversion precision under `D10` continues in E08). Human UX review belongs to E18. |
+| E04 | implementing (E04.1 verified) | Base (v1) slice `E04.1` (`D06–D08`, `T04`, `T08`, `T09`, purchase returns/debit notes & reversals) is agent-verified (`evidence/E04/purchase-supplier-parity.md`). Remaining typed purchase GST/SAC charges (`E04.2`, `F16`, `T05`, `R06`) are scheduled in **M1**. |
+| E05 | planned (M1) | Scheduled in **M1** (Parties, receivables, credit limits, aging, split tender, advances). |
+| E06 | planned (M1) | Scheduled in **M1** (Accounting, cashbook, bank accounts, P&L, balance sheet). |
+| E07 | planned (M1) | Scheduled in **M1** (Quotations, proforma, sales/purchase orders, delivery challans). |
+| E08 | planned (M2) | Scheduled in **M2** (Multi-firm, warehouses, alternate units `D10`, batch/expiry/serials, transfers). |
+| E09 | planned (M2) | Scheduled in **M2** (Wholesale tiers, party pricing, BOM/manufacturing, deep reports). |
+| E10 | planned (M2) | Scheduled in **M2** (Granular permissions, app lock, cheques, loans, fixed assets, POS shift). |
+| E11 | planned (M1/M2) | Core GST/HSN/TCS/TDS reports scheduled in **M1**; provider-gated GSTIN/e-Invoice/e-Way scheduled in **M2**. |
+| E12 | implementing (E12.1–E12.2 verified) | Base (v1) slices `E12.1–E12.2` (`O01`, `O02`, `O04`, `D13`) are agent-verified across API, web, and Android (`evidence/E12/invoice-output-parity.md`). Physical Bluetooth printer check belongs to E18; Wi-Fi/USB adapters (`E12.3`) are scheduled in **M2**. |
+| E13 | planned (M1) | Android local backup/restore (`O12`) verified in Base v1; full imports, recycle bin, encrypted/auto backups, and FY closing are scheduled in **M1**. |
+| E14 | planned (M2) | Scheduled in **M2** (Recurring invoices, automated reminders, scheduled email reports). |
+| E15 | planned (M2) | Scheduled in **M2** (Storefront, payment links, loyalty, CRM). |
+| E16 | planned (M2) | Scheduled in **M2** (Phone/Google auth, multi-currency/regional, Tally/Vyapar interop, deferred `D14`). |
+| E17 | implementing (E17 lite verified) | Base (v1) pilot release hardening verified (`evidence/E17/pilot-release-hardening.md`: PG 18.6 migration `0029`, `O12` restore, clean release APK without debug CA). Full regression repeats for M1/M2. |
+| E18 | ready for pilot walkthrough | Base (v1) pilot is ready for human UX walkthrough on `https://localhost` and `app-release.apk`, decision on `STORELY_NATIVE_SALE_POSTING`, and production deploy. |
 
 ## Feature evidence record template
 
