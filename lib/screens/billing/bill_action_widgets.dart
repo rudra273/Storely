@@ -63,6 +63,7 @@ class _EditBuyerDetailsSheet extends StatelessWidget {
   final TextEditingController tradeNameCtrl;
   final TextEditingController addressCtrl;
   final TextEditingController stateCodeCtrl;
+  final TextEditingController notesCtrl;
 
   const _EditBuyerDetailsSheet({
     required this.isB2b,
@@ -73,6 +74,7 @@ class _EditBuyerDetailsSheet extends StatelessWidget {
     required this.tradeNameCtrl,
     required this.addressCtrl,
     required this.stateCodeCtrl,
+    required this.notesCtrl,
   });
 
   @override
@@ -182,6 +184,19 @@ class _EditBuyerDetailsSheet extends StatelessWidget {
                     ),
                   ),
                 ],
+                const SizedBox(height: AppSpacing.md),
+                TextField(
+                  key: const ValueKey('edit-bill-notes'),
+                  controller: notesCtrl,
+                  maxLength: 500,
+                  minLines: 1,
+                  maxLines: 3,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                    prefixIcon: Icon(Icons.notes_outlined),
+                  ),
+                ),
                 const SizedBox(height: AppSpacing.lg),
                 Row(
                   children: [

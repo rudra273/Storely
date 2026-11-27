@@ -19,7 +19,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | A07 | Owner/admin/staff and invitations | E/E/E | E02 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A08 | Configurable permissions / category access | N/N/N | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | A09 | App lock / sensitive-action authentication | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| A10 | Audit/security history | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| A10 | Audit/security history | P/P/E | E03 | verified | Shop-wide audit & security history with date/action filters on API/Web (`Activity & audit`), local product/stock/bill audit logging and `AuditLogScreen` on Android. See [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md). |
 | A11 | Onboarding tutorial and first invoice | P/P/P | E02 | implementing | Home guidance through a first saved invoice passed paired localhost and Android checks. Broader tutorial scope and human UX review remain open. See `evidence/E02/first-invoice-onboarding.md`. |
 | A12 | Global search / settings search / notification routing | P/P/P | E02 | verified | Workspace search, settings search, and in-app alert routing passed on localhost, Docker and Android. Human UX review remains open. See `evidence/E02/notification-routing.md` and the search evidence records. |
 | A13 | Themes / seasonal launcher variants | E/E/— | — | excluded visual scope | Preserve existing theme; no seasonal/visual cloning. |
@@ -41,13 +41,13 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | T16 | Asset sale/purchase | N/N/N | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T17 | Party-to-party balance transfer | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T18 | Save / Save and new / post-save preview | P/P/P | E02 | verified | Localhost and Android verified saved settlement summary, clean New invoice and saved invoice view. Printing transport verification remains E12. See evidence/E02/slice-3-payment-completion.md. |
-| T19 | Editing posted documents | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| T19 | Editing posted documents | P/P/P | E03 | verified | Admin-only non-financial metadata & notes editing (`PATCH /bills/{id}` on API/Web, `_EditBuyerDetailsSheet` on Android) with field-diff audit trail, cancelled-bill `409` guard, and immutable financial lines/totals. See [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md). |
 | T20 | Cancellation / dependency guards | E/E/E | E03 | implementing | Atomic native cancellation command with credit-note dependency guard, deterministic stock void, and idempotent replay verified across API and Android. Mixed-version rollout remains open. See [billing commands](evidence/E03/native-billing-commands.md). |
 | T21 | Recycle bin and restore | N/N/N | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | T22 | POS mode | P/P/P | E10 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F01 | Cash/credit and full/partial/unpaid | D/D/E | E02 | verified | Explicit settlement, five payment methods, exact paise cash change and invoice payment reference handling verified across API, web and Android. See evidence/E02/slice-3-payment-completion.md. |
-| F02 | Date/time/backdating | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F03 | Prefix/number/series | P/P/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| F02 | Date/time/backdating | P/P/P | E03 | verified | Admin-only invoice backdating (`bill_date` on API/Web, date picker in Android checkout) with future/range guards, staff `403`, FY series alignment, and audit logging. See [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md). |
+| F03 | Prefix/number/series | P/P/E | E03 | verified | Configurable template/prefix, padding, reset period, forward-only `next_sequence`, and live preview across API `invoice-settings`, Web `InvoiceSettingsPage`, and Android `BillSettingsScreen`. See [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md). |
 | F04 | Billing name distinct from party master | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F05 | Billing and multiple shipping addresses | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F06 | Country/currency/exchange rate | N/N/N | E16 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -82,7 +82,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | I07 | Party-specific item prices | N/N/N | E09 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I08 | Primary/secondary units and conversions | N/N/N | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I09 | Opening stock / opening valuation date | P/P/P | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| I10 | Reorder/low stock and stock ledger | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| I10 | Reorder/low stock and stock ledger | E/E/E | E03 | verified | Shop-wide & per-product stock ledger (`GET /stock-movements` + `ShopStockLedger` on Web, running balance & type filter chips in Android `StockMovementHistorySheet`), low-stock thresholds, and reorder levels verified. See [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md). |
 | I11 | Batch and expiry | P/P/P | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I12 | Manufacturing date/size/model/batch attributes | N/N/N | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I13 | Serial/IMEI tracking | N/N/N | E08 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -194,6 +194,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03.2 atomic Android payment, cancellation, and credit-note commands | verified | [Billing commands](evidence/E03/native-billing-commands.md) |
 | E03.2 mixed-version upgrade, downgrade, and backup/restore compatibility | verified | [Mixed-version restore](evidence/E03/native-mixed-version-restore.md) |
 | E03.3A billing controls (line/doc discounts, inclusive/exclusive tax modes, round-off modes/increments, exact decimal `D09`) | verified | [Billing controls](evidence/E03/billing-controls.md) |
+| E03.3B document date/series, posted-bill metadata edit, audit history, and shop stock ledger (`F02`, `F03`, `T19`, `A10`, `I10`) | verified | [E03.3B evidence](evidence/E03/billing-metadata-audit-ledger.md) |
 
 ## Phase readiness
 
@@ -202,7 +203,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
 | E02 | agent-verified | Paired checkout sequence (`D01`) and E02 phase-exit checks passed on localhost browser and Android emulator (`evidence/E02/phase-exit.md`), joining verified E02.1–E02.3 deliverables (settlement, drafts, held carts, process-death recovery, catalog entry, payment/completion, pricing/GST defaults, low-stock threshold, portable preferences, first-invoice onboarding, workspace/settings search, notification routing). Web Hindi localization (`D14`) is deferred by owner. Human UX review belongs to E18. |
-| E03 | implementing | E03.2 rollout gates (`D15`) and E03.3A billing controls (`D09`, `F10–F13`, `F17`) are verified. Next is E03.3B/C (`F02`, `F03`, `T19`, `A10`, `I10`, `O16`) before E04. |
+| E03 | implementing | E03.2 (`D15`), E03.3A (`D09`, `F10–F13`, `F17`), and E03.3B (`F02`, `F03`, `T19`, `A10`, `I10`) are verified. Final E03 slice is E03.3C (`O16` cross-device single-consumer draft handoff) before closing E03 and starting E04. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |

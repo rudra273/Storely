@@ -23,6 +23,7 @@ class _BillCheckoutSheet extends StatefulWidget {
   final double defaultRoundOffIncrement;
   final double maxFixedDiscount;
   final int itemCount;
+  final bool canBackdate;
   final Bill? initialBill;
   final Future<void> Function() onReview;
   final Future<({int id, BillTotals totals})> Function(_BillDraft) onSave;
@@ -39,6 +40,7 @@ class _BillCheckoutSheet extends StatefulWidget {
     required this.defaultRoundOffIncrement,
     required this.maxFixedDiscount,
     required this.itemCount,
+    this.canBackdate = true,
     this.initialBill,
   });
 
@@ -58,6 +60,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _paidAmountController = TextEditingController();
   final _cashReceivedController = TextEditingController();
   final _transactionIdController = TextEditingController();
+  final _notesController = TextEditingController();
 
   final _customerFieldLink = LayerLink();
   final _customerFocusNode = FocusNode();
@@ -70,6 +73,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   late String _roundOffMode;
   late double _roundOffIncrement;
   var _billType = Bill.typeB2c;
+  DateTime? _billDate;
   String? _paymentStatus;
   bool _allowUnassignedCredit = false;
   bool _saving = false;
@@ -121,6 +125,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
       _roundOffMode = bill.roundOffMode;
       _roundOffIncrement = bill.roundOffIncrement;
       _billType = bill.billType;
+      if (bill.notes != null && bill.notes!.isNotEmpty) {
+        _setCheckoutControllerText(_notesController, bill.notes!);
+      }
       _paymentStatus = null;
       _paymentMethod = 'cash';
       _hideCustomerSuggestions = true;
@@ -164,6 +171,12 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           : null;
       _paymentMethod = normalizeCheckoutPaymentMethod(raw['method']);
       _allowUnassignedCredit = raw['consent'] == true;
+      if (raw['billDate'] is String) {
+        final parsed = DateTime.tryParse(raw['billDate'] as String);
+        if (parsed != null && widget.canBackdate) {
+          _billDate = parsed;
+        }
+      }
     }
     final pending = widget.initialState['pending'];
     if (pending is Map) {
@@ -197,6 +210,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     'partial': _paidAmountController,
     'cash': _cashReceivedController,
     'reference': _transactionIdController,
+    'notes': _notesController,
   };
   String? _lastRaw;
   String? _draftError;
@@ -209,6 +223,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     'roundOffMode': _roundOffMode,
     'roundOffIncrement': _roundOffIncrement,
     'billType': _billType,
+    'billDate': _billDate?.toIso8601String(),
     'settlement': _paymentStatus,
     'method': _paymentMethod,
     'consent': _allowUnassignedCredit,
@@ -265,6 +280,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _paidAmountController.dispose();
     _cashReceivedController.dispose();
     _transactionIdController.dispose();
+    _notesController.dispose();
     _removeSuggestionOverlay();
     _customerFocusNode.dispose();
     super.dispose();
@@ -344,8 +360,65 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     return digits.isEmpty || digits == '91' ? null : digits;
   }
 
+  Future<void> _pickBillDate() async {
+    if (_frozen || !widget.canBackdate) return;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final initial = _billDate != null
+        ? DateTime(_billDate!.year, _billDate!.month, _billDate!.day)
+        : today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isAfter(today) ? today : initial,
+      firstDate: DateTime(2000, 1, 1),
+      lastDate: today,
+    );
+    if (picked == null || !mounted) return;
+    final pickedDay = DateTime(picked.year, picked.month, picked.day);
+    if (pickedDay.isAfter(today)) {
+      _showCheckoutError('Bill date cannot be in the future.');
+      return;
+    }
+    setState(() {
+      _billDate = pickedDay == today
+          ? null
+          : DateTime(pickedDay.year, pickedDay.month, pickedDay.day, 12, 0);
+    });
+  }
+
+  String _billDateLabel() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = _billDate;
+    if (date == null) {
+      return 'Today (${DateFormat('dd MMM yyyy').format(now)})';
+    }
+    final pickedDay = DateTime(date.year, date.month, date.day);
+    if (pickedDay == today) {
+      return 'Today (${DateFormat('dd MMM yyyy').format(now)})';
+    }
+    return DateFormat('dd MMM yyyy').format(date);
+  }
+
   Future<void> _submit(double total) async {
     if (_saving || _reviewRequired || _draftError != null) return;
+    if (!_frozen && _billDate != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final chosenDay = DateTime(
+        _billDate!.year,
+        _billDate!.month,
+        _billDate!.day,
+      );
+      if (chosenDay.isAfter(today)) {
+        _showCheckoutError('Bill date cannot be in the future.');
+        return;
+      }
+      if (chosenDay.isBefore(today) && !widget.canBackdate) {
+        _showCheckoutError('Only a shop owner or admin can backdate bills.');
+        return;
+      }
+    }
     if (!_frozen &&
         _discountMode == Bill.discountModeAmount &&
         _discountValue > widget.maxFixedDiscount + 1e-6) {
@@ -401,6 +474,10 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   trimmedReference.isEmpty)
               ? null
               : trimmedReference,
+          billDate: _billDate,
+          notes: _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
         );
       }
       FocusManager.instance.primaryFocus?.unfocus();
@@ -661,6 +738,42 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                         ),
                       ),
                     ],
+                    const SizedBox(height: 12),
+                    InkWell(
+                      key: const ValueKey('checkout-bill-date'),
+                      borderRadius: AppRadius.smRadius,
+                      onTap: widget.canBackdate && !_frozen
+                          ? _pickBillDate
+                          : null,
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: 'Bill date',
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                          suffixIcon: widget.canBackdate
+                              ? const Icon(Icons.edit_calendar_outlined)
+                              : const Icon(Icons.lock_outline_rounded, size: 18),
+                          enabled: widget.canBackdate && !_frozen,
+                        ),
+                        child: Text(
+                          _billDateLabel(),
+                          style: AppText.body,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      readOnly: _frozen,
+                      key: const ValueKey('checkout-notes'),
+                      controller: _notesController,
+                      maxLength: 500,
+                      minLines: 1,
+                      maxLines: 3,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes (optional)',
+                        prefixIcon: Icon(Icons.notes_outlined),
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     _BillSummaryRow(
                       label: context.l10n.subtotal,

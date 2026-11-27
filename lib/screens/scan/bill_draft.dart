@@ -26,6 +26,8 @@ class _BillDraft {
   final double paidAmount;
   final String paymentMethod;
   final String? transactionReference;
+  final DateTime? billDate;
+  final String? notes;
 
   Map<String, dynamic> toMap() => {
     'customerName': customerName,
@@ -45,6 +47,8 @@ class _BillDraft {
     'paidAmount': paidAmount,
     'paymentMethod': paymentMethod,
     'transactionReference': transactionReference,
+    'billDate': billDate?.toIso8601String(),
+    'notes': notes,
   };
   factory _BillDraft.fromMap(Map<String, dynamic> map) {
     final discountPercent = (map['discountPercent'] as num?)?.toDouble() ?? 0;
@@ -81,6 +85,10 @@ class _BillDraft {
       paidAmount: (map['paidAmount'] as num).toDouble(),
       paymentMethod: map['paymentMethod'] as String,
       transactionReference: map['transactionReference'] as String?,
+      billDate: map['billDate'] is String
+          ? DateTime.tryParse(map['billDate'] as String)
+          : null,
+      notes: map['notes'] as String?,
     );
   }
 
@@ -102,5 +110,7 @@ class _BillDraft {
     required this.paidAmount,
     required this.paymentMethod,
     this.transactionReference,
+    this.billDate,
+    this.notes,
   });
 }

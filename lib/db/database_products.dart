@@ -292,6 +292,43 @@ mixin DatabaseProducts {
         whereArgs: [product.id],
       );
       if (count > 0 && current != null) {
+        final productChanges = <String>[];
+        if (current.name != productToUpdate.name) {
+          productChanges.add(
+            'Name: ${current.name} → ${productToUpdate.name}',
+          );
+        }
+        if ((current.sellingPrice - productToUpdate.sellingPrice).abs() >
+            0.005) {
+          productChanges.add(
+            'Selling price: ${rupees(current.sellingPrice)} → ${rupees(productToUpdate.sellingPrice)}',
+          );
+        }
+        if ((current.purchasePrice - productToUpdate.purchasePrice).abs() >
+            0.005) {
+          productChanges.add(
+            'Purchase price: ${rupees(current.purchasePrice)} → ${rupees(productToUpdate.purchasePrice)}',
+          );
+        }
+        if (current.gstPercent != productToUpdate.gstPercent) {
+          productChanges.add(
+            'GST: ${current.gstPercent ?? 'default'}% → ${productToUpdate.gstPercent ?? 'default'}%',
+          );
+        }
+        if (current.reorderLevel != productToUpdate.reorderLevel) {
+          productChanges.add(
+            'Reorder level: ${current.reorderLevel ?? '—'} → ${productToUpdate.reorderLevel ?? '—'}',
+          );
+        }
+        if (productChanges.isNotEmpty) {
+          await _logAuditEvent(
+            txn,
+            entityType: 'product',
+            entityUuid: productToUpdate.uuid,
+            action: AuditAction.updated,
+            details: '${productToUpdate.name} · ${productChanges.join(', ')}',
+          );
+        }
         final quantityDelta = productToUpdate.quantity - current.quantity;
         await _insertStockMovement(
           txn,
@@ -304,6 +341,16 @@ mixin DatabaseProducts {
           reason: StockAdjustmentReason.count,
           notes: 'Stock count corrected',
         );
+        if (quantityDelta.abs() >= stockQuantityEpsilon) {
+          await _logAuditEvent(
+            txn,
+            entityType: 'stock',
+            entityUuid: productToUpdate.uuid,
+            action: AuditAction.stockAdjusted,
+            details:
+                '${productToUpdate.name}: ${quantityDelta >= 0 ? '+' : ''}${_formatDbQuantity(quantityDelta)} · Stock count corrected',
+          );
+        }
         await _syncProductQuantityCache(txn, product.id!);
       }
       notifyDatabaseChanged();
@@ -636,6 +683,17 @@ mixin DatabaseProducts {
         notes: trimmedNote == null || trimmedNote.isEmpty
             ? StockAdjustmentReason.label(reason)
             : trimmedNote,
+      );
+      await _logAuditEvent(
+        txn,
+        entityType: 'stock',
+        entityUuid: product.uuid,
+        action: AuditAction.stockAdjusted,
+        details: [
+          '${product.name}: ${delta >= 0 ? '+' : ''}${_formatDbQuantity(delta)}',
+          StockAdjustmentReason.label(reason),
+          if (trimmedNote != null && trimmedNote.isNotEmpty) trimmedNote,
+        ].join(' · '),
       );
       await txn.update(
         'products',

@@ -1716,6 +1716,7 @@ mixin DatabaseBills {
     String? customerGstTradeName,
     String? customerAddressSnapshot,
     String? placeOfSupplyStateCode,
+    String? notes,
     required bool isB2b,
   }) async {
     await _requireAdminMutation();
@@ -1725,6 +1726,7 @@ mixin DatabaseBills {
       // Stored as typed, like new bills (customers keep the 91-prefixed
       // form for matching).
       'customer_phone': _normaliseName(customerPhone),
+      if (notes != null) 'notes': _normaliseName(notes),
       'updated_at': _nowIso(),
     };
     if (isB2b) {
@@ -1790,6 +1792,7 @@ mixin DatabaseBills {
     'customer_gst_trade_name' => 'Trade name',
     'customer_address_snapshot' => 'Address',
     'place_of_supply_state_code' => 'Place of supply',
+    'notes' => 'Notes',
     _ => column,
   };
 

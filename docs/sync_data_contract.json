@@ -1305,6 +1305,11 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "notes": {
+          "wire": "notes",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "device_id": {
           "wire": "device_id",
           "kind": "mirrored",

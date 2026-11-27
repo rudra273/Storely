@@ -100,6 +100,7 @@ class Bill {
   final DateTime? cancelledAt;
   final String? cancelReason;
   final String? duplicatedFromBillUuid;
+  final String? notes;
   final String? deviceId;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -155,6 +156,7 @@ class Bill {
     this.cancelledAt,
     String? cancelReason,
     String? duplicatedFromBillUuid,
+    String? notes,
     this.deviceId,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -192,6 +194,7 @@ class Bill {
            ),
        cancelReason = _cleanOptional(cancelReason),
        duplicatedFromBillUuid = _cleanOptional(duplicatedFromBillUuid),
+       notes = _cleanOptional(notes),
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
@@ -239,6 +242,7 @@ class Bill {
     'cancelled_at': cancelledAt?.toIso8601String(),
     'cancel_reason': cancelReason,
     'duplicated_from_bill_uuid': duplicatedFromBillUuid,
+    'notes': notes,
     'device_id': deviceId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
@@ -313,6 +317,7 @@ class Bill {
           : DateTime.tryParse(map['cancelled_at'] as String),
       cancelReason: map['cancel_reason'] as String?,
       duplicatedFromBillUuid: map['duplicated_from_bill_uuid'] as String?,
+      notes: map['notes'] as String?,
       deviceId: map['device_id'] as String?,
       createdAt: createdAt,
       updatedAt:
@@ -324,6 +329,117 @@ class Bill {
       // Not a `bills` column; supplied transiently when bills are loaded with
       // their latest payment reference joined in (see getAllBills).
       transactionReference: map['transaction_reference'] as String?,
+    );
+  }
+
+  Bill copyWith({
+    int? id,
+    String? uuid,
+    String? shopId,
+    String? billNumber,
+    String? invoiceSeriesUuid,
+    String? billType,
+    int? customerId,
+    String? customerUuid,
+    String? customerName,
+    String? customerPhone,
+    String? customerGstin,
+    String? customerGstLegalName,
+    String? customerGstTradeName,
+    String? customerAddressSnapshot,
+    String? placeOfSupplyStateCode,
+    double? subtotalAmount,
+    double? discountPercent,
+    String? discountMode,
+    double? discountValue,
+    double? discountAmount,
+    String? taxMode,
+    double? profitCommissionPercent,
+    double? taxableAmount,
+    double? cgstAmount,
+    double? sgstAmount,
+    double? igstAmount,
+    double? roundOffAmount,
+    String? roundOffMode,
+    double? roundOffIncrement,
+    String? documentType,
+    String? originalBillUuid,
+    String? originalBillNumber,
+    double? totalAmount,
+    int? itemCount,
+    bool? isPaid,
+    String? paymentMethod,
+    double? paidAmount,
+    double? balanceDue,
+    String? paymentStatus,
+    String? lifecycleStatus,
+    DateTime? cancelledAt,
+    String? cancelReason,
+    String? duplicatedFromBillUuid,
+    String? notes,
+    bool clearNotes = false,
+    String? deviceId,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? deletedAt,
+    List<BillItem>? items,
+    String? transactionReference,
+  }) {
+    return Bill(
+      id: id ?? this.id,
+      uuid: uuid ?? this.uuid,
+      shopId: shopId ?? this.shopId,
+      billNumber: billNumber ?? this.billNumber,
+      invoiceSeriesUuid: invoiceSeriesUuid ?? this.invoiceSeriesUuid,
+      billType: billType ?? this.billType,
+      customerId: customerId ?? this.customerId,
+      customerUuid: customerUuid ?? this.customerUuid,
+      customerName: customerName ?? this.customerName,
+      customerPhone: customerPhone ?? this.customerPhone,
+      customerGstin: customerGstin ?? this.customerGstin,
+      customerGstLegalName: customerGstLegalName ?? this.customerGstLegalName,
+      customerGstTradeName: customerGstTradeName ?? this.customerGstTradeName,
+      customerAddressSnapshot:
+          customerAddressSnapshot ?? this.customerAddressSnapshot,
+      placeOfSupplyStateCode:
+          placeOfSupplyStateCode ?? this.placeOfSupplyStateCode,
+      subtotalAmount: subtotalAmount ?? this.subtotalAmount,
+      discountPercent: discountPercent ?? this.discountPercent,
+      discountMode: discountMode ?? this.discountMode,
+      discountValue: discountValue ?? this.discountValue,
+      discountAmount: discountAmount ?? this.discountAmount,
+      taxMode: taxMode ?? this.taxMode,
+      profitCommissionPercent:
+          profitCommissionPercent ?? this.profitCommissionPercent,
+      taxableAmount: taxableAmount ?? this.taxableAmount,
+      cgstAmount: cgstAmount ?? this.cgstAmount,
+      sgstAmount: sgstAmount ?? this.sgstAmount,
+      igstAmount: igstAmount ?? this.igstAmount,
+      roundOffAmount: roundOffAmount ?? this.roundOffAmount,
+      roundOffMode: roundOffMode ?? this.roundOffMode,
+      roundOffIncrement: roundOffIncrement ?? this.roundOffIncrement,
+      documentType: documentType ?? this.documentType,
+      originalBillUuid: originalBillUuid ?? this.originalBillUuid,
+      originalBillNumber: originalBillNumber ?? this.originalBillNumber,
+      totalAmount: totalAmount ?? this.totalAmount,
+      itemCount: itemCount ?? this.itemCount,
+      isPaid: isPaid ?? this.isPaid,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      paidAmount: paidAmount ?? this.paidAmount,
+      balanceDue: balanceDue ?? this.balanceDue,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      lifecycleStatus: lifecycleStatus ?? this.lifecycleStatus,
+      cancelledAt: cancelledAt ?? this.cancelledAt,
+      cancelReason: cancelReason ?? this.cancelReason,
+      duplicatedFromBillUuid:
+          duplicatedFromBillUuid ?? this.duplicatedFromBillUuid,
+      notes: clearNotes ? null : (notes ?? this.notes),
+      deviceId: deviceId ?? this.deviceId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      items: items ?? this.items,
+      transactionReference: transactionReference ?? this.transactionReference,
     );
   }
 }

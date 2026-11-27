@@ -259,6 +259,7 @@ class _BillsScreenState extends State<BillsScreen> {
     final stateCodeCtrl = TextEditingController(
       text: bill.placeOfSupplyStateCode ?? '',
     );
+    final notesCtrl = TextEditingController(text: bill.notes ?? '');
     try {
       final saved = await showModalBottomSheet<bool>(
         context: context,
@@ -273,6 +274,7 @@ class _BillsScreenState extends State<BillsScreen> {
           tradeNameCtrl: tradeNameCtrl,
           addressCtrl: addressCtrl,
           stateCodeCtrl: stateCodeCtrl,
+          notesCtrl: notesCtrl,
         ),
       );
       if (saved != true) return;
@@ -285,6 +287,7 @@ class _BillsScreenState extends State<BillsScreen> {
         customerGstTradeName: tradeNameCtrl.text,
         customerAddressSnapshot: addressCtrl.text,
         placeOfSupplyStateCode: stateCodeCtrl.text,
+        notes: notesCtrl.text,
         isB2b: isB2b,
       );
       await _loadBills();
@@ -308,6 +311,7 @@ class _BillsScreenState extends State<BillsScreen> {
       tradeNameCtrl.dispose();
       addressCtrl.dispose();
       stateCodeCtrl.dispose();
+      notesCtrl.dispose();
     }
   }
 

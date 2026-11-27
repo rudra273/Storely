@@ -909,6 +909,8 @@ class _ScanScreenState extends State<ScanScreen> {
             paymentMethod: paymentMethod,
             paidAmount: received,
             transactionReference: transactionReference,
+            notes: _cleanOptionalText(draft.notes),
+            createdAt: draft.billDate,
             duplicatedFromBillUuid:
                 _checkoutState['source_bill_uuid'] as String? ??
                 _effectiveDuplicateFromBill?.uuid,
@@ -1044,6 +1046,9 @@ class _ScanScreenState extends State<ScanScreen> {
               defaultRoundOffIncrement: settings.roundOffIncrement,
               maxFixedDiscount: maxFixedDiscount,
               itemCount: _itemCount,
+              canBackdate:
+                  DatabaseHelper.instance.isAdminMutationAllowed == null ||
+                  DatabaseHelper.instance.isAdminMutationAllowed!(),
               initialBill: _effectiveDuplicateFromBill,
             ),
           );

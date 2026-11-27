@@ -526,10 +526,13 @@ mixin DatabaseSettings {
       resetPeriod: settings.resetPeriod,
     );
     if (problem != null) throw ArgumentError(problem);
+    if (settings.nextSequence < 1) {
+      throw ArgumentError('Next invoice number must be at least 1');
+    }
     final shopId = await _activeShopId(txn);
     var rows = await txn.query(
       'invoice_series',
-      columns: ['id'],
+      columns: ['id', 'next_sequence'],
       where:
           'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
       whereArgs: [shopId],
@@ -540,7 +543,7 @@ mixin DatabaseSettings {
       await _seedDefaultInvoiceSeries(txn);
       rows = await txn.query(
         'invoice_series',
-        columns: ['id'],
+        columns: ['id', 'next_sequence'],
         where:
             'shop_id = ? AND deleted_at IS NULL AND is_active = 1 AND is_default = 1',
         whereArgs: [shopId],
@@ -551,15 +554,24 @@ mixin DatabaseSettings {
     if (rows.isEmpty) {
       throw StateError('No active invoice series is configured');
     }
+    final existingNext = (rows.single['next_sequence'] as num?)?.toInt() ?? 1;
+    final updateValues = <String, Object?>{
+      'name': _normaliseName(settings.name) ?? 'Default',
+      'format_template': template,
+      'sequence_padding': settings.sequencePadding.clamp(1, 8),
+      'reset_period': settings.resetPeriod,
+      'updated_at': _nowIso(),
+    };
+    if (settings.nextSequence > existingNext) {
+      updateValues['next_sequence'] = settings.nextSequence;
+      updateValues['last_sequence_key'] = InvoiceNumbering.resetKey(
+        DateTime.now(),
+        settings.resetPeriod,
+      );
+    }
     await txn.update(
       'invoice_series',
-      {
-        'name': _normaliseName(settings.name) ?? 'Default',
-        'format_template': template,
-        'sequence_padding': settings.sequencePadding.clamp(1, 8),
-        'reset_period': settings.resetPeriod,
-        'updated_at': _nowIso(),
-      },
+      updateValues,
       where: 'id = ?',
       whereArgs: [rows.single['id']],
     );

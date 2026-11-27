@@ -1,16 +1,55 @@
 part of '../products_screen.dart';
 
-class _StockMovementHistorySheet extends StatelessWidget {
+typedef _StockMovementHistorySheet = StockMovementHistorySheet;
+
+class StockMovementHistorySheet extends StatefulWidget {
   final Product product;
   final List<StockMovement> movements;
 
-  const _StockMovementHistorySheet({
+  const StockMovementHistorySheet({
+    super.key,
     required this.product,
     required this.movements,
   });
 
   @override
+  State<StockMovementHistorySheet> createState() =>
+      _StockMovementHistorySheetState();
+}
+
+class _StockMovementHistorySheetState extends State<StockMovementHistorySheet> {
+  String? _selectedType;
+
+  static const _typeFilters = <(String?, String, String)>[
+    (null, 'All', 'stock-filter-all'),
+    (StockMovementType.sale, 'Sale', 'stock-filter-sale'),
+    (StockMovementType.purchase, 'Purchase', 'stock-filter-purchase'),
+    (StockMovementType.adjustment, 'Adjustment', 'stock-filter-adjustment'),
+    (StockMovementType.returnIn, 'Return', 'stock-filter-return'),
+    (StockMovementType.voidSale, 'Void', 'stock-filter-void'),
+  ];
+
+  /// Computes the running balance after each movement by walking backward from
+  /// [widget.product.quantity] through newest-first [widget.movements].
+  List<({StockMovement movement, double balanceAfter})> _withBalances() {
+    var running = widget.product.quantity;
+    final rows = <({StockMovement movement, double balanceAfter})>[];
+    for (final movement in widget.movements) {
+      rows.add((movement: movement, balanceAfter: running));
+      running -= movement.quantityDelta;
+    }
+    return rows;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final allRows = _withBalances();
+    final filtered = _selectedType == null
+        ? allRows
+        : allRows
+              .where((row) => row.movement.movementType == _selectedType)
+              .toList();
+
     return SafeArea(
       top: false,
       child: Container(
@@ -48,27 +87,52 @@ class _StockMovementHistorySheet extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${product.name} • Current ${product.quantityLabel}',
+              '${widget.product.name} • Current ${widget.product.quantityLabel}',
               style: const TextStyle(color: AppColors.textMuted),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final filter in _typeFilters) ...[
+                    ChoiceChip(
+                      key: ValueKey(filter.$3),
+                      label: Text(filter.$2),
+                      selected: _selectedType == filter.$1,
+                      onSelected: (_) =>
+                          setState(() => _selectedType = filter.$1),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
             Flexible(
-              child: movements.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No stock movement yet',
-                        style: TextStyle(color: AppColors.textMuted),
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Text(
+                          widget.movements.isEmpty
+                              ? 'No stock movement yet'
+                              : 'No matching stock movements',
+                          style: const TextStyle(color: AppColors.textMuted),
+                        ),
                       ),
                     )
                   : ListView.separated(
                       shrinkWrap: true,
-                      itemCount: movements.length,
+                      itemCount: filtered.length,
                       separatorBuilder: (_, _) => Divider(
                         height: 1,
                         color: AppColors.borderOf(context),
                       ),
-                      itemBuilder: (_, index) =>
-                          _StockMovementRow(movement: movements[index]),
+                      itemBuilder: (_, index) => _StockMovementRow(
+                        movement: filtered[index].movement,
+                        balanceAfter: filtered[index].balanceAfter,
+                      ),
                     ),
             ),
           ],
@@ -80,8 +144,12 @@ class _StockMovementHistorySheet extends StatelessWidget {
 
 class _StockMovementRow extends StatelessWidget {
   final StockMovement movement;
+  final double balanceAfter;
 
-  const _StockMovementRow({required this.movement});
+  const _StockMovementRow({
+    required this.movement,
+    required this.balanceAfter,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -134,13 +202,27 @@ class _StockMovementRow extends StatelessWidget {
               ],
             ),
           ),
-          Text(
-            '${positive ? '+' : ''}${_formatQuantityInput(movement.quantityDelta)}',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w900,
-              fontSize: 15,
-            ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${positive ? '+' : ''}${_formatQuantityInput(movement.quantityDelta)}',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+              Text(
+                'Bal: ${_formatQuantityInput(balanceAfter)}',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ],
       ),

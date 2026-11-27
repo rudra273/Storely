@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 29,
+      version: 30,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -51,6 +51,7 @@ mixin DatabaseSchema {
     await _ensureInventoryColumns(db);
     await _ensureV22Columns(db);
     await _ensureV29Columns(db);
+    await _ensureV30Columns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -68,6 +69,7 @@ mixin DatabaseSchema {
     await _ensureInventoryColumns(db);
     await _ensureV22Columns(db);
     await _ensureV29Columns(db);
+    await _ensureV30Columns(db);
     await _runOneShotMigrations(db);
     await _ensureSyncTracking(db);
   }
@@ -735,6 +737,7 @@ mixin DatabaseSchema {
         cancelled_at TEXT,
         cancel_reason TEXT,
         duplicated_from_bill_uuid TEXT,
+        notes TEXT,
         device_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -1129,6 +1132,11 @@ mixin DatabaseSchema {
       'discount_amount': 'REAL NOT NULL DEFAULT 0',
       'tax_mode': 'TEXT',
     });
+  }
+
+  /// v30 billing metadata: optional notes on bills.
+  Future<void> _ensureV30Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'bills', {'notes': 'TEXT'});
   }
 
   /// v20 changed these index definitions but kept their names, so the CREATE
