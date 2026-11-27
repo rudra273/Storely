@@ -52,6 +52,23 @@ class BillSettings {
   /// Round the grand total to the nearest rupee with a 'Round off' line.
   final bool roundOffTotal;
 
+  /// Default rate tax mode for new bills: `'inclusive'` or `'exclusive'`.
+  final String defaultTaxMode;
+
+  /// Round-off mode: `'none'`, `'nearest'`, `'up'`, or `'down'`.
+  final String roundOffMode;
+
+  /// Round-off increment in rupees: `0.50`, `1.00`, `5.00`, or `10.00`.
+  final double roundOffIncrement;
+
+  static const taxModeInclusive = 'inclusive';
+  static const taxModeExclusive = 'exclusive';
+  static const roundOffNone = 'none';
+  static const roundOffNearest = 'nearest';
+  static const roundOffUp = 'up';
+  static const roundOffDown = 'down';
+  static const roundOffIncrements = <double>[0.50, 1.00, 5.00, 10.00];
+
   /// PDF page size: [paperA4] or [paperA5].
   final String paperSize;
 
@@ -122,7 +139,10 @@ class BillSettings {
     this.showGstTotal = true,
     this.showGrandTotal = true,
     this.showFooterText = true,
-    this.roundOffTotal = true,
+    bool roundOffTotal = true,
+    String defaultTaxMode = taxModeInclusive,
+    String? roundOffMode,
+    double roundOffIncrement = 1.0,
     this.paperSize = paperA4,
     String? preservedPaperSize,
     this.upiId = '',
@@ -134,7 +154,15 @@ class BillSettings {
     DateTime? createdAt,
     DateTime? updatedAt,
     this.deletedAt,
-  }) : _preservedPaperSize =
+  }) : defaultTaxMode = _cleanTaxMode(defaultTaxMode),
+       roundOffMode = roundOffMode != null
+           ? _cleanRoundOffMode(roundOffMode)
+           : (roundOffTotal ? roundOffNearest : roundOffNone),
+       roundOffTotal = roundOffMode != null
+           ? _cleanRoundOffMode(roundOffMode) != roundOffNone
+           : roundOffTotal,
+       roundOffIncrement = _cleanRoundOffIncrement(roundOffIncrement),
+       _preservedPaperSize =
            paperSize == paperA4 && {'80mm', '58mm'}.contains(preservedPaperSize)
            ? preservedPaperSize
            : null,
@@ -225,6 +253,11 @@ class BillSettings {
       showGrandTotal: _flag(map['show_grand_total'], fallback: true),
       showFooterText: _flag(map['show_footer_text'], fallback: true),
       roundOffTotal: _flag(map['round_off_total'], fallback: true),
+      defaultTaxMode: _cleanTaxMode(map['default_tax_mode']),
+      roundOffMode: map['round_off_mode'] != null
+          ? _cleanRoundOffMode(map['round_off_mode'])
+          : null,
+      roundOffIncrement: _cleanRoundOffIncrement(map['round_off_increment']),
       paperSize: map['paper_size'] == paperA5 ? paperA5 : paperA4,
       preservedPaperSize: {'80mm', '58mm'}.contains(map['paper_size'])
           ? map['paper_size'] as String
@@ -290,6 +323,9 @@ class BillSettings {
     'show_grand_total': showGrandTotal ? 1 : 0,
     'show_footer_text': showFooterText ? 1 : 0,
     'round_off_total': roundOffTotal ? 1 : 0,
+    'default_tax_mode': defaultTaxMode,
+    'round_off_mode': roundOffMode,
+    'round_off_increment': roundOffIncrement,
     'paper_size': _preservedPaperSize ?? paperSize,
     'upi_id': upiId.trim(),
     'show_upi_qr': showUpiQr ? 1 : 0,
@@ -349,6 +385,9 @@ class BillSettings {
     bool? showGrandTotal,
     bool? showFooterText,
     bool? roundOffTotal,
+    String? defaultTaxMode,
+    String? roundOffMode,
+    double? roundOffIncrement,
     String? paperSize,
     String? upiId,
     bool? showUpiQr,
@@ -413,7 +452,20 @@ class BillSettings {
       showGstTotal: showGstTotal ?? this.showGstTotal,
       showGrandTotal: showGrandTotal ?? this.showGrandTotal,
       showFooterText: showFooterText ?? this.showFooterText,
-      roundOffTotal: roundOffTotal ?? this.roundOffTotal,
+      roundOffTotal: roundOffMode != null
+          ? _cleanRoundOffMode(roundOffMode) != roundOffNone
+          : (roundOffTotal ?? this.roundOffTotal),
+      defaultTaxMode: defaultTaxMode ?? this.defaultTaxMode,
+      roundOffMode: roundOffMode != null
+          ? _cleanRoundOffMode(roundOffMode)
+          : roundOffTotal != null
+          ? (roundOffTotal
+                ? (this.roundOffMode == roundOffNone
+                      ? roundOffNearest
+                      : this.roundOffMode)
+                : roundOffNone)
+          : this.roundOffMode,
+      roundOffIncrement: roundOffIncrement ?? this.roundOffIncrement,
       paperSize: paperSize ?? this.paperSize,
       preservedPaperSize: paperSize == null ? _preservedPaperSize : null,
       upiId: upiId ?? this.upiId,
@@ -503,6 +555,34 @@ String _cleanResetPeriod(Object? value) {
   const allowed = {'daily', 'monthly', 'financial_year', 'never'};
   final text = value?.toString();
   return allowed.contains(text) ? text! : InvoiceNumbering.defaultResetPeriod;
+}
+
+String _cleanTaxMode(Object? value) {
+  return value?.toString() == BillSettings.taxModeExclusive
+      ? BillSettings.taxModeExclusive
+      : BillSettings.taxModeInclusive;
+}
+
+String _cleanRoundOffMode(Object? value) {
+  const allowed = {
+    BillSettings.roundOffNone,
+    BillSettings.roundOffNearest,
+    BillSettings.roundOffUp,
+    BillSettings.roundOffDown,
+  };
+  final text = value?.toString();
+  return allowed.contains(text) ? text! : BillSettings.roundOffNearest;
+}
+
+double _cleanRoundOffIncrement(Object? value) {
+  final parsed = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '');
+  if (parsed == null) return 1.0;
+  for (final allowed in BillSettings.roundOffIncrements) {
+    if ((parsed - allowed).abs() < 1e-6) return allowed;
+  }
+  return 1.0;
 }
 
 DateTime _date(Object? value) {

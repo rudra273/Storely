@@ -256,7 +256,7 @@ void main() {
       await sql.execute('PRAGMA user_version = 27');
       await db.close();
       expect((await db.loadCheckoutCart(scope))!.state, isEmpty);
-      expect((await db.database).getVersion(), completion(28));
+      expect((await db.database).getVersion(), completion(29));
     },
   );
   test(

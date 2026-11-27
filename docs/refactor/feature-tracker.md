@@ -54,14 +54,14 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | F07 | Payment terms/due date | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F08 | Customer PO number/date | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F09 | E-way bill / IRN fields | N/N/N | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F10 | Document discount percentage | E/E/E | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F11 | Fixed document discount / alternate discount controls | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F12 | Line discount percent/amount | N/N/N | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F13 | Inclusive/exclusive rate per document/line | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| F10 | Document discount percentage | E/E/E | E03 | verified | Exact decimal document `%` discount before tax verified across API, web, mobile, Docker, browser, and emulator. See [billing controls](evidence/E03/billing-controls.md). |
+| F11 | Fixed document discount / alternate discount controls | P/P/P | E03 | verified | Fixed `₹` document discount with exact-paisa proration across GST lines, overflow guards, and `%`/`₹` toggle verified across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
+| F12 | Line discount percent/amount | N/N/N | E03 | verified | Per-line `%` and `₹` discounts with held-cart/draft persistence, invoice display/PDF, and credit-note carry-over verified across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
+| F13 | Inclusive/exclusive rate per document/line | P/P/P | E03 | verified | Shop default, per-document, and per-line inclusive/exclusive tax modes verified with mixed-mode oracle fixtures across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
 | F14 | Transaction-level tax and tax conflicts | P/P/P | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F15 | Cess, additional cess, TCS/TDS, ITC and reverse charge | N/N/N | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F16 | Taxable additional charges with SAC | P/P/P | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F17 | Round-off modes/increments | P/P/P | E03 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| F17 | Round-off modes/increments | P/P/P | E03 | verified | Shop default and per-bill `none`/`nearest`/`up`/`down` round-off across `₹0.50`/`₹1`/`₹5`/`₹10` increments verified across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
 | F18 | Split tender | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F19 | Settlement discount/write-off | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F20 | Advances/unallocated credits | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -170,7 +170,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | D06 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D07 | E04 | planned | Not run; paired before/after scenario and regression required. |
 | D08 | E04 | planned | Not run; paired before/after scenario and regression required. |
-| D09 | E03 | planned | Not run; paired before/after scenario and regression required. |
+| D09 | E03 | verified | Exact decimal/rational math across API (`Decimal`), Mobile (`ExactDecimal`), and Web (`BigInt` paise) verified against 12 v1 + 14 v2 independent oracle fixtures and 91 shared vectors at 0.00 tolerance. See [billing controls](evidence/E03/billing-controls.md). |
 | D10 | E03 | implementing | New sale and return quantity validation verified across clients and API, including exact remaining-stock guards. Broader unit conversion precision remains open. See `evidence/E03/sale-quantity.md` and `evidence/E03/return-quantity.md`. |
 | D11 | E03 | verified | Bank transfer aliases accepted with compatible wire codes and same-key replay. Android recovery, web history display and Docker integration passed. See `evidence/E03/payment-method-aliases.md`. |
 | D12 | E02 | verified | Sales checkout uses its dedicated durable store. Legacy meaningful drafts survive age, failed writes keep the prior revision, and an unconfirmed request cannot be replaced or cleared. Rechecked 122 web billing and draft-store tests. See `evidence/E02/slice-2.md` and `evidence/E02/notification-routing.md`. |
@@ -193,6 +193,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03.2 reconciliation of reserved Android sales (shortages, snapshot drift, local edits, lost responses) | verified | [Reconciliation](evidence/E03/native-sale-reconciliation.md) |
 | E03.2 atomic Android payment, cancellation, and credit-note commands | verified | [Billing commands](evidence/E03/native-billing-commands.md) |
 | E03.2 mixed-version upgrade, downgrade, and backup/restore compatibility | verified | [Mixed-version restore](evidence/E03/native-mixed-version-restore.md) |
+| E03.3A billing controls (line/doc discounts, inclusive/exclusive tax modes, round-off modes/increments, exact decimal `D09`) | verified | [Billing controls](evidence/E03/billing-controls.md) |
 
 ## Phase readiness
 
@@ -201,7 +202,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E00 | implementing | Baseline checks and paid roundtrip verified. Close the broad browser harness, fixture and final environment gaps against current revisions. See [E00 evidence](evidence/E00/initial/summary.md). |
 | E01 | complete | Foundation verification passed. See [closing audit](evidence/E01/closing-audit.md) and [command contract](contracts/E01-command-foundations.md). Final human acceptance belongs to E18. |
 | E02 | agent-verified | Paired checkout sequence (`D01`) and E02 phase-exit checks passed on localhost browser and Android emulator (`evidence/E02/phase-exit.md`), joining verified E02.1–E02.3 deliverables (settlement, drafts, held carts, process-death recovery, catalog entry, payment/completion, pricing/GST defaults, low-stock threshold, portable preferences, first-invoice onboarding, workspace/settings search, notification routing). Web Hindi localization (`D14`) is deferred by owner. Human UX review belongs to E18. |
-| E03 | implementing | All E03.2 rollout gates (capture, preflight/post, snapshot proof, reconciliation, atomic payment/cancel/credit-note commands, and mixed-version upgrade/restore) are verified (`D15` closed). Next is E03.3 remaining billing controls (`F02`, `F03`, `F10–F13`, `F17`, `T19`, `O16`, `D09`) before E04. |
+| E03 | implementing | E03.2 rollout gates (`D15`) and E03.3A billing controls (`D09`, `F10–F13`, `F17`) are verified. Next is E03.3B/C (`F02`, `F03`, `T19`, `A10`, `I10`, `O16`) before E04. |
 | E04 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E05 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |
 | E06 | planned | See explicit dependency list in implementation plan; no gate has passed yet. |

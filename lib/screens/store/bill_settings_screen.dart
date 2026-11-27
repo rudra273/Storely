@@ -664,13 +664,93 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                               showGrandTotal: value,
                             ),
                           ),
-                          _switch(
-                            'Round grand total to nearest ₹1',
-                            _settings.roundOffTotal,
-                            (value) => _settings = _settings.copyWith(
-                              roundOffTotal: value,
+                          const SizedBox(height: AppSpacing.sm),
+                          Text('Default tax mode', style: AppText.caption),
+                          const SizedBox(height: AppSpacing.xs),
+                          SegmentedButton<String>(
+                            key: const ValueKey('settings-default-tax-mode'),
+                            segments: const [
+                              ButtonSegment(
+                                value: BillSettings.taxModeInclusive,
+                                label: Text('GST inclusive'),
+                              ),
+                              ButtonSegment(
+                                value: BillSettings.taxModeExclusive,
+                                label: Text('GST exclusive'),
+                              ),
+                            ],
+                            selected: {_settings.defaultTaxMode},
+                            showSelectedIcon: false,
+                            onSelectionChanged: (value) => setState(
+                              () => _settings = _settings.copyWith(
+                                defaultTaxMode: value.first,
+                              ),
                             ),
                           ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text('Round-off mode', style: AppText.caption),
+                          const SizedBox(height: AppSpacing.xs),
+                          Wrap(
+                            key: const ValueKey('settings-round-off-mode'),
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final entry in const [
+                                (BillSettings.roundOffNone, 'None'),
+                                (BillSettings.roundOffNearest, 'Nearest'),
+                                (BillSettings.roundOffUp, 'Round up'),
+                                (BillSettings.roundOffDown, 'Round down'),
+                              ])
+                                ChoiceChip(
+                                  key: ValueKey(
+                                    'settings-round-off-mode-${entry.$1}',
+                                  ),
+                                  label: Text(entry.$2),
+                                  selected: _settings.roundOffMode == entry.$1,
+                                  onSelected: (_) => setState(
+                                    () => _settings = _settings.copyWith(
+                                      roundOffMode: entry.$1,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (_settings.roundOffMode !=
+                              BillSettings.roundOffNone) ...[
+                            const SizedBox(height: AppSpacing.sm),
+                            Text('Round-off increment', style: AppText.caption),
+                            const SizedBox(height: AppSpacing.xs),
+                            Wrap(
+                              key: const ValueKey(
+                                'settings-round-off-increment',
+                              ),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final inc
+                                    in BillSettings.roundOffIncrements)
+                                  ChoiceChip(
+                                    key: ValueKey(
+                                      'settings-round-off-increment-${inc.toStringAsFixed(2)}',
+                                    ),
+                                    label: Text(
+                                      inc == 0.5
+                                          ? '₹0.50'
+                                          : '₹${inc.toStringAsFixed(0)}',
+                                    ),
+                                    selected:
+                                        (_settings.roundOffIncrement - inc)
+                                            .abs() <
+                                        1e-6,
+                                    onSelected: (_) => setState(
+                                      () => _settings = _settings.copyWith(
+                                        roundOffIncrement: inc,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: AppSpacing.md),

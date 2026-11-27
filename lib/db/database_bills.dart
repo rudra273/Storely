@@ -770,6 +770,12 @@ mixin DatabaseBills {
             igstAmountSnapshot: item.igstAmountSnapshot,
             wasDirectPrice: item.wasDirectPrice,
             quantity: -qty,
+            discountMode: item.discountMode,
+            discountValue: item.discountValue,
+            discountAmount: item.quantity == 0
+                ? 0
+                : -roundMoney(item.discountAmount * (qty / item.quantity)),
+            taxMode: item.taxMode,
             originalItemUuid: item.uuid,
             mrpSnapshot: item.mrpSnapshot,
             createdAt: when,
@@ -781,6 +787,9 @@ mixin DatabaseBills {
       final totals = BillTotals.fromTaxedItems(
         lines,
         roundOff: settings.roundOffTotal,
+        roundOffMode: original.roundOffMode,
+        roundOffIncrement: original.roundOffIncrement,
+        billTaxMode: original.taxMode,
       );
       final refund = -totals.grandTotal; // positive amount owed back
       if (settlement == creditNoteSettleAdjust &&
@@ -807,12 +816,17 @@ mixin DatabaseBills {
           placeOfSupplyStateCode: original.placeOfSupplyStateCode,
           subtotalAmount: totals.subtotal,
           discountPercent: original.discountPercent,
+          discountMode: original.discountMode,
+          discountValue: original.discountValue,
           discountAmount: totals.discountAmount,
+          taxMode: original.taxMode,
           taxableAmount: totals.taxableAmount,
           cgstAmount: totals.cgstAmount,
           sgstAmount: totals.sgstAmount,
           igstAmount: totals.igstAmount,
           roundOffAmount: totals.roundOffAmount,
+          roundOffMode: original.roundOffMode,
+          roundOffIncrement: original.roundOffIncrement,
           totalAmount: totals.grandTotal,
           itemCount: lines.length,
           isPaid: false,

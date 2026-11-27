@@ -154,9 +154,33 @@ Map<String, dynamic> _request(dynamic decoded) {
     }
     movementByProduct[product] = movement;
   }
+  final billDiscountMode = invoice['discount_mode'] ?? 'percent';
+  if (billDiscountMode != 'percent' && billDiscountMode != 'amount') {
+    _unsupported();
+  }
+  final billTaxMode = invoice['tax_mode'] ?? 'inclusive';
+  if (billTaxMode != 'inclusive' && billTaxMode != 'exclusive') {
+    _unsupported();
+  }
+  final roundOffMode = invoice['round_off_mode'] ?? 'nearest';
+  if (!{'none', 'nearest', 'up', 'down'}.contains(roundOffMode)) {
+    _unsupported();
+  }
+  final roundOffIncrement = invoice['round_off_increment'] == null
+      ? BigInt.from(100)
+      : _scaled(invoice['round_off_increment'], 2, max: BigInt.from(1000));
+  if (!{
+    BigInt.from(50),
+    BigInt.from(100),
+    BigInt.from(500),
+    BigInt.from(1000),
+  }.contains(roundOffIncrement)) {
+    _unsupported();
+  }
   var subtotal = BigInt.zero;
   var taxable = BigInt.zero;
   var tax = BigInt.zero;
+  var exclusiveGst = BigInt.zero;
   var net = BigInt.zero;
   final products = <String>{};
   final cartItems = <Map<String, dynamic>>[];
@@ -172,6 +196,28 @@ Map<String, dynamic> _request(dynamic decoded) {
     }
     final quantity = _scaled(row['quantity'], 3, max: BigInt.from(1000000000));
     if (quantity == BigInt.zero) _unsupported();
+    final lineDiscountMode = row['discount_mode'] ?? 'percent';
+    if (lineDiscountMode != 'percent' && lineDiscountMode != 'amount') {
+      _unsupported();
+    }
+    final lineDiscountValue = row['discount_value'] == null
+        ? BigInt.zero
+        : _scaled(
+            row['discount_value'],
+            2,
+            max: lineDiscountMode == 'percent'
+                ? BigInt.from(10000)
+                : BigInt.from(10).pow(20) - BigInt.one,
+          );
+    if (row['discount_amount'] != null) {
+      _amount(row['discount_amount']);
+    }
+    final lineTaxMode = row['tax_mode'];
+    if (lineTaxMode != null &&
+        lineTaxMode != 'inclusive' &&
+        lineTaxMode != 'exclusive') {
+      _unsupported();
+    }
     for (final field in [
       'selling_price_snapshot',
       'taxable_value_snapshot',
@@ -191,13 +237,22 @@ Map<String, dynamic> _request(dynamic decoded) {
         _scaled(movement['quantity_delta'], 3, signed: true) != -quantity) {
       _unsupported();
     }
+    final effectiveLineTaxMode = (lineTaxMode as String?) ?? billTaxMode;
     subtotal += lineSubtotal;
     taxable += lineTaxable;
     tax += lineTax;
+    if (effectiveLineTaxMode == 'exclusive') {
+      exclusiveGst += lineTax;
+    }
     net += lineTotal;
     cartItems.add({
       'product_uuid': product,
       'quantity': decimalTextFromScaled(quantity, scale: 3),
+      if (lineDiscountMode != 'percent' || lineDiscountValue > BigInt.zero) ...{
+        'discount_mode': lineDiscountMode,
+        'discount_value': decimalTextFromScaled(lineDiscountValue, scale: 2),
+      },
+      'tax_mode': ?lineTaxMode,
     });
     lines.add({
       'line_uuid': identity(row['uuid']),
@@ -229,22 +284,42 @@ Map<String, dynamic> _request(dynamic decoded) {
     'round_off_amount': _scaled(
       invoice['round_off_amount'],
       2,
-      max: BigInt.from(100),
+      max: BigInt.from(1000),
       signed: true,
     ),
   };
+  final roundOffAmount = header['round_off_amount']!;
+  if (roundOffMode == 'none' && roundOffAmount != BigInt.zero) {
+    _unsupported();
+  }
+  if (roundOffAmount.abs() > roundOffIncrement) {
+    _unsupported();
+  }
+  if (roundOffMode == 'nearest' &&
+      roundOffAmount.abs() * BigInt.two > roundOffIncrement) {
+    _unsupported();
+  }
   final discount = _scaled(
     invoice['discount_percent'],
     2,
     max: BigInt.from(10000),
   );
+  final discountValue = invoice['discount_value'] == null
+      ? (billDiscountMode == 'percent' ? discount : BigInt.zero)
+      : _scaled(
+          invoice['discount_value'],
+          2,
+          max: billDiscountMode == 'percent'
+              ? BigInt.from(10000)
+              : BigInt.from(10).pow(20) - BigInt.one,
+        );
   if (subtotal != header['subtotal'] ||
       taxable != header['taxable_amount'] ||
       tax !=
           header['cgst_amount']! +
               header['sgst_amount']! +
               header['igst_amount']! ||
-      subtotal - header['discount_amount']! != net ||
+      subtotal - header['discount_amount']! != net - exclusiveGst ||
       taxable + tax != net ||
       net + header['round_off_amount']! != header['total_amount'] ||
       header['paid_amount']! + header['balance_due']! !=
@@ -295,6 +370,11 @@ Map<String, dynamic> _request(dynamic decoded) {
   final cart = <String, dynamic>{
     'items': cartItems,
     'discount_percent': decimalTextFromScaled(discount, scale: 2),
+    'discount_mode': billDiscountMode,
+    'discount_value': decimalTextFromScaled(discountValue, scale: 2),
+    'tax_mode': billTaxMode,
+    'round_off_mode': roundOffMode,
+    'round_off_increment': _money(roundOffIncrement),
     'bill_type': billType,
     'customer_name': _optional(invoice['customer_name'], 120),
     'customer_phone': phone,

@@ -614,6 +614,10 @@ class _ScanScreenState extends State<ScanScreen> {
       igstAmountSnapshot: item.igstAmountSnapshot,
       wasDirectPrice: item.wasDirectPrice,
       quantity: item.quantity,
+      discountMode: item.discountMode,
+      discountValue: item.discountValue,
+      discountAmount: item.discountAmount,
+      taxMode: item.taxMode,
       mrpSnapshot: item.mrpSnapshot,
     );
   }
@@ -749,17 +753,43 @@ class _ScanScreenState extends State<ScanScreen> {
         },
       };
     }
-    // GST-inclusive prices: the payable total does not depend on GST
-    // registration or inter-state supply, only on discount and round-off.
-    BillTotals totalsFor(double discountPercent) => BillTotals.forCart(
+    final maxFixedDiscount = BillTotals.calculate(
       cartItems,
-      discountPercent: discountPercent,
       gstRegistered: false,
       interState: false,
-      roundOff:
-          (_checkoutState['pending'] as Map?)?['round_off'] as bool? ??
-          settings.roundOffTotal,
-    );
+      roundOffMode: Bill.roundOffNone,
+    ).totals.netAmount;
+
+    BillTotals totalsFor({
+      required String discountMode,
+      required double discountValue,
+      required String taxMode,
+      required String roundOffMode,
+      required double roundOffIncrement,
+      String? placeOfSupplyStateCode,
+      String? customerGstin,
+    }) {
+      final gstRegistered = shop?.gstRegistered ?? false;
+      final shopStateCode = _stateCodeFromGstin(shop?.gstin);
+      final supplyStateCode =
+          _cleanStateCode(placeOfSupplyStateCode) ??
+          _stateCodeFromGstin(customerGstin);
+      final interState =
+          gstRegistered &&
+          shopStateCode != null &&
+          supplyStateCode != null &&
+          shopStateCode != supplyStateCode;
+      return BillTotals.forCart(
+        cartItems,
+        discountMode: discountMode,
+        discountValue: discountValue,
+        taxMode: taxMode,
+        gstRegistered: gstRegistered,
+        interState: interState,
+        roundOffMode: roundOffMode,
+        roundOffIncrement: roundOffIncrement,
+      );
+    }
 
     var attemptId = const Uuid().v4();
     Bill? frozenBill;
@@ -782,7 +812,12 @@ class _ScanScreenState extends State<ScanScreen> {
       }, frozenItems);
       frozenTotals = BillTotals.fromTaxedItems(
         frozenItems,
-        roundOff: saved['round_off'] as bool,
+        roundOff: saved['round_off'] as bool? ?? true,
+        roundOffMode: saved['round_off_mode'] as String? ?? frozenBill.roundOffMode,
+        roundOffIncrement:
+            (saved['round_off_increment'] as num?)?.toDouble() ??
+            frozenBill.roundOffIncrement,
+        billTaxMode: saved['tax_mode'] as String? ?? frozenBill.taxMode,
       );
       if (attemptId.isEmpty ||
           frozenBill.uuid.isEmpty ||
@@ -807,10 +842,14 @@ class _ScanScreenState extends State<ScanScreen> {
           final customerAddress = draft.customerAddress;
           final placeOfSupplyStateCode = draft.placeOfSupplyStateCode;
           final discountPercent = draft.discountPercent;
+          final discountMode = draft.discountMode;
+          final discountValue = draft.discountValue;
+          final taxMode = draft.taxMode;
+          final roundOffMode = draft.roundOffMode;
+          final roundOffIncrement = draft.roundOffIncrement;
           final paidAmount = draft.paidAmount;
           final paymentMethod = draft.paymentMethod;
           final transactionReference = draft.transactionReference;
-          final percent = discountPercent;
           final gstRegistered = shop?.gstRegistered ?? false;
           final shopStateCode = _stateCodeFromGstin(shop?.gstin);
           final supplyStateCode =
@@ -821,20 +860,18 @@ class _ScanScreenState extends State<ScanScreen> {
               shopStateCode != null &&
               supplyStateCode != null &&
               shopStateCode != supplyStateCode;
-          final itemCopies = cartItems
-              .map(
-                (item) => BillTotals.taxedItem(
-                  item,
-                  discountPercent: percent,
-                  gstRegistered: gstRegistered,
-                  interState: interState,
-                ),
-              )
-              .toList();
-          final totals = BillTotals.fromTaxedItems(
-            itemCopies,
-            roundOff: settings.roundOffTotal,
+          final calculated = BillTotals.calculate(
+            cartItems,
+            discountMode: discountMode,
+            discountValue: discountValue,
+            taxMode: taxMode,
+            gstRegistered: gstRegistered,
+            interState: interState,
+            roundOffMode: roundOffMode,
+            roundOffIncrement: roundOffIncrement,
           );
+          final itemCopies = calculated.items;
+          final totals = calculated.totals;
           final total = totals.grandTotal;
           final received = paidAmount;
 
@@ -852,13 +889,20 @@ class _ScanScreenState extends State<ScanScreen> {
             customerAddressSnapshot: _cleanOptionalText(customerAddress),
             placeOfSupplyStateCode: supplyStateCode,
             subtotalAmount: totals.subtotal,
-            discountPercent: percent,
+            discountPercent: discountMode == Bill.discountModePercent
+                ? discountPercent
+                : 0,
+            discountMode: discountMode,
+            discountValue: discountValue,
             discountAmount: totals.discountAmount,
+            taxMode: taxMode,
             taxableAmount: totals.taxableAmount,
             cgstAmount: totals.cgstAmount,
             sgstAmount: totals.sgstAmount,
             igstAmount: totals.igstAmount,
             roundOffAmount: totals.roundOffAmount,
+            roundOffMode: roundOffMode,
+            roundOffIncrement: roundOffIncrement,
             totalAmount: total,
             itemCount: _itemCount,
             isPaid: received >= total - 0.005,
@@ -870,9 +914,18 @@ class _ScanScreenState extends State<ScanScreen> {
                 _effectiveDuplicateFromBill?.uuid,
           );
 
+          final previewTotals = totalsFor(
+            discountMode: discountMode,
+            discountValue: discountValue,
+            taxMode: taxMode,
+            roundOffMode: roundOffMode,
+            roundOffIncrement: roundOffIncrement,
+            placeOfSupplyStateCode: placeOfSupplyStateCode,
+            customerGstin: customerGstin,
+          );
           if (decimalScaledInteger(total.toStringAsFixed(2), scale: 2) !=
               decimalScaledInteger(
-                totalsFor(percent).grandTotal.toStringAsFixed(2),
+                previewTotals.grandTotal.toStringAsFixed(2),
                 scale: 2,
               )) {
             throw StateError(
@@ -894,7 +947,10 @@ class _ScanScreenState extends State<ScanScreen> {
               'bill': frozenBill!.toMap(),
               'reference': frozenBill!.transactionReference,
               'items': frozenItems!.map((item) => item.toMap(0)).toList(),
-              'round_off': settings.roundOffTotal,
+              'round_off': frozenBill!.roundOffMode != Bill.roundOffNone,
+              'round_off_mode': frozenBill!.roundOffMode,
+              'round_off_increment': frozenBill!.roundOffIncrement,
+              'tax_mode': frozenBill!.taxMode,
               'draft': draft.toMap(),
             },
           });
@@ -983,6 +1039,10 @@ class _ScanScreenState extends State<ScanScreen> {
                 attemptId = const Uuid().v4();
               },
               totalsFor: totalsFor,
+              defaultTaxMode: settings.defaultTaxMode,
+              defaultRoundOffMode: settings.roundOffMode,
+              defaultRoundOffIncrement: settings.roundOffIncrement,
+              maxFixedDiscount: maxFixedDiscount,
               itemCount: _itemCount,
               initialBill: _effectiveDuplicateFromBill,
             ),
@@ -1649,6 +1709,55 @@ class _ScanScreenState extends State<ScanScreen> {
       );
   }
 
+  Future<void> _showLineControlsSheet(int index) async {
+    if (_pendingCheckoutBlocksEdit()) return;
+    final item = _items[index];
+    final result = await showModalBottomSheet<
+      ({String mode, double value, String? taxMode})
+    >(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.surfaceOf(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _LineControlsSheet(
+        productName: item.productName,
+        lineSubtotal: item.subtotal,
+        initialMode: item.discountMode,
+        initialValue: item.discountValue,
+        initialTaxMode: item.taxMode,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      item.discountMode = result.mode;
+      item.discountValue = result.value;
+      item.taxMode = result.taxMode;
+    });
+  }
+
+  String? _lineControlsBadge(BillItem item) {
+    final parts = <String>[];
+    if (item.discountValue > 0) {
+      final val = item.discountValue
+          .toStringAsFixed(2)
+          .replaceFirst(RegExp(r'\.?0+$'), '');
+      parts.add(
+        item.discountMode == Bill.discountModeAmount
+            ? '₹$val off'
+            : '$val% off',
+      );
+    }
+    if (item.taxMode == Bill.taxModeInclusive) {
+      parts.add('Incl.');
+    } else if (item.taxMode == Bill.taxModeExclusive) {
+      parts.add('Excl.');
+    }
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
   Widget _buildBillItemsPanel() {
     return Container(
       decoration: BoxDecoration(
@@ -1709,6 +1818,18 @@ class _ScanScreenState extends State<ScanScreen> {
                                 fontSize: 12,
                               ),
                             ),
+                            if (_lineControlsBadge(item) case final badge?)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  badge,
+                                  style: TextStyle(
+                                    color: AppColors.amber,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                             if (item.draftQuantityInput != null ||
                                 saleQuantityThousandths(
                                       item.quantity.toString(),
@@ -1760,7 +1881,19 @@ class _ScanScreenState extends State<ScanScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      IconButton(
+                        key: ValueKey('cart-item-edit-$i'),
+                        tooltip: 'Line discount & tax',
+                        onPressed: _checkoutState['pending'] == null
+                            ? () => _showLineControlsSheet(i)
+                            : null,
+                        icon: const Icon(Icons.tune_rounded, size: 18),
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       // Subtotal
                       Text(
                         rupees(item.subtotal),
@@ -1774,6 +1907,179 @@ class _ScanScreenState extends State<ScanScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+class _LineControlsSheet extends StatefulWidget {
+  final String productName;
+  final double lineSubtotal;
+  final String initialMode;
+  final double initialValue;
+  final String? initialTaxMode;
+
+  const _LineControlsSheet({
+    required this.productName,
+    required this.lineSubtotal,
+    required this.initialMode,
+    required this.initialValue,
+    required this.initialTaxMode,
+  });
+
+  @override
+  State<_LineControlsSheet> createState() => _LineControlsSheetState();
+}
+
+class _LineControlsSheetState extends State<_LineControlsSheet> {
+  late String _mode;
+  String? _taxMode;
+  late final TextEditingController _valueCtrl;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.initialMode;
+    _taxMode = widget.initialTaxMode;
+    _valueCtrl = TextEditingController(
+      text: widget.initialValue > 0
+          ? widget.initialValue
+                .toStringAsFixed(2)
+                .replaceFirst(RegExp(r'\.?0+$'), '')
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _valueCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SingleChildScrollView(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.productName,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('line-discount-value'),
+                    controller: _valueCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        return RegExp(
+                              r'^\d*\.?\d{0,2}$',
+                            ).hasMatch(newValue.text)
+                            ? newValue
+                            : oldValue;
+                      }),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: _mode == Bill.discountModePercent
+                          ? 'Line discount (%)'
+                          : 'Line discount (₹)',
+                      prefixText: _mode == Bill.discountModeAmount
+                          ? '₹ '
+                          : null,
+                      suffixText: _mode == Bill.discountModePercent
+                          ? '%'
+                          : null,
+                      errorText: _errorText,
+                    ),
+                    onChanged: (_) => setState(() => _errorText = null),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SegmentedButton<String>(
+                  key: const ValueKey('line-discount-mode'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: Bill.discountModePercent,
+                      label: Text('%'),
+                    ),
+                    ButtonSegment(
+                      value: Bill.discountModeAmount,
+                      label: Text('₹'),
+                    ),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (sel) => setState(() {
+                    _mode = sel.first;
+                    _errorText = null;
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text('Line tax mode', style: AppText.caption),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                key: const ValueKey('line-tax-mode'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 'default', label: Text('Bill default')),
+                  ButtonSegment(
+                    value: Bill.taxModeInclusive,
+                    label: Text('Incl.'),
+                  ),
+                  ButtonSegment(
+                    value: Bill.taxModeExclusive,
+                    label: Text('Excl.'),
+                  ),
+                ],
+                selected: {_taxMode ?? 'default'},
+                onSelectionChanged: (sel) => setState(() {
+                  _taxMode = sel.first == 'default' ? null : sel.first;
+                }),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const ValueKey('line-controls-apply'),
+                onPressed: () {
+                  final parsed = double.tryParse(_valueCtrl.text.trim()) ?? 0;
+                  if (_mode == Bill.discountModePercent && parsed > 100) {
+                    setState(() => _errorText = 'Percent must be 0 to 100');
+                    return;
+                  }
+                  if (_mode == Bill.discountModeAmount &&
+                      parsed > widget.lineSubtotal + 1e-6) {
+                    setState(() => _errorText = 'Cannot exceed line subtotal');
+                    return;
+                  }
+                  Navigator.pop(context, (
+                    mode: _mode,
+                    value: parsed,
+                    taxMode: _taxMode,
+                  ));
+                },
+                child: const Text('Apply'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

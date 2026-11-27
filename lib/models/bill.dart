@@ -1,4 +1,5 @@
 import 'bill_totals.dart';
+import '../utils/exact_decimal.dart';
 import '../utils/money.dart';
 
 class Bill {
@@ -11,6 +12,15 @@ class Bill {
   static const lifecycleCancelled = 'cancelled';
   static const documentInvoice = 'invoice';
   static const documentCreditNote = 'credit_note';
+  static const discountModePercent = 'percent';
+  static const discountModeAmount = 'amount';
+  static const taxModeInclusive = 'inclusive';
+  static const taxModeExclusive = 'exclusive';
+  static const roundOffNone = 'none';
+  static const roundOffNearest = 'nearest';
+  static const roundOffUp = 'up';
+  static const roundOffDown = 'down';
+  static const roundOffIncrements = <double>[0.50, 1.00, 5.00, 10.00];
 
   final int? id;
   final String uuid;
@@ -29,15 +39,20 @@ class Bill {
   final String? placeOfSupplyStateCode;
   final double subtotalAmount;
   final double discountPercent;
+  final String discountMode;
+  final double discountValue;
   final double discountAmount;
+  final String taxMode;
   final double profitCommissionPercent;
   final double taxableAmount;
   final double cgstAmount;
   final double sgstAmount;
   final double igstAmount;
 
-  /// Added to the line total to reach a whole-rupee grand total (+/- < 0.50).
+  /// Added to the line total to reach the rounded grand total.
   final double roundOffAmount;
+  final String roundOffMode;
+  final double roundOffIncrement;
 
   /// [documentInvoice] or [documentCreditNote]. A credit note (sales return)
   /// carries negative quantities and amounts, so sales and GST totals are
@@ -114,13 +129,18 @@ class Bill {
     String? placeOfSupplyStateCode,
     double? subtotalAmount,
     this.discountPercent = 0,
+    String discountMode = discountModePercent,
+    double? discountValue,
     this.discountAmount = 0,
+    String taxMode = taxModeInclusive,
     this.profitCommissionPercent = 0,
     double? taxableAmount,
     this.cgstAmount = 0,
     this.sgstAmount = 0,
     this.igstAmount = 0,
     this.roundOffAmount = 0,
+    String roundOffMode = roundOffNearest,
+    double roundOffIncrement = 1.0,
     this.documentType = documentInvoice,
     this.originalBillUuid,
     this.originalBillNumber,
@@ -149,6 +169,15 @@ class Bill {
        customerGstTradeName = _cleanOptional(customerGstTradeName),
        customerAddressSnapshot = _cleanOptional(customerAddressSnapshot),
        placeOfSupplyStateCode = _cleanStateCode(placeOfSupplyStateCode),
+       discountMode = _cleanDiscountMode(discountMode),
+       discountValue =
+           discountValue ??
+           (_cleanDiscountMode(discountMode) == discountModePercent
+               ? discountPercent
+               : 0),
+       taxMode = _cleanTaxMode(taxMode),
+       roundOffMode = _cleanRoundOffMode(roundOffMode),
+       roundOffIncrement = _cleanRoundOffIncrement(roundOffIncrement),
        subtotalAmount = subtotalAmount ?? totalAmount + discountAmount,
        taxableAmount = taxableAmount ?? totalAmount,
        paidAmount = paidAmount ?? (isPaid ? totalAmount : 0),
@@ -184,13 +213,18 @@ class Bill {
     'place_of_supply_state_code': placeOfSupplyStateCode,
     'subtotal_amount': subtotalAmount,
     'discount_percent': discountPercent,
+    'discount_mode': discountMode,
+    'discount_value': discountValue,
     'discount_amount': discountAmount,
+    'tax_mode': taxMode,
     'profit_commission_percent': profitCommissionPercent,
     'taxable_amount': taxableAmount,
     'cgst_amount': cgstAmount,
     'sgst_amount': sgstAmount,
     'igst_amount': igstAmount,
     'round_off_amount': roundOffAmount,
+    'round_off_mode': roundOffMode,
+    'round_off_increment': roundOffIncrement,
     'document_type': documentType,
     'original_bill_uuid': originalBillUuid,
     'original_bill_number': originalBillNumber,
@@ -244,7 +278,10 @@ class Bill {
           (map['subtotal_amount'] as num?)?.toDouble() ??
           totalAmount + discountAmount,
       discountPercent: (map['discount_percent'] as num?)?.toDouble() ?? 0,
+      discountMode: _cleanDiscountMode(map['discount_mode']),
+      discountValue: (map['discount_value'] as num?)?.toDouble(),
       discountAmount: discountAmount,
+      taxMode: _cleanTaxMode(map['tax_mode']),
       profitCommissionPercent:
           (map['profit_commission_percent'] as num?)?.toDouble() ?? 0,
       taxableAmount: (map['taxable_amount'] as num?)?.toDouble() ?? totalAmount,
@@ -252,6 +289,8 @@ class Bill {
       sgstAmount: (map['sgst_amount'] as num?)?.toDouble() ?? 0,
       igstAmount: (map['igst_amount'] as num?)?.toDouble() ?? 0,
       roundOffAmount: (map['round_off_amount'] as num?)?.toDouble() ?? 0,
+      roundOffMode: _cleanRoundOffMode(map['round_off_mode']),
+      roundOffIncrement: _cleanRoundOffIncrement(map['round_off_increment']),
       documentType: map['document_type'] == documentCreditNote
           ? documentCreditNote
           : documentInvoice,
@@ -314,6 +353,10 @@ class BillItem {
   final double igstAmountSnapshot;
   final bool wasDirectPrice;
   double quantity;
+  String discountMode;
+  double discountValue;
+  final double discountAmount;
+  String? taxMode;
 
   /// Invalid editor text kept with a draft. Issued invoice rows store quantity only.
   String? draftQuantityInput;
@@ -339,7 +382,10 @@ class BillItem {
   double get mrp => sellingPriceSnapshot;
 
   /// Line value before bill discount (selling price x qty).
-  double get subtotal => roundMoney(sellingPriceSnapshot * quantity);
+  double get subtotal =>
+      (ExactDecimal.fromNum(sellingPriceSnapshot) *
+              ExactDecimal.fromNum(quantity))
+          .toMoneyDouble();
   double get totalCost => costSnapshot * quantity;
   double get totalProfit => profitSnapshot * quantity;
   double get totalCommission => commissionSnapshot * quantity;
@@ -350,19 +396,38 @@ class BillItem {
 
   /// Line value after bill discount, including tax.
   double get lineAmount =>
-      roundMoney((taxableValueSnapshot + gstSnapshot) * quantity);
-  double get totalTaxableValue => roundMoney(taxableValueSnapshot * quantity);
-  double get totalGst => roundMoney(lineAmount - totalTaxableValue);
+      (((ExactDecimal.fromNum(taxableValueSnapshot) +
+                      ExactDecimal.fromNum(gstSnapshot)) *
+                  ExactDecimal.fromNum(quantity))
+              .roundHalfAway(scale: 12))
+          .toMoneyDouble();
+  double get totalTaxableValue =>
+      ((ExactDecimal.fromNum(taxableValueSnapshot) *
+                  ExactDecimal.fromNum(quantity))
+              .roundHalfAway(scale: 12))
+          .toMoneyDouble();
+  double get totalGst =>
+      (ExactDecimal.fromNum(lineAmount) -
+              ExactDecimal.fromNum(totalTaxableValue))
+          .toMoneyDouble();
   double get totalIgst => igstAmountSnapshot > 0 ? totalGst : 0;
-  double get totalCgst => cgstAmountSnapshot > 0 ? roundMoney(totalGst / 2) : 0;
-  double get totalSgst =>
-      sgstAmountSnapshot > 0 ? roundMoney(totalGst - totalCgst) : 0;
+  double get totalCgst => cgstAmountSnapshot > 0
+      ? (ExactDecimal.fromNum(totalGst) / ExactDecimal.fromInt(2))
+            .toMoneyDouble()
+      : 0;
+  double get totalSgst => sgstAmountSnapshot > 0
+      ? (ExactDecimal.fromNum(totalGst) - ExactDecimal.fromNum(totalCgst))
+            .toMoneyDouble()
+      : 0;
   double get totalNetProfit => totalProfit - totalCommission;
 
   /// Profit actually made on this line: taxable value after the bill
   /// discount minus cost (GST is never profit).
   double get lineProfit =>
-      roundMoney((taxableValueSnapshot - costSnapshot) * quantity);
+      ((ExactDecimal.fromNum(taxableValueSnapshot) -
+                  ExactDecimal.fromNum(costSnapshot)) *
+              ExactDecimal.fromNum(quantity))
+          .toMoneyDouble();
   String get unitLabel {
     final value = unit?.trim();
     return value == null || value.isEmpty ? '' : value;
@@ -404,6 +469,10 @@ class BillItem {
     this.igstAmountSnapshot = 0,
     this.wasDirectPrice = true,
     num quantity = 1,
+    String discountMode = Bill.discountModePercent,
+    this.discountValue = 0,
+    this.discountAmount = 0,
+    String? taxMode,
     this.originalItemUuid,
     this.mrpSnapshot,
     this.deviceId,
@@ -423,6 +492,8 @@ class BillItem {
            taxableValueSnapshot ??
            ((sellingPriceSnapshot ?? mrp ?? 0) - (gstSnapshot ?? 0)),
        quantity = quantity.toDouble(),
+       discountMode = _cleanDiscountMode(discountMode),
+       taxMode = _cleanOptionalTaxMode(taxMode),
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
@@ -451,6 +522,10 @@ class BillItem {
     'igst_amount_snapshot': igstAmountSnapshot,
     'was_direct_price': wasDirectPrice ? 1 : 0,
     'quantity': quantity,
+    'discount_mode': discountMode,
+    'discount_value': discountValue,
+    'discount_amount': discountAmount,
+    'tax_mode': taxMode,
     'original_item_uuid': originalItemUuid,
     'mrp_snapshot': mrpSnapshot,
     'subtotal': subtotal,
@@ -494,6 +569,10 @@ class BillItem {
           (map['igst_amount_snapshot'] as num?)?.toDouble() ?? 0,
       wasDirectPrice: (map['was_direct_price'] as int? ?? 1) == 1,
       quantity: (map['quantity'] as num).toDouble(),
+      discountMode: _cleanDiscountMode(map['discount_mode']),
+      discountValue: (map['discount_value'] as num?)?.toDouble() ?? 0,
+      discountAmount: (map['discount_amount'] as num?)?.toDouble() ?? 0,
+      taxMode: _cleanOptionalTaxMode(map['tax_mode']),
       originalItemUuid: map['original_item_uuid'] as String?,
       mrpSnapshot: (map['mrp_snapshot'] as num?)?.toDouble(),
       deviceId: map['device_id'] as String?,
@@ -693,4 +772,46 @@ String? _cleanStateCode(String? value) {
 String? _cleanHsnCode(String? value) {
   final digits = value?.replaceAll(RegExp(r'[^0-9]'), '');
   return digits == null || digits.isEmpty ? null : digits;
+}
+
+String _cleanDiscountMode(Object? value) {
+  return value?.toString() == Bill.discountModeAmount
+      ? Bill.discountModeAmount
+      : Bill.discountModePercent;
+}
+
+String _cleanTaxMode(Object? value) {
+  return value?.toString() == Bill.taxModeExclusive
+      ? Bill.taxModeExclusive
+      : Bill.taxModeInclusive;
+}
+
+String? _cleanOptionalTaxMode(Object? value) {
+  final text = value?.toString();
+  if (text == Bill.taxModeInclusive || text == Bill.taxModeExclusive) {
+    return text;
+  }
+  return null;
+}
+
+String _cleanRoundOffMode(Object? value) {
+  const allowed = {
+    Bill.roundOffNone,
+    Bill.roundOffNearest,
+    Bill.roundOffUp,
+    Bill.roundOffDown,
+  };
+  final text = value?.toString();
+  return allowed.contains(text) ? text! : Bill.roundOffNearest;
+}
+
+double _cleanRoundOffIncrement(Object? value) {
+  final parsed = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '');
+  if (parsed == null) return 1.0;
+  for (final allowed in Bill.roundOffIncrements) {
+    if ((parsed - allowed).abs() < 1e-6) return allowed;
+  }
+  return 1.0;
 }

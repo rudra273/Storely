@@ -248,7 +248,7 @@ void main() {
       await sql.execute('PRAGMA user_version = 26');
       await helper.close();
       sql = await helper.database;
-      expect(await sql.getVersion(), 28);
+      expect(await sql.getVersion(), 29);
       expect(await sql.query('checkout_acceptances'), isEmpty);
       expect(await helper.getAllBills(), hasLength(1));
     },

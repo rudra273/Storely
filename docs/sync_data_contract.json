@@ -411,6 +411,21 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "default_tax_mode": {
+          "wire": "default_tax_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_mode": {
+          "wire": "round_off_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_increment": {
+          "wire": "round_off_increment",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "paper_size": {
           "wire": "paper_size",
           "kind": "mirrored",
@@ -1160,8 +1175,23 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "discount_mode": {
+          "wire": "discount_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_value": {
+          "wire": "discount_value",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "discount_amount": {
           "wire": "discount_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "tax_mode": {
+          "wire": "tax_mode",
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
@@ -1192,6 +1222,16 @@
         },
         "round_off_amount": {
           "wire": "round_off_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_mode": {
+          "wire": "round_off_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "round_off_increment": {
+          "wire": "round_off_increment",
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
@@ -1414,6 +1454,26 @@
         },
         "quantity": {
           "wire": "quantity",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_mode": {
+          "wire": "discount_mode",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_value": {
+          "wire": "discount_value",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "discount_amount": {
+          "wire": "discount_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "tax_mode": {
+          "wire": "tax_mode",
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
@@ -2035,6 +2095,22 @@
     },
     "quantity": {
       "wire": "quantity",
+      "kind": "mirrored"
+    },
+    "discount_mode": {
+      "wire": "discount_mode",
+      "kind": "mirrored"
+    },
+    "discount_value": {
+      "wire": "discount_value",
+      "kind": "mirrored"
+    },
+    "discount_amount": {
+      "wire": "discount_amount",
+      "kind": "mirrored"
+    },
+    "tax_mode": {
+      "wire": "tax_mode",
       "kind": "mirrored"
     },
     "original_item_uuid": {

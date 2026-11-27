@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 28,
+      version: 29,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -35,6 +35,7 @@ mixin DatabaseSchema {
     await _markMigrationDone(db, _v16BillingBackfillKey);
     await _markMigrationDone(db, _v21IndexRebuildKey);
     await _markMigrationDone(db, _gstInvoiceNumberKey);
+    await _markMigrationDone(db, _v29BillingControlsBackfillKey);
   }
 
   Future<void> _configureDB(Database db) async {
@@ -49,6 +50,7 @@ mixin DatabaseSchema {
     await _ensureV20Columns(db);
     await _ensureInventoryColumns(db);
     await _ensureV22Columns(db);
+    await _ensureV29Columns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -65,6 +67,7 @@ mixin DatabaseSchema {
     await _ensureV20Columns(db);
     await _ensureInventoryColumns(db);
     await _ensureV22Columns(db);
+    await _ensureV29Columns(db);
     await _runOneShotMigrations(db);
     await _ensureSyncTracking(db);
   }
@@ -159,6 +162,7 @@ mixin DatabaseSchema {
   static const _v21IndexRebuildKey = 'v21_index_rebuild';
   static const _gstInvoiceNumberKey = 'v2_gst_invoice_number_default';
   static const _v26PaymentStateKey = 'v26_supplier_payment_state';
+  static const _v29BillingControlsBackfillKey = 'v29_billing_controls_backfill';
 
   Future<void> _runOneShotMigrations(DatabaseExecutor executor) async {
     if (!await _isMigrationDone(executor, _v26PaymentStateKey)) {
@@ -180,6 +184,13 @@ mixin DatabaseSchema {
     if (!await _isMigrationDone(executor, _gstInvoiceNumberKey)) {
       await _moveLegacyInvoiceDefault(executor);
       await _markMigrationDone(executor, _gstInvoiceNumberKey);
+    }
+    if (!await _isMigrationDone(executor, _v29BillingControlsBackfillKey)) {
+      await executor.execute("""
+        UPDATE bill_settings
+        SET round_off_mode = CASE WHEN round_off_total = 0 THEN 'none' ELSE 'nearest' END
+      """);
+      await _markMigrationDone(executor, _v29BillingControlsBackfillKey);
     }
   }
 
@@ -459,6 +470,9 @@ mixin DatabaseSchema {
         show_grand_total INTEGER NOT NULL DEFAULT 1,
         show_footer_text INTEGER NOT NULL DEFAULT 1,
         round_off_total INTEGER NOT NULL DEFAULT 1,
+        default_tax_mode TEXT NOT NULL DEFAULT 'inclusive',
+        round_off_mode TEXT NOT NULL DEFAULT 'nearest',
+        round_off_increment REAL NOT NULL DEFAULT 1.0,
         paper_size TEXT NOT NULL DEFAULT 'a4',
         upi_id TEXT,
         show_upi_qr INTEGER NOT NULL DEFAULT 1,
@@ -695,13 +709,18 @@ mixin DatabaseSchema {
         place_of_supply_state_code TEXT,
         subtotal_amount REAL NOT NULL DEFAULT 0,
         discount_percent REAL NOT NULL DEFAULT 0,
+        discount_mode TEXT NOT NULL DEFAULT 'percent',
+        discount_value REAL NOT NULL DEFAULT 0,
         discount_amount REAL NOT NULL DEFAULT 0,
+        tax_mode TEXT NOT NULL DEFAULT 'inclusive',
         profit_commission_percent REAL NOT NULL DEFAULT 0,
         taxable_amount REAL NOT NULL DEFAULT 0,
         cgst_amount REAL NOT NULL DEFAULT 0,
         sgst_amount REAL NOT NULL DEFAULT 0,
         igst_amount REAL NOT NULL DEFAULT 0,
         round_off_amount REAL NOT NULL DEFAULT 0,
+        round_off_mode TEXT NOT NULL DEFAULT 'nearest',
+        round_off_increment REAL NOT NULL DEFAULT 1.0,
         document_type TEXT NOT NULL DEFAULT 'invoice',
         original_bill_uuid TEXT,
         original_bill_number TEXT,
@@ -749,6 +768,10 @@ mixin DatabaseSchema {
         igst_amount_snapshot REAL NOT NULL DEFAULT 0,
         was_direct_price INTEGER NOT NULL DEFAULT 1,
         quantity REAL NOT NULL DEFAULT 0,
+        discount_mode TEXT NOT NULL DEFAULT 'percent',
+        discount_value REAL NOT NULL DEFAULT 0,
+        discount_amount REAL NOT NULL DEFAULT 0,
+        tax_mode TEXT,
         original_item_uuid TEXT,
         subtotal REAL NOT NULL,
         device_id TEXT,
@@ -1083,6 +1106,29 @@ mixin DatabaseSchema {
     });
     await _ensureColumns(executor, 'products', {'mrp_price': 'REAL'});
     await _ensureColumns(executor, 'bill_items', {'mrp_snapshot': 'REAL'});
+  }
+
+  /// v29 billing controls: tax-exclusive & mixed lines, per-line discounts,
+  /// fixed document discounts, and configurable round-off modes/increments.
+  Future<void> _ensureV29Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'bill_settings', {
+      'default_tax_mode': "TEXT NOT NULL DEFAULT 'inclusive'",
+      'round_off_mode': "TEXT NOT NULL DEFAULT 'nearest'",
+      'round_off_increment': 'REAL NOT NULL DEFAULT 1.0',
+    });
+    await _ensureColumns(executor, 'bills', {
+      'discount_mode': "TEXT NOT NULL DEFAULT 'percent'",
+      'discount_value': 'REAL NOT NULL DEFAULT 0',
+      'tax_mode': "TEXT NOT NULL DEFAULT 'inclusive'",
+      'round_off_mode': "TEXT NOT NULL DEFAULT 'nearest'",
+      'round_off_increment': 'REAL NOT NULL DEFAULT 1.0',
+    });
+    await _ensureColumns(executor, 'bill_items', {
+      'discount_mode': "TEXT NOT NULL DEFAULT 'percent'",
+      'discount_value': 'REAL NOT NULL DEFAULT 0',
+      'discount_amount': 'REAL NOT NULL DEFAULT 0',
+      'tax_mode': 'TEXT',
+    });
   }
 
   /// v20 changed these index definitions but kept their names, so the CREATE
