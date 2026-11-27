@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/cloud_defaults.dart';
 import '../db/database_helper.dart';
+import '../models/bill.dart';
 import 'api/api_client.dart';
 import 'api/http_client_factory.dart';
 import 'api/token_store.dart';
@@ -36,6 +37,117 @@ export 'cloud/cloud_backend.dart'
         SignUpOutcome;
 export 'sync/cloud_sync_engine.dart'
     show FirstSyncMode, CloudSyncResult, NativeSaleReconciliationReport;
+
+/// Thrown when a draft handoff was already claimed or discarded on another device.
+class DraftHandoffAlreadyClaimedException implements Exception {
+  final String message;
+
+  const DraftHandoffAlreadyClaimedException([
+    this.message = 'This cart was already claimed on another device.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
+/// A cross-device checkout draft handoff stored on the server.
+class DraftHandoff {
+  final String uuid;
+  final String sourceDeviceLabel;
+  final String label;
+  final int itemCount;
+  final List<Map<String, dynamic>> items;
+  final Map<String, dynamic> metadata;
+  final String status;
+  final String? claimedByDevice;
+  final DateTime? claimedAt;
+  final DateTime? createdAt;
+
+  const DraftHandoff({
+    required this.uuid,
+    required this.sourceDeviceLabel,
+    this.label = '',
+    required this.itemCount,
+    this.items = const [],
+    this.metadata = const {},
+    this.status = 'available',
+    this.claimedByDevice,
+    this.claimedAt,
+    this.createdAt,
+  });
+
+  factory DraftHandoff.fromJson(Map<String, dynamic> json) {
+    final rawItems = json['items'];
+    final parsedItems = rawItems is List
+        ? [
+            for (final item in rawItems)
+              Map<String, dynamic>.from(item as Map),
+          ]
+        : const <Map<String, dynamic>>[];
+    final rawMetadata = json['metadata'];
+    final parsedMetadata = rawMetadata is Map
+        ? Map<String, dynamic>.from(rawMetadata)
+        : const <String, dynamic>{};
+    return DraftHandoff(
+      uuid: json['uuid']?.toString() ?? '',
+      sourceDeviceLabel:
+          json['source_device_label']?.toString() ?? 'Another device',
+      label: json['label']?.toString() ?? '',
+      itemCount: (json['item_count'] as num?)?.toInt() ?? parsedItems.length,
+      items: parsedItems,
+      metadata: parsedMetadata,
+      status: json['status']?.toString() ?? 'available',
+      claimedByDevice: json['claimed_by_device']?.toString(),
+      claimedAt: json['claimed_at'] is String
+          ? DateTime.tryParse(json['claimed_at'] as String)
+          : null,
+      createdAt: json['created_at'] is String
+          ? DateTime.tryParse(json['created_at'] as String)
+          : null,
+    );
+  }
+
+  /// Hydrates the handoff's JSON item payloads into [BillItem] instances,
+  /// tolerating both mobile and web cart item shapes.
+  List<BillItem> toBillItems() {
+    final nowIso = DateTime.now().toIso8601String();
+    return [
+      for (final raw in items)
+        () {
+          final map = Map<String, dynamic>.from(raw);
+          map['product_name'] ??=
+              map['productName'] ?? map['name'] ?? 'Item';
+          map['product_uuid'] ??= map['productUuid'];
+          map['selling_price_snapshot'] ??=
+              map['sellingPriceSnapshot'] ??
+              map['selling_price'] ??
+              map['sellingPrice'] ??
+              map['unit_price'] ??
+              map['unitPrice'] ??
+              map['price'] ??
+              0.0;
+          map['gst_percent_snapshot'] ??=
+              map['gstPercentSnapshot'] ??
+              map['gst_percent'] ??
+              map['gstPercent'];
+          map['hsn_code_snapshot'] ??=
+              map['hsnCodeSnapshot'] ?? map['hsn_code'] ?? map['hsnCode'];
+          map['quantity'] ??= map['qty'] ?? 1;
+          map['discount_mode'] ??= map['discountMode'];
+          map['discount_value'] ??= map['discountValue'];
+          map['tax_mode'] ??= map['taxMode'];
+          map['created_at'] ??= nowIso;
+          map.remove('id');
+          map.remove('bill_id');
+          map.remove('bill_uuid');
+          return BillItem.fromMap(map)
+            ..draftQuantityInput = map['draft_quantity_input'] is String
+                ? map['draft_quantity_input'] as String
+                : null;
+        }(),
+    ];
+  }
+}
 
 /// Storely's API is the only supported cloud backend.
 enum CloudBackendMode { storelyApi }
@@ -113,6 +225,11 @@ class CloudState {
       !isSignedIn ||
       shopRole == 'owner' ||
       shopRole == 'admin';
+
+  /// True when the device is signed into a cloud shop and can use cross-device
+  /// draft handoff. Local-only mode always returns false.
+  bool get canUseDraftHandoff =>
+      isConfigured && isSignedIn && membership == CloudMembership.member;
 
   CloudState copyWith({
     CloudConfig? config,
@@ -497,6 +614,134 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
   /// Revoke a pending invite.
   Future<void> revokeInvite(String inviteId) async => _requireBackend()
       .revokeInvite(await DatabaseHelper.instance.currentShopId(), inviteId);
+
+  // ── Cross-device single-consumer draft handoff (E03.3C / O16) ────────
+
+  String get draftHandoffDeviceLabel {
+    final backend = _backend;
+    if (backend is ApiCloudBackend && backend.deviceLabel.trim().isNotEmpty) {
+      return backend.deviceLabel.trim();
+    }
+    return 'Storely mobile';
+  }
+
+  @visibleForTesting
+  void setBackendForTesting(CloudBackend? backend) {
+    _backend = backend;
+  }
+
+  ApiCloudBackend _requireApiBackendForHandoff() {
+    final backend = _requireBackend();
+    if (backend is! ApiCloudBackend) {
+      throw StateError('Cross-device handoff requires Storely Cloud.');
+    }
+    if (backend.currentUser == null) {
+      throw StateError('Sign in to a cloud shop first.');
+    }
+    return backend;
+  }
+
+  static String _clampHandoffText(String value, int maxLength) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+    return trimmed.substring(0, maxLength);
+  }
+
+  Future<DraftHandoff> publishDraftHandoff({
+    required List<Map<String, dynamic>> items,
+    String label = '',
+    Map<String, dynamic> metadata = const {},
+    String? sourceDeviceLabel,
+    String? shopId,
+  }) async {
+    final backend = _requireApiBackendForHandoff();
+    final userId = backend.currentUser!.id;
+    final resolvedShopId = shopId ?? await DatabaseHelper.instance.currentShopId();
+    final rawDevice = (sourceDeviceLabel ?? draftHandoffDeviceLabel).trim();
+    final device = _clampHandoffText(
+      rawDevice.isEmpty ? 'Storely mobile' : rawDevice,
+      80,
+    );
+    final data = await backend.api.postJson(
+      '/v1/shops/$resolvedShopId/draft-handoffs',
+      {
+        'source_device_label': device,
+        'label': _clampHandoffText(label, 120),
+        'items': items,
+        'metadata': metadata,
+      },
+    );
+    if (backend.currentUser?.id != userId) {
+      throw StateError('The account changed. Sign in and try again.');
+    }
+    return DraftHandoff.fromJson(data);
+  }
+
+  Future<List<DraftHandoff>> listDraftHandoffs({String? shopId}) async {
+    final backend = _requireApiBackendForHandoff();
+    final userId = backend.currentUser!.id;
+    final resolvedShopId = shopId ?? await DatabaseHelper.instance.currentShopId();
+    final data = await backend.api.getJson(
+      '/v1/shops/$resolvedShopId/draft-handoffs',
+    );
+    if (backend.currentUser?.id != userId) {
+      throw StateError('The account changed. Sign in and try again.');
+    }
+    final rawList = (data['items'] ?? data['value']) as List? ?? const [];
+    return [
+      for (final row in rawList)
+        DraftHandoff.fromJson(Map<String, dynamic>.from(row as Map)),
+    ];
+  }
+
+  Future<DraftHandoff> claimDraftHandoff(
+    String handoffId, {
+    String? deviceLabel,
+    String? shopId,
+  }) async {
+    final backend = _requireApiBackendForHandoff();
+    final userId = backend.currentUser!.id;
+    final resolvedShopId = shopId ?? await DatabaseHelper.instance.currentShopId();
+    final rawDevice = (deviceLabel ?? draftHandoffDeviceLabel).trim();
+    final device = _clampHandoffText(
+      rawDevice.isEmpty ? 'Storely mobile' : rawDevice,
+      80,
+    );
+    try {
+      final data = await backend.api.postJson(
+        '/v1/shops/$resolvedShopId/draft-handoffs/$handoffId/claim',
+        {'device_label': device},
+      );
+      if (backend.currentUser?.id != userId) {
+        throw StateError('The account changed. Sign in and try again.');
+      }
+      return DraftHandoff.fromJson(data);
+    } on ApiException catch (error) {
+      if (error.status == 409 && error.code == 'draft_already_claimed') {
+        throw const DraftHandoffAlreadyClaimedException();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> discardDraftHandoff(String handoffId, {String? shopId}) async {
+    final backend = _requireApiBackendForHandoff();
+    final userId = backend.currentUser!.id;
+    final resolvedShopId = shopId ?? await DatabaseHelper.instance.currentShopId();
+    try {
+      await backend.api.deleteJson(
+        '/v1/shops/$resolvedShopId/draft-handoffs/$handoffId',
+      );
+      if (backend.currentUser?.id != userId) {
+        throw StateError('The account changed. Sign in and try again.');
+      }
+    } on ApiException catch (error) {
+      if (error.status == 409 && error.code == 'draft_already_claimed') {
+        throw const DraftHandoffAlreadyClaimedException();
+      }
+      rethrow;
+    }
+  }
 
   Future<void> signOut() async {
     final backend = _backend;

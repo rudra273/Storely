@@ -333,6 +333,8 @@ void main() {
             'Payment headers via supplier payment API; receipt feed carries allocations',
         'supplier_payment_allocations':
             'Allocated amounts via whole purchase document feed; never generic row-sync',
+        'draft_handoffs':
+            'Server-mediated single-consumer cross-device draft handoffs via REST API',
         'alembic_version': 'Migration runtime state',
       },
       'device_only': [

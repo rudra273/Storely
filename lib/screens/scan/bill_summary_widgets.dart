@@ -241,12 +241,39 @@ class _BillCreatedDialogState extends State<_BillCreatedDialog> {
   }
 }
 
-/// Parked carts: tap to resume, or delete.
+sealed class _HeldSheetSelection {
+  const _HeldSheetSelection();
+}
+
+class _ResumeHeldBill extends _HeldSheetSelection {
+  final HeldBill bill;
+  const _ResumeHeldBill(this.bill);
+}
+
+class _ClaimedDraftHandoff extends _HeldSheetSelection {
+  final DraftHandoff handoff;
+  const _ClaimedDraftHandoff(this.handoff);
+}
+
+/// Parked carts: tap to resume, or delete. When signed into a cloud shop, also
+/// shows available single-consumer cloud handoffs to take over or discard.
 class _HeldBillsSheet extends StatefulWidget {
   final List<HeldBill> held;
   final Future<void> Function(HeldBill bill) onDelete;
+  final bool showCloudHandoffs;
+  final Future<List<DraftHandoff>> Function()? onLoadCloudHandoffs;
+  final Future<DraftHandoff> Function(DraftHandoff handoff)?
+  onClaimCloudHandoff;
+  final Future<void> Function(DraftHandoff handoff)? onDiscardCloudHandoff;
 
-  const _HeldBillsSheet({required this.held, required this.onDelete});
+  const _HeldBillsSheet({
+    required this.held,
+    required this.onDelete,
+    this.showCloudHandoffs = false,
+    this.onLoadCloudHandoffs,
+    this.onClaimCloudHandoff,
+    this.onDiscardCloudHandoff,
+  });
 
   @override
   State<_HeldBillsSheet> createState() => _HeldBillsSheetState();
@@ -254,30 +281,238 @@ class _HeldBillsSheet extends StatefulWidget {
 
 class _HeldBillsSheetState extends State<_HeldBillsSheet> {
   late final List<HeldBill> _held = List.of(widget.held);
+  List<DraftHandoff> _handoffs = const [];
+  bool _loadingHandoffs = false;
+  String? _busyHandoffId;
+  String? _handoffMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showCloudHandoffs && widget.onLoadCloudHandoffs != null) {
+      _refreshCloudHandoffs();
+    }
+  }
+
+  Future<void> _refreshCloudHandoffs({bool clearMessage = false}) async {
+    final loader = widget.onLoadCloudHandoffs;
+    if (loader == null) return;
+    setState(() {
+      _loadingHandoffs = true;
+      if (clearMessage) _handoffMessage = null;
+    });
+    try {
+      final list = await loader();
+      if (!mounted) return;
+      setState(() {
+        _handoffs = list;
+        _loadingHandoffs = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingHandoffs = false;
+        _handoffMessage = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Future<void> _claimHandoff(DraftHandoff handoff) async {
+    final claimer = widget.onClaimCloudHandoff;
+    if (claimer == null || _busyHandoffId != null) return;
+    setState(() {
+      _busyHandoffId = handoff.uuid;
+      _handoffMessage = null;
+    });
+    try {
+      final claimed = await claimer(handoff);
+      if (!mounted) return;
+      Navigator.pop(context, _ClaimedDraftHandoff(claimed));
+    } on DraftHandoffAlreadyClaimedException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyHandoffId = null;
+        _handoffMessage = error.message;
+      });
+      await _refreshCloudHandoffs();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyHandoffId = null;
+        _handoffMessage = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Future<void> _discardHandoff(DraftHandoff handoff) async {
+    final discarder = widget.onDiscardCloudHandoff;
+    if (discarder == null || _busyHandoffId != null) return;
+    setState(() {
+      _busyHandoffId = handoff.uuid;
+      _handoffMessage = null;
+    });
+    try {
+      await discarder(handoff);
+      if (!mounted) return;
+      setState(() {
+        _busyHandoffId = null;
+        _handoffs = _handoffs
+            .where((item) => item.uuid != handoff.uuid)
+            .toList();
+      });
+    } on DraftHandoffAlreadyClaimedException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyHandoffId = null;
+        _handoffMessage = error.message;
+      });
+      await _refreshCloudHandoffs();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyHandoffId = null;
+        _handoffMessage = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Widget _buildCloudHandoffsSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Cloud handoffs',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('handoff-refresh'),
+              tooltip: 'Refresh cloud handoffs',
+              onPressed: _loadingHandoffs
+                  ? null
+                  : () => _refreshCloudHandoffs(clearMessage: true),
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+            ),
+          ],
+        ),
+        if (_handoffMessage != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.1),
+              borderRadius: AppRadius.smRadius,
+              border: Border.all(
+                color: AppColors.error.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Text(
+              _handoffMessage!,
+              style: TextStyle(color: AppColors.error, fontSize: 13),
+            ),
+          ),
+        if (_loadingHandoffs)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          )
+        else if (_handoffs.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: Text(
+              'No cloud handoffs available.',
+              textAlign: TextAlign.center,
+              style: AppText.caption,
+            ),
+          )
+        else
+          for (var i = 0; i < _handoffs.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _handoffs[i].label.isNotEmpty
+                              ? _handoffs[i].label
+                              : 'Draft cart',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'From ${_handoffs[i].sourceDeviceLabel} · '
+                          '${_handoffs[i].itemCount} '
+                          'item${_handoffs[i].itemCount == 1 ? '' : 's'}',
+                          style: AppText.caption,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  TextButton(
+                    key: ValueKey('handoff-discard-${_handoffs[i].uuid}'),
+                    onPressed: _busyHandoffId != null
+                        ? null
+                        : () => _discardHandoff(_handoffs[i]),
+                    child: const Text('Discard'),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  FilledButton(
+                    key: ValueKey('handoff-claim-${_handoffs[i].uuid}'),
+                    onPressed: _busyHandoffId != null
+                        ? null
+                        : () => _claimHandoff(_handoffs[i]),
+                    child: _busyHandoffId == _handoffs[i].uuid
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Take over'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        const SizedBox(height: AppSpacing.md),
+        const Divider(height: 1),
+        const SizedBox(height: AppSpacing.md),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(context.l10n.heldBills, style: AppText.title),
-          const SizedBox(height: AppSpacing.sm),
-          if (_held.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
-              child: Text(
-                context.l10n.noHeldBills,
-                textAlign: TextAlign.center,
-                style: AppText.caption,
-              ),
-            )
-          else
-            Flexible(
-              child: ListView.separated(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(context.l10n.heldBills, style: AppText.title),
+            const SizedBox(height: AppSpacing.sm),
+            if (widget.showCloudHandoffs) _buildCloudHandoffsSection(context),
+            if (_held.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
+                child: Text(
+                  context.l10n.noHeldBills,
+                  textAlign: TextAlign.center,
+                  style: AppText.caption,
+                ),
+              )
+            else
+              ListView.separated(
                 shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 itemCount: _held.length,
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (_, index) {
@@ -318,7 +553,7 @@ class _HeldBillsSheetState extends State<_HeldBillsSheet> {
                               ],
                             ),
                           )
-                        : () => Navigator.pop(context, bill),
+                        : () => Navigator.pop(context, _ResumeHeldBill(bill)),
                     leading: bill.readOnly
                         ? const Icon(Icons.lock_outline)
                         : null,
@@ -352,8 +587,8 @@ class _HeldBillsSheetState extends State<_HeldBillsSheet> {
                   );
                 },
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

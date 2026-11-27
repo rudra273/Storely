@@ -11,6 +11,7 @@ import '../db/database_helper.dart';
 import '../services/app_settings_service.dart';
 import '../services/app_log.dart';
 import '../services/bill_share.dart';
+import '../services/cloud_service.dart';
 import '../services/thermal/thermal_printer_service.dart';
 import '../models/bill.dart';
 import '../models/checkout_settlement.dart';
@@ -67,9 +68,12 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isProcessing = false;
   bool _isSavingBill = false;
   bool _isOpeningBillSheet = false;
+  bool _isSendingHandoff = false;
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   bool _duplicateConsumed = false;
+  bool _canUseCloudHandoff = CloudService.instance.state.value.canUseDraftHandoff;
+  int _cloudHandoffCount = 0;
   String? _lastScanned;
   DateTime? _lastScannedSeenAt;
 
@@ -97,8 +101,23 @@ class _ScanScreenState extends State<ScanScreen> {
       _restoreDraft();
     }
     _productSearchCtrl.addListener(_applyProductSearch);
+    CloudService.instance.state.addListener(_onCloudStateChanged);
     _loadProducts();
     _loadHeldCount();
+    if (_canUseCloudHandoff) {
+      unawaited(_loadCloudHandoffCount());
+    }
+  }
+
+  void _onCloudStateChanged() {
+    final enabled = CloudService.instance.state.value.canUseDraftHandoff;
+    if (enabled == _canUseCloudHandoff) return;
+    if (!mounted) return;
+    setState(() {
+      _canUseCloudHandoff = enabled;
+      if (!enabled) _cloudHandoffCount = 0;
+    });
+    if (enabled) unawaited(_loadCloudHandoffCount());
   }
 
   ScaffoldMessengerState? _messenger;
@@ -121,6 +140,7 @@ class _ScanScreenState extends State<ScanScreen> {
     _scanCooldownTimer?.cancel();
     if (_draftReady) _saveDraftNow();
     _productSearchCtrl.removeListener(_applyProductSearch);
+    CloudService.instance.state.removeListener(_onCloudStateChanged);
     _productSearchCtrl.dispose();
     super.dispose();
   }
@@ -270,6 +290,129 @@ class _ScanScreenState extends State<ScanScreen> {
     if (mounted) setState(() => _heldCount = held.length);
   }
 
+  Future<void> _loadCloudHandoffCount() async {
+    if (!_canUseCloudHandoff) return;
+    try {
+      final list = await CloudService.instance.listDraftHandoffs();
+      if (mounted) setState(() => _cloudHandoffCount = list.length);
+    } on Object {
+      // Offline or unavailable: keep local billing unaffected.
+    }
+  }
+
+  Future<void> _sendDraftHandoff() async {
+    if (_items.isEmpty || _isSendingHandoff || !_canUseCloudHandoff) return;
+    if (_pendingCheckoutBlocksEdit()) return;
+    setState(() => _isSendingHandoff = true);
+    try {
+      await _flushCart();
+      final items = List<BillItem>.of(_items);
+      final first = items.first.productName;
+      final label =
+          '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
+          '${items.length > 1 ? ' +${items.length - 1}' : ''}';
+      final serializedItems = [
+        for (final item in items)
+          {
+            ...item.toMap(0),
+            if (item.draftQuantityInput != null)
+              'draft_quantity_input': item.draftQuantityInput,
+          },
+      ];
+      final metadata = Map<String, dynamic>.from(_checkoutState)
+        ..remove('pending');
+      await CloudService.instance.publishDraftHandoff(
+        items: serializedItems,
+        label: label,
+        metadata: metadata,
+      );
+      await DatabaseHelper.instance.saveCartDraft(
+        const [],
+        expectedScope: await _checkoutScope,
+        expectedCart: _checkoutCart,
+      );
+      _checkoutCart = null;
+      _checkoutState = const {};
+      _savedDraft = HeldBill.encodeItems(const []);
+      if (!mounted) return;
+      setState(() {
+        _items.clear();
+        _cloudHandoffCount++;
+      });
+      _showCheckoutSnackBar('Sent to another device: $label');
+    } catch (error) {
+      if (!mounted) return;
+      _showCheckoutSnackBar(error.toString().replaceFirst('Bad state: ', ''));
+    } finally {
+      if (mounted) setState(() => _isSendingHandoff = false);
+    }
+  }
+
+  Future<void> _hydrateClaimedHandoff(DraftHandoff claimed) async {
+    if (_pendingCheckoutBlocksEdit()) return;
+    try {
+      await _flushCart();
+      final scope = await _checkoutScope;
+      if (_items.isNotEmpty && _checkoutCart != null) {
+        final first = _items.first.productName;
+        final parkLabel =
+            '${DateFormat('hh:mm a').format(DateTime.now())} · $first'
+            '${_items.length > 1 ? ' +${_items.length - 1}' : ''}';
+        await DatabaseHelper.instance.parkCheckoutCart(
+          _checkoutCart!,
+          parkLabel,
+        );
+        _checkoutCart = null;
+        _checkoutState = const {};
+      }
+      final byUuid = {
+        for (final product in _allProducts)
+          if (product.uuid.isNotEmpty) product.uuid: product,
+      };
+      final hydratedItems = [
+        for (final item in claimed.toBillItems())
+          if (item.productUuid != null && byUuid.containsKey(item.productUuid))
+            BillItem.fromMap({
+              ...item.toMap(0),
+              'product_id': byUuid[item.productUuid]!.id,
+            })..draftQuantityInput = item.draftQuantityInput
+          else
+            item,
+      ];
+      var nextCart = await DatabaseHelper.instance.saveCartDraft(
+        hydratedItems,
+        expectedScope: scope,
+        expectedCart: _checkoutCart,
+      );
+      final sanitizedMetadata = Map<String, dynamic>.from(claimed.metadata)
+        ..remove('pending');
+      if (sanitizedMetadata.isNotEmpty && nextCart != null) {
+        nextCart = await DatabaseHelper.instance.writeCheckoutState(
+          nextCart,
+          sanitizedMetadata,
+        );
+      }
+      if (!mounted) return;
+      _checkoutCart = nextCart;
+      _checkoutState = nextCart?.state ?? sanitizedMetadata;
+      _savedDraft = HeldBill.encodeItems(hydratedItems);
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(hydratedItems);
+      });
+      await _loadHeldCount();
+      await _loadCloudHandoffCount();
+      if (!mounted) return;
+      _showCheckoutSnackBar(
+        'Took over cart from ${claimed.sourceDeviceLabel}',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showCheckoutSnackBar(error.toString().replaceFirst('Bad state: ', ''));
+    }
+  }
+
   /// Parks the cart so the next customer can be billed.
   Future<void> _holdCart() async {
     if (_items.isEmpty) return;
@@ -308,8 +451,9 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _openHeldBills() async {
     final held = await DatabaseHelper.instance.getHeldBills();
     if (!mounted) return;
-    final chosen = await showModalBottomSheet<HeldBill>(
+    final selection = await showModalBottomSheet<_HeldSheetSelection>(
       context: context,
+      isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: AppColors.surfaceOf(context),
       builder: (_) => _HeldBillsSheet(
@@ -318,9 +462,33 @@ class _ScanScreenState extends State<ScanScreen> {
           await DatabaseHelper.instance.deleteHeldBill(bill.id);
           await _loadHeldCount();
         },
+        showCloudHandoffs: _canUseCloudHandoff,
+        onLoadCloudHandoffs: _canUseCloudHandoff
+            ? () async {
+                final list = await CloudService.instance.listDraftHandoffs();
+                if (mounted) setState(() => _cloudHandoffCount = list.length);
+                return list;
+              }
+            : null,
+        onClaimCloudHandoff: _canUseCloudHandoff
+            ? (handoff) => CloudService.instance.claimDraftHandoff(handoff.uuid)
+            : null,
+        onDiscardCloudHandoff: _canUseCloudHandoff
+            ? (handoff) async {
+                await CloudService.instance.discardDraftHandoff(handoff.uuid);
+                if (mounted && _cloudHandoffCount > 0) {
+                  setState(() => _cloudHandoffCount--);
+                }
+              }
+            : null,
       ),
     );
-    if (chosen == null || !mounted) return;
+    if (selection == null || !mounted) return;
+    if (selection is _ClaimedDraftHandoff) {
+      await _hydrateClaimedHandoff(selection.handoff);
+      return;
+    }
+    final chosen = (selection as _ResumeHeldBill).bill;
     // Swap: the cart being billed is held, so nothing is lost.
     if (_pendingCheckoutBlocksEdit()) return;
     CheckoutCart resumed;
@@ -1513,7 +1681,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 ),
               ],
             ),
-            if (_heldCount > 0)
+            if (_heldCount > 0 || _canUseCloudHandoff)
               TextButton.icon(
                 key: const ValueKey('checkout-held-list'),
                 onPressed: _openHeldBills,
@@ -1522,7 +1690,9 @@ class _ScanScreenState extends State<ScanScreen> {
                   color: AppColors.amber,
                 ),
                 label: Text(
-                  context.l10n.heldCount(_heldCount),
+                  _heldCount + _cloudHandoffCount > 0
+                      ? context.l10n.heldCount(_heldCount + _cloudHandoffCount)
+                      : context.l10n.heldBills,
                   style: const TextStyle(color: AppColors.amber),
                 ),
               ),
@@ -1789,128 +1959,160 @@ class _ScanScreenState extends State<ScanScreen> {
                 ],
               ),
             )
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-              itemCount: _items.length,
-              itemBuilder: (_, i) {
-                final item = _items[i];
-                return Container(
-                  margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceOf(context),
-                    borderRadius: AppRadius.mdRadius,
-                    border: Border.all(color: AppColors.borderOf(context)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.productName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              item.priceLabel,
-                              style: TextStyle(
-                                color: AppColors.inkMutedOf(context),
-                                fontSize: 12,
-                              ),
-                            ),
-                            if (_lineControlsBadge(item) case final badge?)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  badge,
-                                  style: TextStyle(
-                                    color: AppColors.amber,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+          : Column(
+              children: [
+                if (_canUseCloudHandoff)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('checkout-send-handoff'),
+                        onPressed: _isSendingHandoff ? null : _sendDraftHandoff,
+                        icon: _isSendingHandoff
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
                                 ),
-                              ),
-                            if (item.draftQuantityInput != null ||
-                                saleQuantityThousandths(
-                                      item.quantity.toString(),
-                                    ) ==
-                                    null)
-                              Text(
-                                saleQuantityGuidance,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                          ],
-                        ),
+                              )
+                            : const Icon(Icons.devices_rounded, size: 18),
+                        label: const Text('Send to another device'),
                       ),
-                      // Qty controls
-                      Container(
+                    ),
+                  ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                    itemCount: _items.length,
+                    itemBuilder: (_, i) {
+                      final item = _items[i];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        padding: const EdgeInsets.all(AppSpacing.md),
                         decoration: BoxDecoration(
-                          color: AppColors.softBgOf(context),
-                          borderRadius: AppRadius.smRadius,
+                          color: AppColors.surfaceOf(context),
+                          borderRadius: AppRadius.mdRadius,
+                          border: Border.all(
+                            color: AppColors.borderOf(context),
+                          ),
                         ),
                         child: Row(
                           children: [
-                            IconButton(
-                              onPressed: () => _updateQty(i, -1),
-                              icon: const Icon(Icons.remove, size: 18),
-                              constraints: const BoxConstraints(
-                                minWidth: 48,
-                                minHeight: 48,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.productName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    item.priceLabel,
+                                    style: TextStyle(
+                                      color: AppColors.inkMutedOf(context),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (_lineControlsBadge(item) case final badge?)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        badge,
+                                        style: TextStyle(
+                                          color: AppColors.amber,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  if (item.draftQuantityInput != null ||
+                                      saleQuantityThousandths(
+                                            item.quantity.toString(),
+                                          ) ==
+                                          null)
+                                    Text(
+                                      saleQuantityGuidance,
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                            SizedBox(
-                              width: 44,
-                              child: _QuantityInput(
-                                key: ObjectKey(item),
-                                quantity: item.quantity,
-                                invalidInput: item.draftQuantityInput,
-                                enabled: _checkoutState['pending'] == null,
-                                onChanged: (quantity) => _setQty(i, quantity),
+                            // Qty controls
+                            Container(
+                              decoration: BoxDecoration(
+                                color: AppColors.softBgOf(context),
+                                borderRadius: AppRadius.smRadius,
+                              ),
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _updateQty(i, -1),
+                                    icon: const Icon(Icons.remove, size: 18),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 44,
+                                    child: _QuantityInput(
+                                      key: ObjectKey(item),
+                                      quantity: item.quantity,
+                                      invalidInput: item.draftQuantityInput,
+                                      enabled: _checkoutState['pending'] == null,
+                                      onChanged: (quantity) =>
+                                          _setQty(i, quantity),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _updateQty(i, 1),
+                                    icon: const Icon(Icons.add, size: 18),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             IconButton(
-                              onPressed: () => _updateQty(i, 1),
-                              icon: const Icon(Icons.add, size: 18),
+                              key: ValueKey('cart-item-edit-$i'),
+                              tooltip: 'Line discount & tax',
+                              onPressed: _checkoutState['pending'] == null
+                                  ? () => _showLineControlsSheet(i)
+                                  : null,
+                              icon: const Icon(Icons.tune_rounded, size: 18),
                               constraints: const BoxConstraints(
-                                minWidth: 48,
-                                minHeight: 48,
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            // Subtotal
+                            Text(
+                              rupees(item.subtotal),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                      IconButton(
-                        key: ValueKey('cart-item-edit-$i'),
-                        tooltip: 'Line discount & tax',
-                        onPressed: _checkoutState['pending'] == null
-                            ? () => _showLineControlsSheet(i)
-                            : null,
-                        icon: const Icon(Icons.tune_rounded, size: 18),
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      // Subtotal
-                      Text(
-                        rupees(item.subtotal),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
     );
   }
