@@ -108,17 +108,37 @@ class _BillCardState extends State<_BillCard> {
   }
 
   Future<void> _print() async {
+    final printer = ThermalPrinterService.instance;
+    if (!printer.isConfigured) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('No Bluetooth receipt printer selected.'),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _print(),
+          ),
+        ),
+      );
+      return;
+    }
     try {
-      await ThermalPrinterService.instance.printBill(widget.bill);
+      await printer.printBill(widget.bill);
     } on PrinterException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          action: SnackBarAction(label: 'Retry', onPressed: () => _print()),
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Printing failed. Try again.')),
+        SnackBar(
+          content: const Text('Printing failed. Try again.'),
+          action: SnackBarAction(label: 'Retry', onPressed: () => _print()),
+        ),
       );
     }
   }

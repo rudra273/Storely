@@ -5,10 +5,25 @@ class _BillCheckoutSheet extends StatefulWidget {
   final Map<String, dynamic> initialState;
   final Future<void> Function(Map<String, dynamic>) onRawChanged;
 
-  /// Payable totals for a discount %, from the same calculator used to save
-  /// the bill, so the preview always matches the saved invoice.
-  final BillTotals Function(double discountPercent) totalsFor;
+  /// Payable totals for the current checkout controls, from the same
+  /// calculator used to save the bill, so the preview always matches the
+  /// saved invoice.
+  final BillTotals Function({
+    required String discountMode,
+    required double discountValue,
+    required String taxMode,
+    required String roundOffMode,
+    required double roundOffIncrement,
+    String? placeOfSupplyStateCode,
+    String? customerGstin,
+  })
+  totalsFor;
+  final String defaultTaxMode;
+  final String defaultRoundOffMode;
+  final double defaultRoundOffIncrement;
+  final double maxFixedDiscount;
   final int itemCount;
+  final bool canBackdate;
   final Bill? initialBill;
   final Future<void> Function() onReview;
   final Future<({int id, BillTotals totals})> Function(_BillDraft) onSave;
@@ -20,7 +35,12 @@ class _BillCheckoutSheet extends StatefulWidget {
     required this.onSave,
     required this.onReview,
     required this.totalsFor,
+    required this.defaultTaxMode,
+    required this.defaultRoundOffMode,
+    required this.defaultRoundOffIncrement,
+    required this.maxFixedDiscount,
     required this.itemCount,
+    this.canBackdate = true,
     this.initialBill,
   });
 
@@ -40,14 +60,20 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   final _paidAmountController = TextEditingController();
   final _cashReceivedController = TextEditingController();
   final _transactionIdController = TextEditingController();
+  final _notesController = TextEditingController();
 
   final _customerFieldLink = LayerLink();
   final _customerFocusNode = FocusNode();
   OverlayEntry? _suggestionOverlay;
   List<Customer> _overlayMatches = const [];
 
-  var _discountPercent = 0.0;
+  var _discountMode = Bill.discountModePercent;
+  var _discountValue = 0.0;
+  late String _taxMode;
+  late String _roundOffMode;
+  late double _roundOffIncrement;
   var _billType = Bill.typeB2c;
+  DateTime? _billDate;
   String? _paymentStatus;
   bool _allowUnassignedCredit = false;
   bool _saving = false;
@@ -60,6 +86,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   @override
   void initState() {
     super.initState();
+    _taxMode = widget.defaultTaxMode;
+    _roundOffMode = widget.defaultRoundOffMode;
+    _roundOffIncrement = widget.defaultRoundOffIncrement;
     final bill = widget.initialBill;
     if (bill != null) {
       _setCheckoutControllerText(_customerController, bill.customerName);
@@ -84,14 +113,21 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
         _stateCodeController,
         bill.placeOfSupplyStateCode ?? '',
       );
-      if (bill.discountPercent > 0) {
-        _discountPercent = bill.discountPercent;
+      _discountMode = bill.discountMode;
+      _discountValue = bill.discountValue;
+      if (bill.discountValue > 0) {
         _setCheckoutControllerText(
           _discountController,
-          bill.discountPercent.toStringAsFixed(2),
+          bill.discountValue.toStringAsFixed(2),
         );
       }
+      _taxMode = bill.taxMode;
+      _roundOffMode = bill.roundOffMode;
+      _roundOffIncrement = bill.roundOffIncrement;
       _billType = bill.billType;
+      if (bill.notes != null && bill.notes!.isNotEmpty) {
+        _setCheckoutControllerText(_notesController, bill.notes!);
+      }
       _paymentStatus = null;
       _paymentMethod = 'cash';
       _hideCustomerSuggestions = true;
@@ -103,7 +139,27 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           entry.value.text = raw[entry.key] as String;
         }
       }
-      _discountPercent = double.tryParse(_discountController.text) ?? 0;
+      _discountMode = raw['discountMode'] == Bill.discountModeAmount
+          ? Bill.discountModeAmount
+          : Bill.discountModePercent;
+      _discountValue = double.tryParse(_discountController.text) ?? 0;
+      if (raw['taxMode'] == Bill.taxModeInclusive ||
+          raw['taxMode'] == Bill.taxModeExclusive) {
+        _taxMode = raw['taxMode'] as String;
+      }
+      if (const {
+        Bill.roundOffNone,
+        Bill.roundOffNearest,
+        Bill.roundOffUp,
+        Bill.roundOffDown,
+      }.contains(raw['roundOffMode'])) {
+        _roundOffMode = raw['roundOffMode'] as String;
+      }
+      final rawInc = (raw['roundOffIncrement'] as num?)?.toDouble();
+      if (rawInc != null &&
+          Bill.roundOffIncrements.any((inc) => (inc - rawInc).abs() < 1e-6)) {
+        _roundOffIncrement = rawInc;
+      }
       _billType = raw['billType'] == Bill.typeB2b ? Bill.typeB2b : Bill.typeB2c;
       _paymentStatus =
           {
@@ -115,6 +171,12 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           : null;
       _paymentMethod = normalizeCheckoutPaymentMethod(raw['method']);
       _allowUnassignedCredit = raw['consent'] == true;
+      if (raw['billDate'] is String) {
+        final parsed = DateTime.tryParse(raw['billDate'] as String);
+        if (parsed != null && widget.canBackdate) {
+          _billDate = parsed;
+        }
+      }
     }
     final pending = widget.initialState['pending'];
     if (pending is Map) {
@@ -148,6 +210,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     'partial': _paidAmountController,
     'cash': _cashReceivedController,
     'reference': _transactionIdController,
+    'notes': _notesController,
   };
   String? _lastRaw;
   String? _draftError;
@@ -155,7 +218,12 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   int _rawWrites = 0;
   Map<String, dynamic> _raw() => {
     for (final entry in _rawControllers.entries) entry.key: entry.value.text,
+    'discountMode': _discountMode,
+    'taxMode': _taxMode,
+    'roundOffMode': _roundOffMode,
+    'roundOffIncrement': _roundOffIncrement,
     'billType': _billType,
+    'billDate': _billDate?.toIso8601String(),
     'settlement': _paymentStatus,
     'method': _paymentMethod,
     'consent': _allowUnassignedCredit,
@@ -212,6 +280,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     _paidAmountController.dispose();
     _cashReceivedController.dispose();
     _transactionIdController.dispose();
+    _notesController.dispose();
     _removeSuggestionOverlay();
     _customerFocusNode.dispose();
     super.dispose();
@@ -291,8 +360,71 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
     return digits.isEmpty || digits == '91' ? null : digits;
   }
 
+  Future<void> _pickBillDate() async {
+    if (_frozen || !widget.canBackdate) return;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final initial = _billDate != null
+        ? DateTime(_billDate!.year, _billDate!.month, _billDate!.day)
+        : today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isAfter(today) ? today : initial,
+      firstDate: DateTime(2000, 1, 1),
+      lastDate: today,
+    );
+    if (picked == null || !mounted) return;
+    final pickedDay = DateTime(picked.year, picked.month, picked.day);
+    if (pickedDay.isAfter(today)) {
+      _showCheckoutError('Bill date cannot be in the future.');
+      return;
+    }
+    setState(() {
+      _billDate = pickedDay == today
+          ? null
+          : DateTime(pickedDay.year, pickedDay.month, pickedDay.day, 12, 0);
+    });
+  }
+
+  String _billDateLabel() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = _billDate;
+    if (date == null) {
+      return 'Today (${DateFormat('dd MMM yyyy').format(now)})';
+    }
+    final pickedDay = DateTime(date.year, date.month, date.day);
+    if (pickedDay == today) {
+      return 'Today (${DateFormat('dd MMM yyyy').format(now)})';
+    }
+    return DateFormat('dd MMM yyyy').format(date);
+  }
+
   Future<void> _submit(double total) async {
     if (_saving || _reviewRequired || _draftError != null) return;
+    if (!_frozen && _billDate != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final chosenDay = DateTime(
+        _billDate!.year,
+        _billDate!.month,
+        _billDate!.day,
+      );
+      if (chosenDay.isAfter(today)) {
+        _showCheckoutError('Bill date cannot be in the future.');
+        return;
+      }
+      if (chosenDay.isBefore(today) && !widget.canBackdate) {
+        _showCheckoutError('Only a shop owner or admin can backdate bills.');
+        return;
+      }
+    }
+    if (!_frozen &&
+        _discountMode == Bill.discountModeAmount &&
+        _discountValue > widget.maxFixedDiscount + 1e-6) {
+      _showCheckoutError('Discount cannot exceed subtotal.');
+      return;
+    }
     if (!_frozen && _billType == Bill.typeB2b && !_validateB2bFields()) return;
     try {
       if (_attemptDraft == null) {
@@ -312,6 +444,9 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
             ? 'cash'
             : _paymentMethod;
         final trimmedReference = _transactionIdController.text.trim();
+        final effectiveDiscountValue = _discountMode == Bill.discountModePercent
+            ? _discountValue.clamp(0, 100).toDouble()
+            : _discountValue;
         _attemptDraft = _BillDraft(
           customerName: _customerController.text,
           customerPhone: _checkoutPhone(),
@@ -323,7 +458,14 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
           placeOfSupplyStateCode: _stateCodeController.text.trim().isEmpty
               ? _gstinController.text.trim()
               : _stateCodeController.text,
-          discountPercent: _discountPercent.clamp(0, 100).toDouble(),
+          discountPercent: _discountMode == Bill.discountModePercent
+              ? effectiveDiscountValue
+              : 0,
+          discountMode: _discountMode,
+          discountValue: effectiveDiscountValue,
+          taxMode: _taxMode,
+          roundOffMode: _roundOffMode,
+          roundOffIncrement: _roundOffIncrement,
           paidAmount: paidAmount,
           paymentMethod: normalizedMethod,
           transactionReference:
@@ -332,6 +474,10 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                   trimmedReference.isEmpty)
               ? null
               : trimmedReference,
+          billDate: _billDate,
+          notes: _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
         );
       }
       FocusManager.instance.primaryFocus?.unfocus();
@@ -402,8 +548,21 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    final percent = _discountPercent.clamp(0, 100).toDouble();
-    final totals = widget.totalsFor(percent);
+    final discountExceedsSubtotal =
+        _discountMode == Bill.discountModeAmount &&
+        _discountValue > widget.maxFixedDiscount + 1e-6;
+    final previewDiscountValue = _discountMode == Bill.discountModePercent
+        ? _discountValue.clamp(0, 100).toDouble()
+        : _discountValue.clamp(0, widget.maxFixedDiscount).toDouble();
+    final totals = widget.totalsFor(
+      discountMode: _discountMode,
+      discountValue: previewDiscountValue,
+      taxMode: _taxMode,
+      roundOffMode: _roundOffMode,
+      roundOffIncrement: _roundOffIncrement,
+      placeOfSupplyStateCode: _stateCodeController.text,
+      customerGstin: _gstinController.text,
+    );
     final discount = totals.discountAmount;
     final total = totals.grandTotal;
     final totalPaise = decimalScaledInteger(total.toStringAsFixed(2), scale: 2);
@@ -580,6 +739,42 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       ),
                     ],
                     const SizedBox(height: 12),
+                    InkWell(
+                      key: const ValueKey('checkout-bill-date'),
+                      borderRadius: AppRadius.smRadius,
+                      onTap: widget.canBackdate && !_frozen
+                          ? _pickBillDate
+                          : null,
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: 'Bill date',
+                          prefixIcon: const Icon(Icons.calendar_today_outlined),
+                          suffixIcon: widget.canBackdate
+                              ? const Icon(Icons.edit_calendar_outlined)
+                              : const Icon(Icons.lock_outline_rounded, size: 18),
+                          enabled: widget.canBackdate && !_frozen,
+                        ),
+                        child: Text(
+                          _billDateLabel(),
+                          style: AppText.body,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      readOnly: _frozen,
+                      key: const ValueKey('checkout-notes'),
+                      controller: _notesController,
+                      maxLength: 500,
+                      minLines: 1,
+                      maxLines: 3,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes (optional)',
+                        prefixIcon: Icon(Icons.notes_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     _BillSummaryRow(
                       label: context.l10n.subtotal,
                       value: rupees(totals.subtotal),
@@ -589,32 +784,169 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       value: '${widget.itemCount}',
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      readOnly: _frozen,
-                      key: const ValueKey('checkout-discount'),
-                      controller: _discountController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        TextInputFormatter.withFunction((oldValue, newValue) {
-                          final isValid = RegExp(
-                            r'^\d*\.?\d{0,2}$',
-                          ).hasMatch(newValue.text);
-                          return isValid ? newValue : oldValue;
-                        }),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            readOnly: _frozen,
+                            key: const ValueKey('checkout-discount'),
+                            controller: _discountController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              TextInputFormatter.withFunction((
+                                oldValue,
+                                newValue,
+                              ) {
+                                final isValid = RegExp(
+                                  r'^\d*\.?\d{0,2}$',
+                                ).hasMatch(newValue.text);
+                                return isValid ? newValue : oldValue;
+                              }),
+                            ],
+                            decoration: InputDecoration(
+                              labelText:
+                                  _discountMode == Bill.discountModePercent
+                                  ? context.l10n.discountPercent
+                                  : 'Discount (₹)',
+                              prefixText:
+                                  _discountMode == Bill.discountModeAmount
+                                  ? '₹ '
+                                  : null,
+                              suffixText:
+                                  _discountMode == Bill.discountModePercent
+                                  ? '%'
+                                  : null,
+                              errorText: discountExceedsSubtotal
+                                  ? 'Cannot exceed subtotal'
+                                  : null,
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                _discountValue = double.tryParse(value) ?? 0;
+                                _allowUnassignedCredit = false;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SegmentedButton<String>(
+                          key: const ValueKey('checkout-discount-mode'),
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(
+                              value: Bill.discountModePercent,
+                              label: Text('%'),
+                            ),
+                            ButtonSegment(
+                              value: Bill.discountModeAmount,
+                              label: Text('₹'),
+                            ),
+                          ],
+                          selected: {_discountMode},
+                          onSelectionChanged: _frozen
+                              ? null
+                              : (value) => setState(() {
+                                  _discountMode = value.first;
+                                  _allowUnassignedCredit = false;
+                                }),
+                        ),
                       ],
-                      decoration: InputDecoration(
-                        labelText: context.l10n.discountPercent,
-                        suffixText: '%',
-                      ),
-                      onChanged: (value) {
-                        setState(() {
-                          _discountPercent = double.tryParse(value) ?? 0;
-                          _allowUnassignedCredit = false;
-                        });
-                      },
                     ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<String>(
+                        key: const ValueKey('checkout-tax-mode'),
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: Bill.taxModeInclusive,
+                            label: Text('Tax inclusive'),
+                          ),
+                          ButtonSegment(
+                            value: Bill.taxModeExclusive,
+                            label: Text('Tax exclusive'),
+                          ),
+                        ],
+                        selected: {_taxMode},
+                        onSelectionChanged: _frozen
+                            ? null
+                            : (value) => setState(() {
+                                _taxMode = value.first;
+                                _allowUnassignedCredit = false;
+                              }),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Round off', style: AppText.caption),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        key: const ValueKey('checkout-round-off-mode'),
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          for (final entry in const [
+                            (Bill.roundOffNone, 'None'),
+                            (Bill.roundOffNearest, 'Nearest'),
+                            (Bill.roundOffUp, 'Up'),
+                            (Bill.roundOffDown, 'Down'),
+                          ])
+                            ChoiceChip(
+                              key: ValueKey(
+                                'checkout-round-off-mode-${entry.$1}',
+                              ),
+                              label: Text(entry.$2),
+                              selected: _roundOffMode == entry.$1,
+                              onSelected: _frozen
+                                  ? null
+                                  : (_) => setState(() {
+                                      _roundOffMode = entry.$1;
+                                      _allowUnassignedCredit = false;
+                                    }),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (_roundOffMode != Bill.roundOffNone) ...[
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          key: const ValueKey('checkout-round-off-increment'),
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            for (final inc in Bill.roundOffIncrements)
+                              ChoiceChip(
+                                key: ValueKey(
+                                  'checkout-round-off-increment-${inc.toStringAsFixed(2)}',
+                                ),
+                                label: Text(
+                                  inc == 0.5
+                                      ? '₹0.50'
+                                      : '₹${inc.toStringAsFixed(0)}',
+                                ),
+                                selected:
+                                    (_roundOffIncrement - inc).abs() < 1e-6,
+                                onSelected: _frozen
+                                    ? null
+                                    : (_) => setState(() {
+                                        _roundOffIncrement = inc;
+                                        _allowUnassignedCredit = false;
+                                      }),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     SegmentedButton<String>(
                       segments: [
@@ -780,9 +1112,21 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                       child: Column(
                         children: [
                           _BillSummaryRow(
-                            label: 'Discount (${percent.toStringAsFixed(2)}%)',
+                            label: _discountMode == Bill.discountModePercent
+                                ? 'Discount (${previewDiscountValue.toStringAsFixed(2)}%)'
+                                : 'Discount',
                             value: '- ${rupees(discount)}',
                           ),
+                          if (totals.gstAmount > 0) ...[
+                            _BillSummaryRow(
+                              label: 'Taxable',
+                              value: rupees(totals.taxableAmount),
+                            ),
+                            _BillSummaryRow(
+                              label: 'GST',
+                              value: rupees(totals.gstAmount),
+                            ),
+                          ],
                           if (totals.roundOffAmount != 0)
                             _BillSummaryRow(
                               label: context.l10n.roundOff,
@@ -791,6 +1135,7 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                             ),
                           const Divider(height: 20),
                           _BillSummaryRow(
+                            valueKey: const ValueKey('checkout-grand-total'),
                             label: context.l10n.grandTotal,
                             value: rupees(total),
                             isTotal: true,

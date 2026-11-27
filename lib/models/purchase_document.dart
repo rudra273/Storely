@@ -58,6 +58,233 @@ String purchaseMoney(String value) {
   return '₹${groups.join(',')}.${(normalized.length == 1 ? '' : normalized[1]).padRight(2, '0')}';
 }
 
+class PurchaseDocumentItem {
+  final String uuid;
+  final String movementUuid;
+  final String productUuid;
+  final String productName;
+  final String? unitName;
+  final String quantity;
+  final String unitCost;
+  final String amount;
+  final String? batchNo;
+  final String? expiryDate;
+  final int? lineNumber;
+  final String returnedQuantity;
+  final String returnableQuantity;
+
+  const PurchaseDocumentItem({
+    required this.uuid,
+    required this.movementUuid,
+    required this.productUuid,
+    required this.productName,
+    this.unitName,
+    required this.quantity,
+    required this.unitCost,
+    required this.amount,
+    this.batchNo,
+    this.expiryDate,
+    this.lineNumber,
+    this.returnedQuantity = '0',
+    required this.returnableQuantity,
+  });
+
+  factory PurchaseDocumentItem.fromJson(Map<String, dynamic> json) {
+    final quantity = json['quantity'] as String;
+    final returned = json['returned_quantity']?.toString() ?? '0';
+    final returnable = json['returnable_quantity']?.toString() ?? quantity;
+    return PurchaseDocumentItem(
+      uuid: json['uuid'] as String,
+      movementUuid: json['movement_uuid'] as String,
+      productUuid: json['product_uuid'] as String,
+      productName: json['product_name'] as String,
+      unitName: json['unit_name'] as String?,
+      quantity: quantity,
+      unitCost: json['unit_cost'] as String,
+      amount: json['amount'] as String,
+      batchNo: json['batch_no'] as String?,
+      expiryDate: json['expiry_date'] as String?,
+      lineNumber: (json['line_number'] as num?)?.toInt(),
+      returnedQuantity: normalizePurchaseDecimal(returned),
+      returnableQuantity: normalizePurchaseDecimal(returnable),
+    );
+  }
+
+  bool get hasReturnedQuantity =>
+      decimalScaledInteger(
+        normalizePurchaseDecimal(returnedQuantity),
+        scale: 4,
+      ) >
+      BigInt.zero;
+
+  bool get hasReturnableQuantity =>
+      decimalScaledInteger(
+        normalizePurchaseDecimal(returnableQuantity),
+        scale: 4,
+      ) >
+      BigInt.zero;
+}
+
+class PurchaseReturnItemRecord {
+  final String uuid;
+  final String purchaseItemUuid;
+  final String productUuid;
+  final String productName;
+  final String? unitName;
+  final String quantity;
+  final String unitCost;
+  final String amount;
+  final String movementUuid;
+
+  const PurchaseReturnItemRecord({
+    required this.uuid,
+    required this.purchaseItemUuid,
+    required this.productUuid,
+    required this.productName,
+    this.unitName,
+    required this.quantity,
+    required this.unitCost,
+    required this.amount,
+    required this.movementUuid,
+  });
+
+  factory PurchaseReturnItemRecord.fromJson(Map<String, dynamic> json) =>
+      PurchaseReturnItemRecord(
+        uuid: json['uuid']?.toString() ?? '',
+        purchaseItemUuid: json['purchase_item_uuid']?.toString() ?? '',
+        productUuid: json['product_uuid']?.toString() ?? '',
+        productName: json['product_name']?.toString() ?? '',
+        unitName: json['unit_name']?.toString(),
+        quantity: normalizePurchaseDecimal(
+          json['quantity']?.toString() ?? '0',
+        ),
+        unitCost: normalizePurchaseDecimal(
+          json['unit_cost']?.toString() ?? '0',
+        ),
+        amount: normalizePurchaseDecimal(json['amount']?.toString() ?? '0'),
+        movementUuid: json['movement_uuid']?.toString() ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+    'uuid': uuid,
+    'purchase_item_uuid': purchaseItemUuid,
+    'product_uuid': productUuid,
+    'product_name': productName,
+    'unit_name': unitName,
+    'quantity': quantity,
+    'unit_cost': unitCost,
+    'amount': amount,
+    'movement_uuid': movementUuid,
+  };
+}
+
+class PurchaseReturnRecord {
+  final String uuid;
+  final String purchaseUuid;
+  final String? supplierUuid;
+  final String? supplierName;
+  final String returnNumber;
+  final String returnDate;
+  final String reason;
+  final String subtotal;
+  final String taxAmount;
+  final String total;
+  final String payableCredit;
+  final String refundAmount;
+  final String? refundMethod;
+  final String createdAt;
+  final List<PurchaseReturnItemRecord> items;
+
+  const PurchaseReturnRecord({
+    required this.uuid,
+    required this.purchaseUuid,
+    this.supplierUuid,
+    this.supplierName,
+    required this.returnNumber,
+    required this.returnDate,
+    required this.reason,
+    required this.subtotal,
+    required this.taxAmount,
+    required this.total,
+    required this.payableCredit,
+    required this.refundAmount,
+    this.refundMethod,
+    required this.createdAt,
+    this.items = const [],
+  });
+
+  factory PurchaseReturnRecord.fromJson(Map<String, dynamic> json) =>
+      PurchaseReturnRecord(
+        uuid: json['uuid']?.toString() ?? '',
+        purchaseUuid: json['purchase_uuid']?.toString() ?? '',
+        supplierUuid: json['supplier_uuid']?.toString(),
+        supplierName: json['supplier_name']?.toString(),
+        returnNumber: json['return_number']?.toString() ?? '',
+        returnDate: json['return_date']?.toString() ?? '',
+        reason: json['reason']?.toString() ?? '',
+        subtotal: normalizePurchaseDecimal(
+          json['subtotal']?.toString() ?? '0',
+        ),
+        taxAmount: normalizePurchaseDecimal(
+          json['tax_amount']?.toString() ?? '0',
+        ),
+        total: normalizePurchaseDecimal(json['total']?.toString() ?? '0'),
+        payableCredit: normalizePurchaseDecimal(
+          json['payable_credit']?.toString() ?? '0',
+        ),
+        refundAmount: normalizePurchaseDecimal(
+          json['refund_amount']?.toString() ?? '0',
+        ),
+        refundMethod: json['refund_method']?.toString(),
+        createdAt: json['created_at']?.toString() ?? '',
+        items: [
+          for (final row in json['items'] as List? ?? const [])
+            PurchaseReturnItemRecord.fromJson(
+              Map<String, dynamic>.from(row as Map),
+            ),
+        ],
+      );
+
+  Map<String, dynamic> toJson() => {
+    'uuid': uuid,
+    'purchase_uuid': purchaseUuid,
+    'supplier_uuid': supplierUuid,
+    'supplier_name': supplierName,
+    'return_number': returnNumber,
+    'return_date': returnDate,
+    'reason': reason,
+    'subtotal': subtotal,
+    'tax_amount': taxAmount,
+    'total': total,
+    'payable_credit': payableCredit,
+    'refund_amount': refundAmount,
+    'refund_method': refundMethod,
+    'created_at': createdAt,
+    'items': [for (final item in items) item.toJson()],
+  };
+}
+
+class SupplierBalanceSummary {
+  final String confirmedBalance;
+  final String pendingPaymentsTotal;
+  final int failedPaymentsCount;
+  final String projectedBalance;
+  final int unrecordedReceiptsCount;
+  final DateTime? lastSyncedAt;
+
+  const SupplierBalanceSummary({
+    required this.confirmedBalance,
+    required this.pendingPaymentsTotal,
+    required this.failedPaymentsCount,
+    required this.projectedBalance,
+    required this.unrecordedReceiptsCount,
+    this.lastSyncedAt,
+  });
+
+  bool get hasPendingPayments =>
+      decimalScaledInteger(pendingPaymentsTotal, scale: 2) > BigInt.zero;
+}
+
 /// Immutable document snapshot. Applying one never creates stock movements.
 class PurchaseDocument {
   final Map<String, dynamic> _json;
@@ -93,6 +320,12 @@ class PurchaseDocument {
       normalizePurchaseDecimal(line['quantity'] as String);
       normalizePurchaseDecimal(line['unit_cost'] as String);
       normalizePurchaseDecimal(line['amount'] as String);
+      if (line['returned_quantity'] != null) {
+        normalizePurchaseDecimal(line['returned_quantity'].toString());
+      }
+      if (line['returnable_quantity'] != null) {
+        normalizePurchaseDecimal(line['returnable_quantity'].toString());
+      }
     }
   }
 
@@ -103,10 +336,22 @@ class PurchaseDocument {
   String get paymentStatus =>
       _json['payment_status'] as String? ?? 'not_recorded';
   String? get total => _json['total'] as String?;
+  String? get paidAmount => _json['paid_amount'] as String?;
   String? get balanceDue => _json['balance_due'] as String?;
   String get taxAmount => _json['tax_amount'] as String? ?? '0';
   String get chargesAmount => _json['charges_amount'] as String? ?? '0';
   String get discountAmount => _json['discount_amount'] as String? ?? '0';
+  String? get dueDate => _json['due_date'] as String?;
+  String? get invoiceNumber => _json['invoice_number'] as String?;
+  String? get notes => _json['notes'] as String?;
+  String? get supplierUuid => _json['supplier_uuid'] as String?;
+  String? get reversedAt => _json['reversed_at'] as String?;
+  String? get reversalReason => _json['reversal_reason'] as String?;
+  String get returnedTotal => _json['returned_total']?.toString() ?? '0.00';
+  List<PurchaseReturnRecord> get returns => [
+    for (final row in _json['returns'] as List? ?? const [])
+      PurchaseReturnRecord.fromJson(Map<String, dynamic>.from(row as Map)),
+  ];
   List<Map<String, dynamic>> get payments => [
     for (final row in _json['payments'] as List? ?? [])
       Map<String, dynamic>.from(row as Map),
@@ -118,6 +363,38 @@ class PurchaseDocument {
     for (final row in _json['items'] as List)
       Map<String, dynamic>.from(row as Map),
   ];
+  List<PurchaseDocumentItem> get lineItems => [
+    for (final row in items) PurchaseDocumentItem.fromJson(row),
+  ];
+
+  bool get isReversed => reversedAt != null && reversedAt!.trim().isNotEmpty;
+  bool get isNotRecorded => paymentStatus == 'not_recorded';
+  bool get hasReturnableItems =>
+      !isReversed && lineItems.any((item) => item.hasReturnableQuantity);
+  bool get canReverse => !isReversed;
+  bool get canRecordPaymentTerms =>
+      !isReversed &&
+      isNotRecorded &&
+      supplierUuid != null &&
+      supplierUuid!.trim().isNotEmpty;
+  bool get hasBalanceDue =>
+      balanceDue != null &&
+      decimalScaledInteger(
+            normalizePurchaseDecimal(balanceDue!),
+            scale: 4,
+          ) >
+          BigInt.zero;
+  bool get canPaySupplier =>
+      !isReversed &&
+      supplierUuid != null &&
+      supplierUuid!.trim().isNotEmpty &&
+      hasBalanceDue;
+  bool get hasReturnedTotal =>
+      decimalScaledInteger(
+        normalizePurchaseDecimal(returnedTotal),
+        scale: 4,
+      ) >
+      BigInt.zero;
   Map<String, dynamic> toJson() =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(_json)) as Map);
 

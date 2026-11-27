@@ -27,6 +27,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
   final TextEditingController _footerCtrl = TextEditingController();
   final TextEditingController _patternCtrl = TextEditingController();
   final TextEditingController _paddingCtrl = TextEditingController();
+  final TextEditingController _nextSequenceCtrl = TextEditingController();
   final TextEditingController _seriesNameCtrl = TextEditingController();
   final TextEditingController _upiCtrl = TextEditingController();
   final TextEditingController _termsCtrl = TextEditingController();
@@ -52,6 +53,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
     _bankCtrl.dispose();
     _patternCtrl.dispose();
     _paddingCtrl.dispose();
+    _nextSequenceCtrl.dispose();
     _seriesNameCtrl.dispose();
     super.dispose();
   }
@@ -73,6 +75,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       _bankCtrl.text = settings.bankDetails;
       _patternCtrl.text = series.formatTemplate;
       _paddingCtrl.text = series.sequencePadding.toString();
+      _nextSequenceCtrl.text = series.nextSequence.toString();
       _seriesNameCtrl.text = series.name;
       _isLoading = false;
     });
@@ -130,6 +133,13 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
       ).showSnackBar(SnackBar(content: Text(upiProblem)));
       return;
     }
+    final seqProblem = _nextSequenceProblem();
+    if (seqProblem != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(seqProblem)));
+      return;
+    }
     final padding = _padding;
     final settings = _settings.copyWith(
       invoiceTitle: _titleCtrl.text,
@@ -144,6 +154,7 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
           : _seriesNameCtrl.text.trim(),
       formatTemplate: pattern,
       sequencePadding: padding.clamp(1, 8),
+      nextSequence: _parsedNextSequence!,
     );
     setState(() => _isSaving = true);
     try {
@@ -177,15 +188,28 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
     resetPeriod: _series.resetPeriod,
   );
 
+  int? get _parsedNextSequence => int.tryParse(_nextSequenceCtrl.text.trim());
+
+  String? _nextSequenceProblem() {
+    final value = _parsedNextSequence;
+    if (value == null || value < 1) {
+      return 'Next invoice number must be 1 or more';
+    }
+    return null;
+  }
+
   String _patternPreview() {
+    final seq = (_parsedNextSequence != null && _parsedNextSequence! >= 1)
+        ? _parsedNextSequence!
+        : 1;
     final number = InvoiceNumbering.format(
       template: _patternCtrl.text.trim(),
       date: DateTime.now(),
-      sequence: 1,
+      sequence: seq,
       padding: _padding,
       deviceCode: '',
     );
-    return 'First bill: $number  (${number.length}/${InvoiceNumbering.maxLength})'
+    return 'Next bill: $number  (${number.length}/${InvoiceNumbering.maxLength})'
         '\nTokens: {FY}, {YYYY}, {YY}, {MM}, {DD}, {SEQ}, {DEVICE}';
   }
 
@@ -284,6 +308,18 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                           );
                         },
                       ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        key: const ValueKey('settings-next-sequence'),
+                        controller: _nextSequenceCtrl,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Next invoice number',
+                          errorText: _nextSequenceProblem(),
+                          prefixIcon: const Icon(Icons.pin_outlined),
+                        ),
+                      ),
                       const SizedBox(height: AppSpacing.lg),
                       const _SettingsSectionLabel(title: 'Invoice Content'),
                       const SizedBox(height: AppSpacing.sm),
@@ -332,7 +368,15 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                           ),
                           ButtonSegment(
                             value: BillSettings.paperA5,
-                            label: Text('A5 (half page)'),
+                            label: Text('A5'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paper80mm,
+                            label: Text('80mm'),
+                          ),
+                          ButtonSegment(
+                            value: BillSettings.paper58mm,
+                            label: Text('58mm'),
                           ),
                         ],
                         selected: {_settings.paperSize},
@@ -664,13 +708,93 @@ class _BillSettingsScreenState extends State<BillSettingsScreen> {
                               showGrandTotal: value,
                             ),
                           ),
-                          _switch(
-                            'Round grand total to nearest ₹1',
-                            _settings.roundOffTotal,
-                            (value) => _settings = _settings.copyWith(
-                              roundOffTotal: value,
+                          const SizedBox(height: AppSpacing.sm),
+                          Text('Default tax mode', style: AppText.caption),
+                          const SizedBox(height: AppSpacing.xs),
+                          SegmentedButton<String>(
+                            key: const ValueKey('settings-default-tax-mode'),
+                            segments: const [
+                              ButtonSegment(
+                                value: BillSettings.taxModeInclusive,
+                                label: Text('GST inclusive'),
+                              ),
+                              ButtonSegment(
+                                value: BillSettings.taxModeExclusive,
+                                label: Text('GST exclusive'),
+                              ),
+                            ],
+                            selected: {_settings.defaultTaxMode},
+                            showSelectedIcon: false,
+                            onSelectionChanged: (value) => setState(
+                              () => _settings = _settings.copyWith(
+                                defaultTaxMode: value.first,
+                              ),
                             ),
                           ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text('Round-off mode', style: AppText.caption),
+                          const SizedBox(height: AppSpacing.xs),
+                          Wrap(
+                            key: const ValueKey('settings-round-off-mode'),
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final entry in const [
+                                (BillSettings.roundOffNone, 'None'),
+                                (BillSettings.roundOffNearest, 'Nearest'),
+                                (BillSettings.roundOffUp, 'Round up'),
+                                (BillSettings.roundOffDown, 'Round down'),
+                              ])
+                                ChoiceChip(
+                                  key: ValueKey(
+                                    'settings-round-off-mode-${entry.$1}',
+                                  ),
+                                  label: Text(entry.$2),
+                                  selected: _settings.roundOffMode == entry.$1,
+                                  onSelected: (_) => setState(
+                                    () => _settings = _settings.copyWith(
+                                      roundOffMode: entry.$1,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (_settings.roundOffMode !=
+                              BillSettings.roundOffNone) ...[
+                            const SizedBox(height: AppSpacing.sm),
+                            Text('Round-off increment', style: AppText.caption),
+                            const SizedBox(height: AppSpacing.xs),
+                            Wrap(
+                              key: const ValueKey(
+                                'settings-round-off-increment',
+                              ),
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final inc
+                                    in BillSettings.roundOffIncrements)
+                                  ChoiceChip(
+                                    key: ValueKey(
+                                      'settings-round-off-increment-${inc.toStringAsFixed(2)}',
+                                    ),
+                                    label: Text(
+                                      inc == 0.5
+                                          ? '₹0.50'
+                                          : '₹${inc.toStringAsFixed(0)}',
+                                    ),
+                                    selected:
+                                        (_settings.roundOffIncrement - inc)
+                                            .abs() <
+                                        1e-6,
+                                    onSelected: (_) => setState(
+                                      () => _settings = _settings.copyWith(
+                                        roundOffIncrement: inc,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: AppSpacing.md),

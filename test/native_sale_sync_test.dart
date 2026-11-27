@@ -73,6 +73,37 @@ class NativeBackend extends FakeSyncBackend implements NativeSaleSyncBackend {
         ],
     };
   }
+
+  @override
+  Future<Map<String, dynamic>> inspectNativeSaleReconciliation(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request,
+  ) async {
+    final existing = committed[attemptId];
+    return {
+      'status': existing != null ? 'already_committed' : 'ready',
+      'operation_committed': existing != null,
+      'invoice_uuid': request['invoice_uuid'],
+      'committed_bill': existing,
+      'stock_shortages': const <Map<String, dynamic>>[],
+      'terms_mismatches': const <Map<String, dynamic>>[],
+      'snapshot_mismatches': const <Map<String, dynamic>>[],
+      'identity_conflicts': const <String>[],
+      'blocking_reasons': const <String>[],
+      'can_reconcile': true,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> reconcileNativeSale(
+    CheckoutScope scope,
+    String attemptId,
+    Map<String, dynamic> request, {
+    required bool allowStockShortage,
+    required bool acceptRecordedSnapshot,
+    required String reason,
+  }) => postNativeSale(scope, attemptId, request);
 }
 
 void main() {

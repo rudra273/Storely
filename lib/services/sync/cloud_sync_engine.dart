@@ -8,6 +8,41 @@ import 'purchase_sync_backend.dart';
 /// How a device's existing local data is handled on its first sync.
 enum FirstSyncMode { uploadExisting, startFresh }
 
+/// Result of inspecting a reserved native sale against both the cloud server
+/// and local post-issue edits.
+class NativeSaleReconciliationReport {
+  final PendingNativeSale sale;
+  final String serverStatus;
+  final bool operationCommitted;
+  final Map<String, dynamic>? committedBill;
+  final List<Map<String, dynamic>> stockShortages;
+  final List<Map<String, dynamic>> termsMismatches;
+  final List<Map<String, dynamic>> snapshotMismatches;
+  final List<String> identityConflicts;
+  final List<String> blockingReasons;
+  final bool canReconcile;
+  final NativeSaleLocalDiff localDiff;
+
+  const NativeSaleReconciliationReport({
+    required this.sale,
+    required this.serverStatus,
+    required this.operationCommitted,
+    required this.committedBill,
+    required this.stockShortages,
+    required this.termsMismatches,
+    required this.snapshotMismatches,
+    required this.identityConflicts,
+    required this.blockingReasons,
+    required this.canReconcile,
+    required this.localDiff,
+  });
+
+  bool get hasStockShortages => stockShortages.isNotEmpty;
+
+  bool get hasSnapshotOrTermsMismatches =>
+      termsMismatches.isNotEmpty || snapshotMismatches.isNotEmpty;
+}
+
 /// Outcome of a sync attempt.
 ///
 /// [syncedAt] is non-null only when a real sync ran. [needsRegistration] means
@@ -76,6 +111,7 @@ class CloudSyncEngine {
 
   static const purchaseCursorStateKey = 'purchase_document_sequence';
   static const nativeSaleConflictTable = 'native_sale_postings';
+  static const nativeBillingCommandConflictTable = 'native_billing_commands';
   static const lastSyncStateKey = 'last_successful_cloud_sync_at';
   static const defaultPageSize = 500;
   static const pushChunkSize = 200;
@@ -119,6 +155,11 @@ class CloudSyncEngine {
         'The original sale is reserved for atomic sync. Its local records are preserved.',
       );
     }
+    if (conflict.table == nativeBillingCommandConflictTable) {
+      throw StateError(
+        'This billing follow-up is reserved for atomic sync. Its local records are preserved.',
+      );
+    }
     await database.markRowSynced(conflict.table, conflict.key);
     await database.clearCloudSyncState(_cursorKey(conflict.table));
     final remaining = [
@@ -133,6 +174,7 @@ class CloudSyncEngine {
     await database.clearCloudSyncState(lastSyncStateKey);
     await database.clearCloudSyncState(purchaseCursorStateKey);
     await database.clearNativeSaleScope();
+    await database.clearNativeBillingCommandsScope();
     for (final table in syncedTables) {
       await database.clearCloudSyncState(_cursorKey(table));
     }
@@ -189,11 +231,16 @@ class CloudSyncEngine {
     await prepareUserData?.call(firstSync && !hadLocalData);
     if (firstSync &&
         firstSyncMode == FirstSyncMode.startFresh &&
-        await database.hasReservedNativeSales(shopId)) {
-      throw StateError('Retry the reserved sales before starting fresh.');
+        (await database.hasReservedNativeSales(shopId) ||
+            await database.hasReservedNativeBillingCommands(shopId))) {
+      throw StateError(
+        'Retry the reserved sales and billing commands before starting fresh.',
+      );
     }
     final saleBackend = backend;
-    final saleScope = saleBackend is NativeSaleSyncBackend
+    final saleScope =
+        (saleBackend is NativeSaleSyncBackend ||
+            saleBackend is NativeBillingCommandSyncBackend)
         ? await database.captureCheckoutScope()
         : null;
     final conflicts = <SyncConflict>[];
@@ -211,15 +258,24 @@ class CloudSyncEngine {
     for (final table in syncedTables) {
       if (_adminManagedTables.contains(table) && !canPushAdminTables) continue;
       if (table == 'audit_log' &&
-          saleBackend is NativeSaleSyncBackend &&
           saleScope?.owner != null &&
           saleScope!.shopId == shopId) {
-        conflicts.addAll(
-          await _syncNativeSales(
-            saleBackend as NativeSaleSyncBackend,
-            saleScope,
-          ),
-        );
+        if (saleBackend is NativeSaleSyncBackend) {
+          conflicts.addAll(
+            await _syncNativeSales(
+              saleBackend as NativeSaleSyncBackend,
+              saleScope,
+            ),
+          );
+        }
+        if (saleBackend is NativeBillingCommandSyncBackend) {
+          conflicts.addAll(
+            await _syncNativeBillingCommands(
+              saleBackend as NativeBillingCommandSyncBackend,
+              saleScope,
+            ),
+          );
+        }
       }
       conflicts.addAll(await _push(table));
     }
@@ -235,16 +291,26 @@ class CloudSyncEngine {
     }
     await applyUserData?.call();
     if (nativeSalePostingEnabled &&
-        saleBackend is NativeSaleSyncBackend &&
         saleScope?.owner != null &&
         saleScope!.shopId == shopId) {
-      final supported = await (saleBackend as NativeSaleSyncBackend)
-          .supportsNativeSale(saleScope);
-      await database.updateNativeSaleScope(
-        saleScope,
-        supported: supported,
-        isCurrent: _nativeSaleScopeCurrent,
-      );
+      if (saleBackend is NativeSaleSyncBackend) {
+        final supported = await (saleBackend as NativeSaleSyncBackend)
+            .supportsNativeSale(saleScope);
+        await database.updateNativeSaleScope(
+          saleScope,
+          supported: supported,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      }
+      if (saleBackend is NativeBillingCommandSyncBackend) {
+        final supported = await (saleBackend as NativeBillingCommandSyncBackend)
+            .supportsNativeBillingCommands(saleScope);
+        await database.updateNativeBillingCommandsScope(
+          saleScope,
+          supported: supported,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      }
     }
     final syncedAt = DateTime.now().toUtc();
     await database.setCloudSyncState(
@@ -256,6 +322,180 @@ class CloudSyncEngine {
   }
 
   bool _nativeSaleScopeCurrent() => isUserDataScopeCurrent?.call() != false;
+
+  Future<NativeSaleReconciliationReport> inspectReservedNativeSale(
+    NativeSaleSyncBackend transport,
+    CheckoutScope scope,
+    String billUuid,
+  ) async {
+    if (!_nativeSaleScopeCurrent()) {
+      throw StateError('Account changed during sale reconciliation.');
+    }
+    final sale = await database.pendingNativeSaleForBill(scope, billUuid);
+    if (sale == null) {
+      throw StateError('No reserved native sale found for this invoice.');
+    }
+    final request = Map<String, dynamic>.from(jsonDecode(sale.request) as Map);
+    if (request['invoice_uuid'] != sale.billUuid ||
+        request['device_id'] != scope.deviceId) {
+      throw const FormatException('Saved sale identity or device differs.');
+    }
+    final localDiff = await database.inspectLocalNativeSaleEdits(scope, sale);
+    if (!_nativeSaleScopeCurrent()) {
+      throw StateError('Account changed during sale reconciliation.');
+    }
+    final raw = await transport.inspectNativeSaleReconciliation(
+      scope,
+      sale.attemptId,
+      request,
+    );
+    if (!_nativeSaleScopeCurrent()) {
+      throw StateError('Account changed during sale reconciliation.');
+    }
+
+    List<Map<String, dynamic>> mapList(Object? value) => value is List
+        ? [for (final item in value) Map<String, dynamic>.from(item as Map)]
+        : const [];
+    List<String> stringList(Object? value) =>
+        value is List ? [for (final item in value) item.toString()] : const [];
+
+    return NativeSaleReconciliationReport(
+      sale: sale,
+      serverStatus: (raw['status'] ?? '').toString(),
+      operationCommitted: raw['operation_committed'] == true,
+      committedBill: raw['committed_bill'] is Map
+          ? Map<String, dynamic>.from(raw['committed_bill'] as Map)
+          : null,
+      stockShortages: mapList(raw['stock_shortages']),
+      termsMismatches: mapList(raw['terms_mismatches']),
+      snapshotMismatches: mapList(raw['snapshot_mismatches']),
+      identityConflicts: stringList(raw['identity_conflicts']),
+      blockingReasons: stringList(raw['blocking_reasons']),
+      canReconcile: raw['can_reconcile'] == true,
+      localDiff: localDiff,
+    );
+  }
+
+  Future<void> resolveReservedNativeSale(
+    NativeSaleSyncBackend transport,
+    CheckoutScope scope,
+    NativeSaleReconciliationReport report, {
+    bool allowStockShortage = false,
+    bool acceptRecordedSnapshot = false,
+    bool postOriginalBeforeLocalEdits = false,
+    String? reason,
+  }) async {
+    if (!_nativeSaleScopeCurrent()) {
+      throw StateError('Account changed during sale reconciliation.');
+    }
+    final sale = report.sale;
+    final request = Map<String, dynamic>.from(jsonDecode(sale.request) as Map);
+    if (request['invoice_uuid'] != sale.billUuid ||
+        request['device_id'] != scope.deviceId) {
+      throw const FormatException('Saved sale identity or device differs.');
+    }
+
+    if (report.serverStatus == 'already_committed') {
+      final receipt = report.committedBill;
+      if (receipt == null || !_matchesNativeSaleReceipt(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved sale identities.',
+        );
+      }
+      if (!_matchesNativeSaleSnapshot(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved invoice item snapshots.',
+        );
+      }
+      if (!_nativeSaleScopeCurrent()) {
+        throw StateError('Account changed during sale reconciliation.');
+      }
+      await database.acknowledgeReconciledNativeSale(
+        scope,
+        sale,
+        isCurrent: _nativeSaleScopeCurrent,
+      );
+    } else if (allowStockShortage || acceptRecordedSnapshot) {
+      final trimmedReason = (reason ?? '').trim();
+      if (trimmedReason.length < 3) {
+        throw ArgumentError(
+          'Enter a reconciliation reason (at least 3 characters).',
+        );
+      }
+      if (report.localDiff.hasEdits && !postOriginalBeforeLocalEdits) {
+        throw StateError(
+          'Confirm posting the original invoice before syncing local edits.',
+        );
+      }
+      if (!_nativeSaleScopeCurrent()) {
+        throw StateError('Account changed during sale reconciliation.');
+      }
+      final receipt = await transport.reconcileNativeSale(
+        scope,
+        sale.attemptId,
+        request,
+        allowStockShortage: allowStockShortage,
+        acceptRecordedSnapshot: acceptRecordedSnapshot,
+        reason: trimmedReason,
+      );
+      if (!_nativeSaleScopeCurrent()) {
+        throw StateError('Account changed during sale reconciliation.');
+      }
+      if (!_matchesNativeSaleReceipt(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved sale identities.',
+        );
+      }
+      if (!_matchesNativeSaleSnapshot(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved invoice item snapshots.',
+        );
+      }
+      await database.acknowledgeReconciledNativeSale(
+        scope,
+        sale,
+        isCurrent: _nativeSaleScopeCurrent,
+      );
+    } else if (report.serverStatus == 'ready' &&
+        (!report.localDiff.hasEdits || postOriginalBeforeLocalEdits)) {
+      if (!_nativeSaleScopeCurrent()) {
+        throw StateError('Account changed during sale reconciliation.');
+      }
+      final receipt = await transport.postNativeSale(
+        scope,
+        sale.attemptId,
+        request,
+      );
+      if (!_nativeSaleScopeCurrent()) {
+        throw StateError('Account changed during sale reconciliation.');
+      }
+      if (!_matchesNativeSaleReceipt(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved sale identities.',
+        );
+      }
+      if (!_matchesNativeSaleSnapshot(request, receipt)) {
+        throw const FormatException(
+          'The server did not confirm the saved invoice item snapshots.',
+        );
+      }
+      await database.acknowledgeReconciledNativeSale(
+        scope,
+        sale,
+        isCurrent: _nativeSaleScopeCurrent,
+      );
+    } else {
+      throw StateError(
+        'Select the required reconciliation options before continuing.',
+      );
+    }
+
+    final remaining = [
+      for (final c in await database.getSyncConflicts())
+        if (c.table != nativeSaleConflictTable || c.key != sale.billUuid) c,
+    ];
+    await database.saveSyncConflicts(remaining);
+  }
 
   Future<List<SyncConflict>> _syncNativeSales(
     NativeSaleSyncBackend transport,
@@ -325,6 +565,131 @@ class CloudSyncEngine {
       }
     }
     return conflicts;
+  }
+
+  Future<List<SyncConflict>> _syncNativeBillingCommands(
+    NativeBillingCommandSyncBackend transport,
+    CheckoutScope scope,
+  ) async {
+    final conflicts = <SyncConflict>[];
+    for (final cmd in await database.pendingNativeBillingCommands(scope)) {
+      String? problem;
+      try {
+        final request = cmd.decodedRequest;
+        if (request['device_id'] != scope.deviceId) {
+          throw const FormatException('Saved billing command device differs.');
+        }
+        final Map<String, dynamic> receipt;
+        switch (cmd.commandType) {
+          case 'payment':
+            receipt = await transport.postNativePayment(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativePaymentReceipt(cmd, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the saved payment identity.',
+              );
+            }
+          case 'cancel':
+            receipt = await transport.postNativeCancel(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativeCancelReceipt(cmd, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the bill cancellation.',
+              );
+            }
+          case 'credit_note':
+            receipt = await transport.postNativeCreditNote(
+              scope,
+              cmd.commandId,
+              cmd.billUuid,
+              request,
+            );
+            if (!_matchesNativeCreditNoteReceipt(cmd, request, receipt)) {
+              throw const FormatException(
+                'The server did not confirm the saved credit note identities.',
+              );
+            }
+          default:
+            throw FormatException(
+              'Unsupported billing command type: ${cmd.commandType}',
+            );
+        }
+        await database.acknowledgeNativeBillingCommand(
+          scope,
+          cmd,
+          isCurrent: _nativeSaleScopeCurrent,
+        );
+      } on SyncRowRejected catch (error) {
+        problem = error.message;
+      } on FormatException catch (error) {
+        problem = error.message;
+      }
+      if (problem != null) {
+        await database.recordNativeBillingCommandError(cmd.commandId, problem);
+        conflicts.add(
+          SyncConflict(
+            table: nativeBillingCommandConflictTable,
+            key: cmd.commandId,
+            message: problem,
+          ),
+        );
+        // Keep creation order so later follow-up commands on the same bill or
+        // stock do not overtake an earlier rejected command.
+        break;
+      }
+    }
+    return conflicts;
+  }
+
+  static bool _matchesNativePaymentReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    final payments = receipt['payments'];
+    if (bill is! Map || bill['uuid'] != cmd.billUuid) return false;
+    if (payments is! List) return false;
+    return payments.any((p) => p is Map && p['uuid'] == cmd.targetUuid);
+  }
+
+  static bool _matchesNativeCancelReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    return bill is Map &&
+        bill['uuid'] == cmd.billUuid &&
+        bill['cancelled'] == true;
+  }
+
+  static bool _matchesNativeCreditNoteReceipt(
+    PendingNativeBillingCommand cmd,
+    Map<String, dynamic> request,
+    Map<String, dynamic> receipt,
+  ) {
+    final bill = receipt['bill'];
+    final items = receipt['items'];
+    if (bill is! Map ||
+        bill['uuid'] != cmd.targetUuid ||
+        bill['bill_number'] != request['credit_note_number']) {
+      return false;
+    }
+    if (items is! List) return false;
+    final returnedIds = items
+        .map((item) => item is Map ? item['uuid'] : null)
+        .toSet();
+    final expectedIds = (request['lines'] as List)
+        .map((line) => (line as Map)['line_uuid'])
+        .toList();
+    return expectedIds.isNotEmpty && returnedIds.containsAll(expectedIds);
   }
 
   static bool _matchesNativeSaleReceipt(

@@ -30,8 +30,17 @@ New native commands carry the accepted purchase price, cost, profit, HSN code an
 
 The API confirms proof version 1 after checking the stored line snapshots. Exact replay checks the issued lines without re-reading current catalog values. Android requires that confirmation and checks the returned HSN and unit before releasing the reservation. Earlier proofless requests use their original acknowledgement contract.
 
+## Reconciliation
+
+Reserved native sales can stall when cloud stock drops below the recorded sale quantity (`insufficient_stock`), when cloud pricing, tax, or historical cost/HSN/unit snapshots change after offline checkout (`native_sale_terms_changed`, `native_sale_snapshot_changed`), when the local invoice is edited while still reserved (`reconcile`), or when the server committed the original command but the response was lost.
+
+- **Capabilities**: `GET /v1/shops/{shop_id}/capabilities` advertises `native_sale_reconciliation: 1`.
+- **Read-only inspection**: `POST /v1/shops/{shop_id}/bills/native/reconcile/inspect` inspects a reserved `attempt_id` and frozen `NativeSalePostIn` without mutating rows, reserving stock, or consuming the operation key. It checks `operation_status` (`idempotent_write`), invoice/line/payment/movement identity collisions, tracked stock shortages, pricing/tax differences, and (for owner/admin only) historical snapshot differences. Staff cannot inspect strict snapshot requests (`403 native_sale_snapshot_permission`).
+- **Explicit reconciliation**: `POST /v1/shops/{shop_id}/bills/native/reconcile` requires owner/admin membership, the registered device owned by the caller, the original `Idempotency-Key` (`attempt_id`), explicit approval flags (`allow_stock_shortage`, `accept_recorded_snapshot`), and a non-empty auditable `reason`. If the original `attempt_id` already committed for the same invoice, the endpoint replays the committed invoice without creating duplicates. Otherwise it validates self-consistent recorded math, locks stock, writes the exact original invoice, line, payment, and movement IDs in one transaction, records an `audit_log` entry (`native_sale_reconciled`), and verifies stored snapshots before returning `native_sale_snapshot_verified: 1`.
+- **Local edits and lost responses on Android**: The original issued invoice, frozen request body, `attempt_id`, and reservation are preserved across retries, restarts, and account/shop switches. Android surfaces reconciliation from the existing Sync Status conflict menu (`Review & reconcile`) without exposing `Use cloud copy`. Confirming an already-committed server invoice or explicitly posting the original frozen invoice clears `sync_dirty` only for rows that still match `posting_snapshot`, leaving post-issue local edits (such as customer updates, later payments, or cancellations) dirty to sync cleanly on top of the committed cloud invoice.
+
 ## Rollout gates
 
-1. Add explicit reconciliation for offline stock shortages, snapshot discrepancies, and edited pending invoices. The opt-in command conservatively reserves a sale whose original terms cannot be verified.
+1. Explicit reconciliation for offline stock shortages, snapshot discrepancies, edited pending invoices, and lost-response commits is governed by the contract above.
 2. Verify safe upgrade, restore, downgrade, and mixed-version operation before enabling selection in release builds. Each device needs to preserve its operation reservation, and adopting previously synced or restored invoices needs an explicit decision.
 3. Apply atomic commands and recovery to later payments, cancellations, and credit notes. Compare interrupted and competing writes across Android, web and exports before the final human UX review.

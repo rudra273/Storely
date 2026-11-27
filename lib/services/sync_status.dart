@@ -41,6 +41,7 @@ class SyncStatus extends ChangeNotifier {
     'stock_movements' => 'Stock changes',
     'purchase_documents' => 'Purchase documents',
     'native_sale_postings' => 'Invoice posting',
+    'native_billing_commands' => 'Billing follow-ups',
     'expenses' => 'Expenses',
     'audit_log' => 'History',
     'held_bills' => 'Held carts and drafts',

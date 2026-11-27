@@ -18,6 +18,11 @@ class ServerCapabilities {
       _features['native_sale_posting'] == 1 &&
       _features['native_sale_snapshot_proof'] == 1;
 
+  bool get supportsNativeBillingCommands =>
+      _features['native_billing_commands'] == 1;
+
+  bool get supportsPurchaseReturns => (_features['purchase_returns'] ?? 0) >= 1;
+
   bool get supportsSupplierPaymentProof {
     final proof = _features['supplier_payment_proof'] ?? 0;
     if (proof == 0) return false;

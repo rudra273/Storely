@@ -28,6 +28,7 @@ import '../main.dart' show AppGate;
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'suppliers_screen.dart';
+import 'store/audit_log_screen.dart';
 import 'store/bill_settings_screen.dart';
 
 part 'store/store_panels.dart';
@@ -163,6 +164,7 @@ class _StoreScreenState extends State<StoreScreen> {
       result.add(
         child is _StoreActionRow
             ? _StoreActionRow(
+                key: child.key,
                 title: child.title,
                 subtitle: child.subtitle,
                 icon: child.icon,
@@ -416,6 +418,12 @@ class _StoreScreenState extends State<StoreScreen> {
       MaterialPageRoute<bool>(builder: (_) => const BillSettingsScreen()),
     );
     if (saved == true && mounted) await _loadStoreData();
+  }
+
+  Future<void> _openAuditLog() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const AuditLogScreen()),
+    );
   }
 
   Future<void> _showCategoryPricing(String name) async {
@@ -687,6 +695,17 @@ class _StoreScreenState extends State<StoreScreen> {
     const SizedBox(height: AppSpacing.xl),
     const _SectionLabel(title: 'Data & security'),
     const SizedBox(height: AppSpacing.sm),
+    if (CloudService.instance.state.value.isAdmin &&
+        (DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true)) ...[
+      _StoreActionRow(
+        key: const ValueKey('store-audit-log'),
+        title: 'Activity & audit',
+        subtitle: 'Bills, product edits, and stock changes',
+        icon: Icons.history_rounded,
+        onTap: _openAuditLog,
+      ),
+      const SizedBox(height: AppSpacing.sm),
+    ],
     _StoreActionRow(
       title: 'Backup & restore',
       subtitle: 'Save all data to one file',

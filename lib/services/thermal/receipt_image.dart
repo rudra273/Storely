@@ -84,12 +84,22 @@ class ReceiptImage {
             billHasGst: hasGst,
             gstScheme: shop?.gstScheme ?? GstScheme.unregistered,
           );
+    final live = !bill.isCancelled;
     final upiId = settings.upiId.trim();
     final showQr =
+        live &&
         !bill.isCreditNote &&
         settings.showUpiQr &&
         bill.balanceDue > 0.005 &&
         Upi.isValidId(upiId);
+    final billNotes = (bill.notes ?? '').trim();
+    final termsText = settings.termsText.trim();
+    final discLabel =
+        bill.discountMode == Bill.discountModeAmount && bill.discountValue > 0
+        ? 'Discount (${rupees(bill.discountValue)} off)'
+        : bill.discountPercent > 0
+        ? 'Discount (${bill.discountPercent.toStringAsFixed(0)}%)'
+        : 'Discount';
 
     final doc = pw.Document(theme: await storelyPdfTheme());
     doc.addPage(
@@ -116,6 +126,21 @@ class ReceiptImage {
               textAlign: pw.TextAlign.center,
               style: style(bold: true),
             ),
+            if (bill.isCancelled)
+              pw.Container(
+                margin: const pw.EdgeInsets.symmetric(vertical: 2),
+                padding: const pw.EdgeInsets.all(2),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.red800, width: 1),
+                ),
+                child: pw.Text(
+                  (bill.cancelReason ?? '').trim().isEmpty
+                      ? 'VOID'
+                      : 'VOID · ${bill.cancelReason!.trim()}',
+                  textAlign: pw.TextAlign.center,
+                  style: style(bold: true),
+                ),
+              ),
             pw.Text('No: ${bill.billNumber}', style: style()),
             if (bill.isCreditNote && bill.originalBillNumber != null)
               pw.Text('Against: ${bill.originalBillNumber}', style: style()),
@@ -123,6 +148,13 @@ class ReceiptImage {
               DateFormat('dd MMM yyyy, hh:mm a').format(bill.createdAt),
               style: style(),
             ),
+            if (hasGst)
+              pw.Text(
+                bill.taxMode == Bill.taxModeExclusive
+                    ? 'Prices excl. GST'
+                    : 'Prices incl. GST',
+                style: style(),
+              ),
             pw.Text('Customer: ${bill.customerName}', style: style()),
             pw.Divider(height: 6),
             for (final item in bill.items) ...[
@@ -132,6 +164,11 @@ class ReceiptImage {
                 '${rupees(item.sellingPriceSnapshot)}',
                 rupees(hasGst ? item.lineAmount : item.subtotal),
               ),
+              if (settings.showDiscount && item.discountAmount > 0.005)
+                pw.Text(
+                  '  Disc: ${rupees(item.discountAmount)}',
+                  style: style(size: small * 0.9),
+                ),
             ],
             pw.Divider(height: 6),
             if (hasGst) ...[
@@ -142,7 +179,7 @@ class ReceiptImage {
             ] else
               row('Subtotal', rupees(bill.subtotalAmount)),
             if (bill.discountAmount > 0.005)
-              row('Discount', '-${rupees(bill.discountAmount)}'),
+              row(discLabel, '-${rupees(bill.discountAmount)}'),
             if (bill.roundOffAmount.abs() > 0.004)
               row('Round off', signedRupees(bill.roundOffAmount)),
             pw.SizedBox(height: 2),
@@ -172,7 +209,7 @@ class ReceiptImage {
                 bill.paymentMethod == 'credit_note' ? 'Adjusted' : 'Refunded',
                 rupees(bill.paidAmount),
               )
-            else if (settings.showPaymentDetails) ...[
+            else if (live && settings.showPaymentDetails) ...[
               row('Paid', rupees(bill.paidAmount)),
               if (bill.balanceDue > 0.005)
                 row('Balance due', rupees(bill.balanceDue), bold: true),
@@ -199,6 +236,20 @@ class ReceiptImage {
                 style: style(bold: true),
               ),
             ],
+            if (billNotes.isNotEmpty)
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(top: 4),
+                child: pw.Text('Notes: $billNotes', style: style()),
+              ),
+            if (termsText.isNotEmpty)
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(top: 4),
+                child: pw.Text(
+                  termsText,
+                  textAlign: pw.TextAlign.center,
+                  style: style(size: small * 0.9),
+                ),
+              ),
             if (settings.showFooterText &&
                 settings.footerText.trim().isNotEmpty)
               pw.Padding(

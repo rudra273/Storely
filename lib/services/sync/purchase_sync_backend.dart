@@ -30,6 +30,45 @@ abstract interface class SupplierPaymentRecoveryBackend {
   );
 }
 
+/// Optional online purchase/supplier operations (reversals, payment terms,
+/// debit-note returns, supplier statements).
+abstract interface class PurchaseOperationsBackend {
+  Future<Map<String, dynamic>> reversePurchase(
+    String shopId,
+    String receiptUuid, {
+    required String reason,
+  });
+
+  Future<Map<String, dynamic>> recordPaymentTerms(
+    String shopId,
+    String receiptUuid,
+    Map<String, Object?> payload,
+  );
+
+  Future<Map<String, dynamic>> previewPurchaseTerms(
+    String shopId,
+    Map<String, Object?> payload,
+  );
+
+  Future<Map<String, dynamic>> createPurchaseReturn(
+    String shopId,
+    String receiptUuid,
+    Map<String, Object?> payload,
+  );
+
+  Future<Map<String, dynamic>> reverseSupplierPayment(
+    String shopId,
+    String supplierUuid,
+    String paymentUuid, {
+    required String reason,
+  });
+
+  Future<Map<String, dynamic>> fetchSupplierStatement(
+    String shopId,
+    String supplierUuid,
+  );
+}
+
 enum SupplierPaymentRecoveryStatus { committed, notFound, unsupported }
 
 class SupplierPaymentRecovery {

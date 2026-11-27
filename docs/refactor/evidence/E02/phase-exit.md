@@ -1,0 +1,11 @@
+# E02 phase-exit verification (paired checkout sequence & D01)
+
+Run date: 26 November 2026.
+
+Paired localhost browser and Android emulator checks re-verified the logical checkout sequence (**Item → Party/details → Settlement/review → Save/result**) on current revisions (`storelyapi` `cd0f454`, `storelyweb` `13f0ecb` + e2e origin allowance, `Storely` `edd7dd0` + async sheet-open waits), closing confirmed divergence `D01` alongside previously verified `D02`, `D04`, `D05`, and `D12` (`D14` web Hindi localization deferred by owner).
+
+- **Localhost browser (`https://app.storely.localhost`)**: `e2e/checkout-payment-completion.cjs` passed via Playwright against the live Docker TLS stack with a disposable Premium shop and ₹118 `Completion Tea` fixture (cleaned up after the run): `PASS cash change, New invoice reset, partial Bank transfer with reference, completion summary, and detail verification`.
+- **Android emulator (`emulator-5554`, `storely_pixel`)**: `integration_test/checkout_payment_completion_test.dart` passed offline (`01:36 +1: All tests passed!`) with the same ₹118 `Completion Tea` fixture: verified unsettled initial settlement, UPI→Cash reference stripping, ₹82.00 exact cash change, draft step persistence across close/reopen, completion summary (`₹118.00` / `₹118.00` / `₹0.00`), clean `New Bill` draft reset, partial Bank transfer (`₹50.00` paid, `₹68.00` due, `NEFT-901`) surviving DB reopen with legacy `bank_transfer` alias, completion summary, and `View invoice` detail.
+- **Process death, drafts, settings, search & notifications**: Previously verified in [slice-1](slice-1.md), [slice-2](slice-2.md), [slice-3-catalog](slice-3-catalog.md), [slice-3-payment-completion](slice-3-payment-completion.md), [slice-3-pricing-settings](slice-3-pricing-settings.md), [slice-3-low-stock-threshold](slice-3-low-stock-threshold.md), [slice-3-portable-preferences](slice-3-portable-preferences.md), [first-invoice-onboarding](first-invoice-onboarding.md), [workspace-search](workspace-search.md), [settings-search](settings-search.md), and [notification-routing](notification-routing.md).
+
+E02 is **agent-verified** for its delivered parity scope. Final human flow/UX approval remains in E18.

@@ -94,6 +94,7 @@ class _StoreActionRow extends StatelessWidget {
   final VoidCallback onTap;
 
   const _StoreActionRow({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.icon,

@@ -11,6 +11,8 @@ import '../models/bill_totals.dart';
 import '../models/checkout_settlement.dart';
 import '../models/gst_states.dart';
 import '../models/shop_profile.dart';
+import '../services/thermal/receipt_builder.dart';
+import '../services/thermal/receipt_image.dart';
 import 'money.dart';
 import 'pdf_theme.dart';
 import 'upi.dart';
@@ -20,10 +22,21 @@ class BillPdfGenerator {
     required Bill bill,
     required ShopProfile? shop,
     BillSettings? settings,
+    String? paperSizeOverride,
   }) async {
     // A credit note is stored negative; print it with positive figures.
     if (bill.isCreditNote && bill.totalAmount < 0) bill = bill.negated();
     final billSettings = settings ?? BillSettings();
+    final effectivePaper = (paperSizeOverride ?? billSettings.paperSize)
+        .toLowerCase();
+    if (effectivePaper == '80mm' || effectivePaper == '58mm') {
+      return ReceiptImage.receiptPdf(
+        bill: bill,
+        shop: shop,
+        settings: billSettings,
+        paper: effectivePaper == '58mm' ? ReceiptPaper.mm58 : ReceiptPaper.mm80,
+      );
+    }
     final pdf = pw.Document(
       title: _billTitle(bill),
       author: shop?.name ?? 'Storely',
@@ -35,17 +48,28 @@ class BillPdfGenerator {
     // shared PDF matches the live preview in Bill Settings.
     final billHasGst = _billHasGst(bill);
 
-    final isA5 = billSettings.paperSize == BillSettings.paperA5;
+    final isA5 = effectivePaper == BillSettings.paperA5;
+    final notesText = (bill.notes ?? '').trim();
     pdf.addPage(
       pw.MultiPage(
         pageFormat: isA5 ? PdfPageFormat.a5 : PdfPageFormat.a4,
         margin: pw.EdgeInsets.all(isA5 ? 18 : 28),
         build: (context) => [
           _header(bill, shop, billSettings, billHasGst: billHasGst),
+          if (bill.isCancelled) ...[
+            pw.SizedBox(height: 8),
+            _voidBanner(bill),
+          ],
           if (_showHeader(billSettings)) pw.SizedBox(height: 10),
           _partyBlock(bill, shop, billSettings),
           pw.SizedBox(height: 10),
-          _invoiceMeta(bill, shop, billSettings, compact: isA5),
+          _invoiceMeta(
+            bill,
+            shop,
+            billSettings,
+            compact: isA5,
+            billHasGst: billHasGst,
+          ),
           pw.SizedBox(height: 16),
           _itemsTable(
             bill,
@@ -77,6 +101,10 @@ class BillPdfGenerator {
           ],
           pw.SizedBox(height: 14),
           _paymentBlock(bill, shop, billSettings),
+          if (notesText.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            _notesBlock(notesText),
+          ],
           pw.SizedBox(height: 14),
           _footer(billSettings),
         ],
@@ -197,11 +225,48 @@ class BillPdfGenerator {
     );
   }
 
+  static pw.Widget _voidBanner(Bill bill) {
+    final reason = (bill.cancelReason ?? '').trim();
+    final label = reason.isEmpty ? 'VOID' : 'VOID · $reason';
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.red800, width: 1.5),
+        borderRadius: pw.BorderRadius.circular(3),
+      ),
+      child: pw.Text(
+        label,
+        textAlign: pw.TextAlign.center,
+        style: pw.TextStyle(
+          fontSize: 10,
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.red800,
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _notesBlock(String notes) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          'Notes',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Text(notes, style: const pw.TextStyle(fontSize: 8.5)),
+      ],
+    );
+  }
+
   static pw.Widget _invoiceMeta(
     Bill bill,
     ShopProfile? shop,
     BillSettings settings, {
     bool compact = false,
+    bool billHasGst = false,
   }) {
     final shopState = gstStateCode(shop?.gstin);
     // A counter (B2C) sale is supplied in the shop's own state.
@@ -236,6 +301,13 @@ class BillPdfGenerator {
         ),
       if (settings.showInvoiceSupplyType)
         _metaCell('Supply Type', supplyType ?? '-'),
+      if (billHasGst)
+        _metaCell(
+          'Tax Mode',
+          bill.taxMode == Bill.taxModeExclusive
+              ? 'Prices excl. GST'
+              : 'Prices incl. GST',
+        ),
     ];
     if (cells.isEmpty) return pw.SizedBox();
 
@@ -324,6 +396,14 @@ class BillPdfGenerator {
           alignment: pw.Alignment.centerRight,
           value: (_, item) => _money(_lineRate(item, showGst: showGst)),
         ),
+      if (settings.showDiscount &&
+          bill.items.any((item) => item.discountAmount > 0.005))
+        _BillTableColumn(
+          label: 'Disc.',
+          width: const pw.FlexColumnWidth(0.95),
+          alignment: pw.Alignment.centerRight,
+          value: (_, item) => _lineDiscountLabel(item),
+        ),
       if (showGst && settings.showGstPercentColumn)
         _BillTableColumn(
           label: 'GST %',
@@ -389,8 +469,7 @@ class BillPdfGenerator {
     final gstTotal = showGst
         ? bill.cgstAmount + bill.sgstAmount + bill.igstAmount
         : 0.0;
-    final discountLabel =
-        'Discount (${bill.discountPercent.toStringAsFixed(2)}%)';
+    final discountLabel = _documentDiscountLabel(bill);
     // GST layout: item lines are already after discount and include tax, so
     // the totals read taxable + tax (+ round off) = grand total, matching the
     // lines. The discount is shown for information only. Non-GST layout:
@@ -588,13 +667,14 @@ class BillPdfGenerator {
     BillSettings settings,
   ) {
     if (bill.isCreditNote) return _creditNoteSettlement(bill);
-    final balance = bill.balanceDue;
+    final live = !bill.isCancelled;
+    final balance = live ? bill.balanceDue : 0.0;
     final upiId = settings.upiId.trim();
     final showQr =
-        settings.showUpiQr && balance > 0.005 && Upi.isValidId(upiId);
+        live && settings.showUpiQr && balance > 0.005 && Upi.isValidId(upiId);
     final bank = settings.bankDetails.trim();
     final lines = <pw.Widget>[
-      if (settings.showPaymentDetails) ...[
+      if (live && settings.showPaymentDetails) ...[
         _kv(
           'Paid',
           bill.paidAmount > 0.005
@@ -754,6 +834,32 @@ class BillPdfGenerator {
     if (percent == null || percent <= 0) return '-';
     final isWhole = percent == percent.roundToDouble();
     return '${percent.toStringAsFixed(isWhole ? 0 : 2)}%';
+  }
+
+  static String _lineDiscountLabel(BillItem item) {
+    if (item.discountAmount <= 0.005) return '-';
+    if (item.discountMode == Bill.discountModePercent &&
+        item.discountValue > 0) {
+      final isWhole = item.discountValue == item.discountValue.roundToDouble();
+      final pct = item.discountValue.toStringAsFixed(isWhole ? 0 : 2);
+      return '${_money(item.discountAmount)} ($pct%)';
+    }
+    return _money(item.discountAmount);
+  }
+
+  static String _documentDiscountLabel(Bill bill) {
+    if (bill.discountMode == Bill.discountModeAmount &&
+        bill.discountValue > 0) {
+      return 'Discount (${_money(bill.discountValue)} off)';
+    }
+    final pct = bill.discountValue > 0
+        ? bill.discountValue
+        : bill.discountPercent;
+    if (pct > 0) {
+      final isWhole = pct == pct.roundToDouble();
+      return 'Discount (${pct.toStringAsFixed(isWhole ? 0 : 2)}%)';
+    }
+    return 'Discount';
   }
 
   static List<String> _buyerLines(Bill bill, BillSettings settings) {
