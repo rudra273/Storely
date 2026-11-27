@@ -11,6 +11,11 @@ mixin DatabasePurchaseDocuments {
     return _supplierAccounting(db, await _activeShopId(db), supplier);
   }
 
+  Future<SupplierBalanceSummary> supplierBalanceSummary(String supplier) async {
+    final accounting = await supplierAccounting(supplier);
+    return accounting['summary'] as SupplierBalanceSummary;
+  }
+
   Future<Map<String, dynamic>> _supplierAccounting(
     DatabaseExecutor db,
     String shop,
@@ -23,7 +28,7 @@ mixin DatabasePurchaseDocuments {
     );
     final receipts = [
       for (final row in rows) _purchaseFromRow(row),
-    ].where((r) => r.toJson()['supplier_uuid'] == supplier).toList();
+    ].where((r) => r.supplierUuid == supplier).toList();
     final queue = await db.query(
       'supplier_payment_queue',
       where: 'shop_id = ? AND supplier_uuid = ?',
@@ -37,26 +42,94 @@ mixin DatabasePurchaseDocuments {
       return decimalScaledInteger(amount, scale: 2);
     }
 
-    var balance = BigInt.zero;
+    var confirmedBalance = BigInt.zero;
+    var unrecordedReceiptsCount = 0;
     final known = <String>{};
+    DateTime? latestSyncedReceiptAt;
     for (final receipt in receipts) {
-      if (receipt.balanceDue != null) balance += cents(receipt.balanceDue!);
       for (final payment in receipt.payments) {
-        known.add(payment['uuid'] as String);
+        final uuid = payment['uuid'];
+        if (uuid is String && uuid.isNotEmpty) {
+          known.add(uuid);
+        }
+      }
+      if (receipt.syncState == 'synced') {
+        final parsed = DateTime.tryParse(receipt.createdAt);
+        if (parsed != null &&
+            (latestSyncedReceiptAt == null ||
+                parsed.isAfter(latestSyncedReceiptAt))) {
+          latestSyncedReceiptAt = parsed;
+        }
+      }
+      if (receipt.isReversed) continue;
+      if (receipt.isNotRecorded) {
+        unrecordedReceiptsCount++;
+      }
+      if (receipt.balanceDue != null) {
+        confirmedBalance += cents(receipt.balanceDue!);
       }
     }
+
+    var pendingPaymentsTotal = BigInt.zero;
+    var failedPaymentsCount = 0;
     for (final row in queue) {
-      if ((row['sync_state'] == 'pending' || row['sync_state'] == 'synced') &&
-          !known.contains(row['cloud_uuid'])) {
-        balance -= cents(
-          (jsonDecode(row['payload'] as String) as Map)['amount'] as String,
-        );
+      final syncState = row['sync_state'] as String?;
+      final commandState = row['command_state'] as String?;
+      final isFailed =
+          syncState == 'error' ||
+          commandState == 'rejected' ||
+          commandState == 'conflict';
+      if (isFailed) {
+        failedPaymentsCount++;
+        continue;
+      }
+      final cloudUuid = row['cloud_uuid'];
+      final isUnreflectedPendingOrSynced =
+          (syncState == 'pending' || syncState == 'synced') &&
+          !known.contains(cloudUuid);
+      if (isUnreflectedPendingOrSynced) {
+        final amount =
+            (jsonDecode(row['payload'] as String) as Map)['amount'] as String;
+        pendingPaymentsTotal += cents(amount);
       }
     }
+
+    final projectedRaw = confirmedBalance - pendingPaymentsTotal;
+    final projectedBalance = projectedRaw < BigInt.zero
+        ? BigInt.zero
+        : projectedRaw;
+
+    DateTime? lastSyncedAt;
+    final syncRows = await db.query(
+      'cloud_sync_state',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['last_sync_at'],
+      limit: 1,
+    );
+    if (syncRows.isNotEmpty && syncRows.single['value'] is String) {
+      lastSyncedAt = DateTime.tryParse(syncRows.single['value'] as String);
+    }
+    lastSyncedAt ??= latestSyncedReceiptAt;
+
+    final summary = SupplierBalanceSummary(
+      confirmedBalance: purchaseCentsText(confirmedBalance),
+      pendingPaymentsTotal: purchaseCentsText(pendingPaymentsTotal),
+      failedPaymentsCount: failedPaymentsCount,
+      projectedBalance: purchaseCentsText(projectedBalance),
+      unrecordedReceiptsCount: unrecordedReceiptsCount,
+      lastSyncedAt: lastSyncedAt,
+    );
+
     return {
-      'balance': purchaseCentsText(
-        balance < BigInt.zero ? BigInt.zero : balance,
-      ),
+      'balance': summary.projectedBalance,
+      'confirmed_balance': summary.confirmedBalance,
+      'pending_payments_total': summary.pendingPaymentsTotal,
+      'failed_payments_count': summary.failedPaymentsCount,
+      'projected_balance': summary.projectedBalance,
+      'unrecorded_receipts_count': summary.unrecordedReceiptsCount,
+      'last_synced_at': summary.lastSyncedAt?.toIso8601String(),
+      'summary': summary,
       'receipts': receipts,
       'queue': queue,
     };
@@ -66,8 +139,11 @@ mixin DatabasePurchaseDocuments {
     String supplier,
     String amount,
     String method,
-    String date,
-  ) async {
+    String date, {
+    String? purchaseUuid,
+    String? reference,
+    String? notes,
+  }) async {
     if (!_canMutateAsAdmin()) {
       throw StateError('Supplier payments require admin access.');
     }
@@ -96,6 +172,16 @@ mixin DatabasePurchaseDocuments {
     if (paid <= BigInt.zero) {
       throw ArgumentError('Payment must be greater than zero.');
     }
+    final cleanedPurchaseUuid =
+        purchaseUuid == null || purchaseUuid.trim().isEmpty
+        ? null
+        : purchaseUuid.trim();
+    final cleanedReference = reference == null || reference.trim().isEmpty
+        ? null
+        : reference.trim();
+    final cleanedNotes = notes == null || notes.trim().isEmpty
+        ? null
+        : notes.trim();
     final db = await database;
     final shop = await _activeShopId(db);
     await db.transaction((txn) async {
@@ -113,19 +199,41 @@ mixin DatabasePurchaseDocuments {
           'Payment cannot exceed the recorded supplier balance.',
         );
       }
+      if (cleanedPurchaseUuid != null) {
+        final receipts = statement['receipts'] as List<PurchaseDocument>;
+        PurchaseDocument? target;
+        for (final r in receipts) {
+          if (r.uuid == cleanedPurchaseUuid) {
+            target = r;
+            break;
+          }
+        }
+        if (target == null || target.isReversed || target.balanceDue == null) {
+          throw StateError(
+            'Selected purchase receipt is not open for payment.',
+          );
+        }
+        if (paid > cents(target.balanceDue!)) {
+          throw StateError(
+            'Payment cannot exceed the selected invoice balance.',
+          );
+        }
+      }
       final key = _newUuid();
+      final payloadMap = <String, Object?>{
+        'request_key': key,
+        'amount': purchaseCentsText(paid),
+        'payment_date': date,
+        'payment_method': paymentMethod,
+        'purchase_uuid': ?cleanedPurchaseUuid,
+        'reference': cleanedReference,
+        'notes': cleanedNotes,
+      };
       await txn.insert('supplier_payment_queue', {
         'request_key': key,
         'shop_id': shop,
         'supplier_uuid': supplier,
-        'payload': jsonEncode({
-          'request_key': key,
-          'amount': purchaseCentsText(paid),
-          'payment_date': date,
-          'payment_method': paymentMethod,
-          'reference': null,
-          'notes': null,
-        }),
+        'payload': jsonEncode(payloadMap),
         'sync_state': 'pending',
         'created_at': _nowIso(),
       });
@@ -230,6 +338,24 @@ mixin DatabasePurchaseDocuments {
       offset: offset,
     );
     return [for (final row in rows) _purchaseFromRow(row)];
+  }
+
+  Future<PurchaseDocument?> getPurchaseDocumentByUuid(String uuid) async {
+    if (!_canMutateAsAdmin()) {
+      throw StateError(
+        'Purchase costs are available to owners and admins only.',
+      );
+    }
+    final db = await database;
+    final shop = await _activeShopId(db);
+    final rows = await db.query(
+      'purchase_documents',
+      where: 'shop_id = ? AND uuid = ? AND deleted_at IS NULL',
+      whereArgs: [shop, uuid],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _purchaseFromRow(rows.single);
   }
 
   PurchaseDocument _purchaseFromRow(Map<String, Object?> row) =>

@@ -26,6 +26,7 @@ import 'backup_service.dart';
 import 'portable_preferences_service.dart';
 import 'sync/cloud_sync_engine.dart';
 import 'sync/native_sale_sync_backend.dart';
+import 'sync/purchase_sync_backend.dart';
 
 export 'cloud/cloud_backend.dart'
     show
@@ -230,6 +231,14 @@ class CloudState {
   /// draft handoff. Local-only mode always returns false.
   bool get canUseDraftHandoff =>
       isConfigured && isSignedIn && membership == CloudMembership.member;
+
+  /// True when the device is signed into a cloud shop as an owner or admin and
+  /// can invoke online purchase/supplier mutations.
+  bool get isCloudLinkedAdmin =>
+      isConfigured &&
+      isSignedIn &&
+      membership == CloudMembership.member &&
+      isAdmin;
 
   CloudState copyWith({
     CloudConfig? config,
@@ -854,6 +863,106 @@ class CloudService with WidgetsBindingObserver implements AccountActions {
           SyncStatus.instance.refresh();
         });
     return _syncInFlight!;
+  }
+
+  PurchaseOperationsBackend _requirePurchaseOperationsBackend() {
+    final backend = _requireBackend();
+    if (backend.currentUser == null) {
+      throw StateError('Sign in to manage cloud purchases.');
+    }
+    final syncBackend = backend.sync;
+    if (syncBackend is! PurchaseOperationsBackend) {
+      throw StateError(
+        'This cloud backend does not support online purchase actions.',
+      );
+    }
+    return syncBackend as PurchaseOperationsBackend;
+  }
+
+  Future<Map<String, dynamic>> reversePurchase(
+    String receiptUuid, {
+    required String reason,
+  }) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    final response = await ops.reversePurchase(
+      shopId,
+      receiptUuid,
+      reason: reason,
+    );
+    if (response['uuid'] is String && response['items'] is List) {
+      await DatabaseHelper.instance.importPurchaseDocument(
+        response,
+        shopId: shopId,
+      );
+    }
+    await syncNow(reason: 'Purchase reversed');
+    return response;
+  }
+
+  Future<Map<String, dynamic>> recordPurchasePaymentTerms(
+    String receiptUuid,
+    Map<String, Object?> payload,
+  ) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    final response = await ops.recordPaymentTerms(shopId, receiptUuid, payload);
+    if (response['uuid'] is String && response['items'] is List) {
+      await DatabaseHelper.instance.importPurchaseDocument(
+        response,
+        shopId: shopId,
+      );
+    }
+    await syncNow(reason: 'Payment terms recorded');
+    return response;
+  }
+
+  Future<Map<String, dynamic>> previewPurchaseTerms(
+    Map<String, Object?> payload,
+  ) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    return ops.previewPurchaseTerms(shopId, payload);
+  }
+
+  Future<Map<String, dynamic>> createPurchaseReturn(
+    String receiptUuid,
+    Map<String, Object?> payload,
+  ) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    final response = await ops.createPurchaseReturn(
+      shopId,
+      receiptUuid,
+      payload,
+    );
+    await syncNow(reason: 'Purchase return recorded');
+    return response;
+  }
+
+  Future<Map<String, dynamic>> reverseSupplierPayment(
+    String supplierUuid,
+    String paymentUuid, {
+    required String reason,
+  }) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    final response = await ops.reverseSupplierPayment(
+      shopId,
+      supplierUuid,
+      paymentUuid,
+      reason: reason,
+    );
+    await syncNow(reason: 'Supplier payment reversed');
+    return response;
+  }
+
+  Future<Map<String, dynamic>> fetchSupplierStatement(
+    String supplierUuid,
+  ) async {
+    final ops = _requirePurchaseOperationsBackend();
+    final shopId = await DatabaseHelper.instance.currentShopId();
+    return ops.fetchSupplierStatement(shopId, supplierUuid);
   }
 
   Future<NativeSaleReconciliationReport> inspectReservedNativeSale(

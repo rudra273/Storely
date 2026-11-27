@@ -9,7 +9,8 @@ class PurchaseApiSyncBackend extends ApiSyncBackend
     implements
         PurchaseSyncBackend,
         SupplierPaymentSyncBackend,
-        SupplierPaymentRecoveryBackend {
+        SupplierPaymentRecoveryBackend,
+        PurchaseOperationsBackend {
   PurchaseApiSyncBackend(super.api, {super.preferredShopId});
 
   @override
@@ -65,10 +66,17 @@ class PurchaseApiSyncBackend extends ApiSyncBackend
     String supplierId,
     Map<String, dynamic> payment,
   ) async {
+    final body = <String, dynamic>{
+      ...payment,
+      if (payment['purchase_uuid'] != null)
+        'purchase_uuid': payment['purchase_uuid'],
+      if (payment.containsKey('reference')) 'reference': payment['reference'],
+      if (payment.containsKey('notes')) 'notes': payment['notes'],
+    };
     try {
       return await api.postJson(
         '/v1/shops/$shopId/suppliers/$supplierId/payments',
-        payment,
+        body,
       );
     } on ApiException catch (error) {
       if (error.status >= 400 &&
@@ -80,6 +88,59 @@ class PurchaseApiSyncBackend extends ApiSyncBackend
       rethrow;
     }
   }
+
+  @override
+  Future<Map<String, dynamic>> reversePurchase(
+    String shopId,
+    String receiptUuid, {
+    required String reason,
+  }) => api.postJson(
+    '/v1/shops/$shopId/purchase-receipts/$receiptUuid/reverse',
+    {'reason': reason.trim()},
+  );
+
+  @override
+  Future<Map<String, dynamic>> recordPaymentTerms(
+    String shopId,
+    String receiptUuid,
+    Map<String, Object?> payload,
+  ) => api.postJson(
+    '/v1/shops/$shopId/purchase-receipts/$receiptUuid/payment-terms',
+    payload,
+  );
+
+  @override
+  Future<Map<String, dynamic>> previewPurchaseTerms(
+    String shopId,
+    Map<String, Object?> payload,
+  ) => api.postJson('/v1/shops/$shopId/purchase-receipts/preview', payload);
+
+  @override
+  Future<Map<String, dynamic>> createPurchaseReturn(
+    String shopId,
+    String receiptUuid,
+    Map<String, Object?> payload,
+  ) => api.postJson(
+    '/v1/shops/$shopId/purchase-receipts/$receiptUuid/returns',
+    payload,
+  );
+
+  @override
+  Future<Map<String, dynamic>> reverseSupplierPayment(
+    String shopId,
+    String supplierUuid,
+    String paymentUuid, {
+    required String reason,
+  }) => api.postJson(
+    '/v1/shops/$shopId/suppliers/$supplierUuid/payments/$paymentUuid/reverse',
+    {'reason': reason.trim()},
+  );
+
+  @override
+  Future<Map<String, dynamic>> fetchSupplierStatement(
+    String shopId,
+    String supplierUuid,
+  ) => api.getJson('/v1/shops/$shopId/suppliers/$supplierUuid/statement');
 
   @override
   Future<Map<String, dynamic>> publishNativePurchase(

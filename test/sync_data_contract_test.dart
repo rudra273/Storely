@@ -329,6 +329,10 @@ void main() {
             'Receipt lines via purchase-receipts API; the phone stores whole document snapshots',
         'purchase_receipt_imports':
             'Server-side purchase import fingerprints; never stored on the device',
+        'purchase_returns':
+            'Debit notes / purchase returns via purchase-receipts returns API; receipt feed carries return snapshots',
+        'purchase_return_items':
+            'Purchase return line items via purchase-receipts returns API; receipt feed carries return snapshots',
         'supplier_payments':
             'Payment headers via supplier payment API; receipt feed carries allocations',
         'supplier_payment_allocations':
