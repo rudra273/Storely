@@ -125,7 +125,7 @@ void main() {
         draft = await db.openPurchaseDraft();
       });
       await tester.pumpWidget(screen(draft, catalog: catalog));
-      await tester.tap(find.text('Search or scan existing product'));
+      await tester.tap(find.text('Search or scan existing item'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Scan barcode'));
       await tester.pumpAndSettle();
@@ -133,7 +133,7 @@ void main() {
       await tester.tap(find.text('Tea B'));
       await tester.pumpAndSettle();
       expect(
-        find.text('Selling price and product settings stay unchanged.'),
+        find.text('Selling price and item settings stay unchanged.'),
         findsOneWidget,
       );
       await tester.enterText(find.byType(TextFormField).at(0), '1.25');
@@ -403,7 +403,7 @@ void main() {
           },
         ),
       );
-      await tester.tap(find.text('Add new product'));
+      await tester.tap(find.text('Add new item'));
       await tester.pumpAndSettle();
       await finishSave(tester);
       expect(find.text('Unsaved tea'), findsOneWidget);
@@ -450,7 +450,7 @@ void main() {
       );
       nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => composer));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Add new product'));
+      await tester.tap(find.text('Add new item'));
       await tester.pumpAndSettle();
       await finishSave(tester);
       await tester.tap(find.byType(BackButton));

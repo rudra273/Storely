@@ -528,6 +528,16 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "tax_type": {
+          "wire": "tax_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cess_percent": {
+          "wire": "cess_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "overhead_cost": {
           "wire": "overhead_cost",
           "kind": "mirrored",
@@ -911,6 +921,21 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "item_type": {
+          "wire": "item_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "tax_type": {
+          "wire": "tax_type",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cess_percent": {
+          "wire": "cess_percent",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "overhead_cost": {
           "wire": "overhead_cost",
           "kind": "mirrored",
@@ -1220,6 +1245,11 @@
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
+        "cess_amount": {
+          "wire": "cess_amount",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
         "round_off_amount": {
           "wire": "round_off_amount",
           "kind": "mirrored",
@@ -1449,6 +1479,26 @@
         },
         "igst_amount_snapshot": {
           "wire": "igst_amount_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "item_type_snapshot": {
+          "wire": "item_type_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "tax_type_snapshot": {
+          "wire": "tax_type_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cess_percent_snapshot": {
+          "wire": "cess_percent_snapshot",
+          "kind": "mirrored",
+          "restore": "Preserve the stored business value."
+        },
+        "cess_amount_snapshot": {
+          "wire": "cess_amount_snapshot",
           "kind": "mirrored",
           "restore": "Preserve the stored business value."
         },
@@ -2092,6 +2142,22 @@
     },
     "igst_amount_snapshot": {
       "wire": "igst_amount_snapshot",
+      "kind": "mirrored"
+    },
+    "item_type_snapshot": {
+      "wire": "item_type_snapshot",
+      "kind": "mirrored"
+    },
+    "tax_type_snapshot": {
+      "wire": "tax_type_snapshot",
+      "kind": "mirrored"
+    },
+    "cess_percent_snapshot": {
+      "wire": "cess_percent_snapshot",
+      "kind": "mirrored"
+    },
+    "cess_amount_snapshot": {
+      "wire": "cess_amount_snapshot",
       "kind": "mirrored"
     },
     "was_direct_price": {

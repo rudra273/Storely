@@ -64,7 +64,7 @@ void main() {
       final upgraded = await helper.database;
       expect(
         (await upgraded.rawQuery('PRAGMA user_version')).single.values.first,
-        30,
+        31,
       );
       final cols = (await upgraded.rawQuery('PRAGMA table_info(bills)'))
           .map((r) => r['name'])

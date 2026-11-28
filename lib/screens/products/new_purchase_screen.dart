@@ -435,7 +435,7 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
                         ? null
                         : _addExisting,
                     icon: const Icon(Icons.search),
-                    label: const Text('Search or scan existing product'),
+                    label: const Text('Search or scan existing item'),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -446,7 +446,7 @@ class _NewPurchaseScreenState extends State<NewPurchaseScreen> {
                             ? null
                             : _addNew,
                         icon: const Icon(Icons.add),
-                        label: const Text('Add new product'),
+                        label: const Text('Add new item'),
                       ),
                       OutlinedButton.icon(
                         onPressed: _busy ? null : _import,

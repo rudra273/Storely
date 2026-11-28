@@ -33,6 +33,7 @@ part 'scan/bill_summary_widgets.dart';
 part 'scan/bill_draft.dart';
 part 'scan/bill_checkout_sheet.dart';
 part 'scan/quantity_input.dart';
+part 'scan/party_bar.dart';
 
 enum BillingEntryMode { scan, manual }
 
@@ -72,7 +73,8 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isLoadingProducts = true;
   bool _showAddedStatus = false;
   bool _duplicateConsumed = false;
-  bool _canUseCloudHandoff = CloudService.instance.state.value.canUseDraftHandoff;
+  bool _canUseCloudHandoff =
+      CloudService.instance.state.value.canUseDraftHandoff;
   int _cloudHandoffCount = 0;
   String? _lastScanned;
   DateTime? _lastScannedSeenAt;
@@ -177,6 +179,67 @@ class _ScanScreenState extends State<ScanScreen> {
     } finally {
       if (identical(_draftWrite, write)) _draftWrite = null;
     }
+    await _commitPendingParty();
+  }
+
+  // ── Customer / party bar ──
+  //
+  // The party is kept in the checkout raw fields (the same durable draft the
+  // checkout sheet edits), so held carts, restores and checkout review see it.
+  // A party picked before the cart has a durable row waits in [_pendingParty]
+  // and is written as soon as the cart is saved.
+
+  Map<String, dynamic>? _pendingParty;
+
+  Map<String, dynamic> get _partyFields {
+    final pending = _pendingParty;
+    if (pending != null) return pending;
+    final raw = _checkoutState['raw'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : const {};
+  }
+
+  Map<String, dynamic> _stateWithParty(Map<String, dynamic> fields) {
+    final raw = _checkoutState['raw'];
+    return {
+      ..._checkoutState,
+      'version': 1,
+      'raw': {...(raw is Map ? Map<String, dynamic>.from(raw) : {}), ...fields},
+    };
+  }
+
+  Future<void> _commitPendingParty() async {
+    final fields = _pendingParty;
+    if (fields == null ||
+        _checkoutCart == null ||
+        _checkoutState['pending'] != null) {
+      return;
+    }
+    try {
+      await _persistCheckoutState(_stateWithParty(fields));
+      if (identical(_pendingParty, fields)) _pendingParty = null;
+    } catch (error, stack) {
+      AppLog.error('Save bill party', error, stack);
+    }
+  }
+
+  Future<void> _pickParty() async {
+    if (_pendingCheckoutBlocksEdit()) return;
+    final customers = await DatabaseHelper.instance.getAllCustomers();
+    if (!mounted) return;
+    final fields = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _PartyPickerSheet(
+        customers: customers,
+        currentName: _partyFields['name']?.toString() ?? '',
+      ),
+    );
+    if (fields == null || !mounted) return;
+    if (_pendingCheckoutBlocksEdit()) return;
+    setState(() => _pendingParty = fields);
+    await _commitPendingParty();
+    if (mounted) setState(() {});
   }
 
   Future<void> _writeDraftNow() async {
@@ -190,6 +253,19 @@ class _ScanScreenState extends State<ScanScreen> {
         expectedScope: await _checkoutScope,
         expectedCart: _checkoutCart,
       );
+      if (_checkoutCart == null && _checkoutState.isNotEmpty) {
+        // Emptying the cart drops its durable checkout row; keep the chosen
+        // party for the next item instead of silently reverting to walk-in.
+        final raw = _checkoutState['raw'];
+        if (raw is Map &&
+            (raw['name']?.toString().trim().isNotEmpty ?? false)) {
+          _pendingParty ??= {
+            for (final key in _walkInPartyFields().keys)
+              if (raw.containsKey(key)) key: raw[key],
+          };
+        }
+        _checkoutState = const {};
+      }
       _lastDraftError = null;
     } catch (error, stack) {
       _lastDraftError = error;
@@ -333,6 +409,7 @@ class _ScanScreenState extends State<ScanScreen> {
       );
       _checkoutCart = null;
       _checkoutState = const {};
+      _pendingParty = null;
       _savedDraft = HeldBill.encodeItems(const []);
       if (!mounted) return;
       setState(() {
@@ -364,6 +441,7 @@ class _ScanScreenState extends State<ScanScreen> {
         );
         _checkoutCart = null;
         _checkoutState = const {};
+        _pendingParty = null;
       }
       final byUuid = {
         for (final product in _allProducts)
@@ -404,9 +482,7 @@ class _ScanScreenState extends State<ScanScreen> {
       await _loadHeldCount();
       await _loadCloudHandoffCount();
       if (!mounted) return;
-      _showCheckoutSnackBar(
-        'Took over cart from ${claimed.sourceDeviceLabel}',
-      );
+      _showCheckoutSnackBar('Took over cart from ${claimed.sourceDeviceLabel}');
     } catch (error) {
       if (!mounted) return;
       _showCheckoutSnackBar(error.toString().replaceFirst('Bad state: ', ''));
@@ -431,6 +507,7 @@ class _ScanScreenState extends State<ScanScreen> {
       await DatabaseHelper.instance.parkCheckoutCart(cart, label);
       _checkoutCart = null;
       _checkoutState = const {};
+      _pendingParty = null;
       _savedDraft = HeldBill.encodeItems(const []);
       if (!mounted) return;
       setState(() {
@@ -617,7 +694,7 @@ class _ScanScreenState extends State<ScanScreen> {
     } catch (error) {
       if (!mounted) return;
       final message = error is FormatException
-          ? 'Product not found. Search the catalog for this label.'
+          ? 'Item not found. Search the catalog for this label.'
           : error.toString().replaceFirst('Bad state: ', '');
       _showCheckoutSnackBar(message);
     } finally {
@@ -641,7 +718,7 @@ class _ScanScreenState extends State<ScanScreen> {
     } on FormatException {
       if (!mounted) return;
       _showCheckoutSnackBar(
-        'Product not found. Search the catalog for this label.',
+        'Item not found. Search the catalog for this label.',
       );
       _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
       return;
@@ -679,7 +756,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final code = checkoutBarcodeCandidate(raw);
     if (code == null) {
       _showCheckoutSnackBar(
-        'Product not found. Search the catalog for this label.',
+        'Item not found. Search the catalog for this label.',
       );
       _scheduleScanCooldown(fromManualSearch, _invalidScanCooldown);
       return;
@@ -702,9 +779,9 @@ class _ScanScreenState extends State<ScanScreen> {
       final add = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Product not found'),
+          title: const Text('Item not found'),
           content: Text(
-            'No product matches "$code". Add it without losing the current bill?',
+            'No item matches "$code". Add it without losing the current bill?',
           ),
           actions: [
             TextButton(
@@ -715,7 +792,7 @@ class _ScanScreenState extends State<ScanScreen> {
             FilledButton(
               key: const ValueKey('checkout-create-product'),
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Add product'),
+              child: const Text('Add item'),
             ),
           ],
         ),
@@ -733,7 +810,7 @@ class _ScanScreenState extends State<ScanScreen> {
         await _loadProducts();
         if (!mounted) return;
         _showCheckoutSnackBar(
-          'Product saved. Add stock before adding it to this bill.',
+          'Item saved. Add stock before adding it to this bill.',
         );
         return;
       }
@@ -780,6 +857,10 @@ class _ScanScreenState extends State<ScanScreen> {
       cgstAmountSnapshot: item.cgstAmountSnapshot,
       sgstAmountSnapshot: item.sgstAmountSnapshot,
       igstAmountSnapshot: item.igstAmountSnapshot,
+      itemTypeSnapshot: item.itemTypeSnapshot,
+      taxTypeSnapshot: item.taxTypeSnapshot,
+      cessPercentSnapshot: item.cessPercentSnapshot,
+      cessAmountSnapshot: item.cessAmountSnapshot,
       wasDirectPrice: item.wasDirectPrice,
       quantity: item.quantity,
       discountMode: item.discountMode,
@@ -981,7 +1062,8 @@ class _ScanScreenState extends State<ScanScreen> {
       frozenTotals = BillTotals.fromTaxedItems(
         frozenItems,
         roundOff: saved['round_off'] as bool? ?? true,
-        roundOffMode: saved['round_off_mode'] as String? ?? frozenBill.roundOffMode,
+        roundOffMode:
+            saved['round_off_mode'] as String? ?? frozenBill.roundOffMode,
         roundOffIncrement:
             (saved['round_off_increment'] as num?)?.toDouble() ??
             frozenBill.roundOffIncrement,
@@ -1068,6 +1150,7 @@ class _ScanScreenState extends State<ScanScreen> {
             cgstAmount: totals.cgstAmount,
             sgstAmount: totals.sgstAmount,
             igstAmount: totals.igstAmount,
+            cessAmount: totals.cessAmount,
             roundOffAmount: totals.roundOffAmount,
             roundOffMode: roundOffMode,
             roundOffIncrement: roundOffIncrement,
@@ -1240,6 +1323,7 @@ class _ScanScreenState extends State<ScanScreen> {
       // no path back to this screen (or New Bill) can carry it forward.
       _checkoutCart = null;
       _checkoutState = const {};
+      _pendingParty = null;
       _savedDraft = HeldBill.encodeItems(const []);
       _duplicateConsumed = true;
       setState(() => _items.clear());
@@ -1604,7 +1688,7 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_items.isNotEmpty) {
       return context.l10n.itemsInBill(_items.length);
     }
-    return 'Search by product name, code, category or supplier';
+    return 'Search by item name, code, category or supplier';
   }
 
   @override
@@ -1628,6 +1712,7 @@ class _ScanScreenState extends State<ScanScreen> {
             );
             _checkoutCart = null;
             _checkoutState = const {};
+            _pendingParty = null;
             _savedDraft = HeldBill.encodeItems(const []);
             if (!mounted) return;
             setState(() => _items.clear());
@@ -1718,6 +1803,11 @@ class _ScanScreenState extends State<ScanScreen> {
         ),
         body: Column(
           children: [
+            _PartyBar(
+              name: _partyFields['name']?.toString() ?? '',
+              phone: _partyFields['phone']?.toString() ?? '',
+              onTap: _pickParty,
+            ),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -1887,24 +1977,25 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _showLineControlsSheet(int index) async {
     if (_pendingCheckoutBlocksEdit()) return;
     final item = _items[index];
-    final result = await showModalBottomSheet<
-      ({String mode, double value, String? taxMode})
-    >(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: AppColors.surfaceOf(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _LineControlsSheet(
-        productName: item.productName,
-        lineSubtotal: item.subtotal,
-        initialMode: item.discountMode,
-        initialValue: item.discountValue,
-        initialTaxMode: item.taxMode,
-      ),
-    );
+    final result =
+        await showModalBottomSheet<
+          ({String mode, double value, String? taxMode})
+        >(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          backgroundColor: AppColors.surfaceOf(context),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (_) => _LineControlsSheet(
+            productName: item.productName,
+            lineSubtotal: item.subtotal,
+            initialMode: item.discountMode,
+            initialValue: item.discountValue,
+            initialTaxMode: item.taxMode,
+          ),
+        );
     if (result == null || !mounted) return;
     setState(() {
       item.discountMode = result.mode;
@@ -2019,7 +2110,8 @@ class _ScanScreenState extends State<ScanScreen> {
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (_lineControlsBadge(item) case final badge?)
+                                  if (_lineControlsBadge(item)
+                                      case final badge?)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 2),
                                       child: Text(
@@ -2069,7 +2161,8 @@ class _ScanScreenState extends State<ScanScreen> {
                                       key: ObjectKey(item),
                                       quantity: item.quantity,
                                       invalidInput: item.draftQuantityInput,
-                                      enabled: _checkoutState['pending'] == null,
+                                      enabled:
+                                          _checkoutState['pending'] == null,
                                       onChanged: (quantity) =>
                                           _setQty(i, quantity),
                                     ),

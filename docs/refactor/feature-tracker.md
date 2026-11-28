@@ -59,7 +59,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | F12 | Line discount percent/amount | N/N/N | E03 | verified | Per-line `%` and `₹` discounts with held-cart/draft persistence, invoice display/PDF, and credit-note carry-over verified across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
 | F13 | Inclusive/exclusive rate per document/line | P/P/P | E03 | verified | Shop default, per-document, and per-line inclusive/exclusive tax modes verified with mixed-mode oracle fixtures across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
 | F14 | Transaction-level tax and tax conflicts | P/P/P | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| F15 | Cess, additional cess, TCS/TDS, ITC and reverse charge | N/N/N | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| F15 | Cess, additional cess, TCS/TDS, ITC and reverse charge | N/N/N | E11 | implementing | M1.0 (API `da24e07`/`44d75de`, web `20f5f53`, Android `530e507`): item/category `cess_percent`, cess in line/bill math (per-unit `cess_amount_snapshot`, `bills.cess_amount`), PDF/thermal output; `tax_type` taxable/exempt/none snapshots. Additional cess, TCS/TDS, ITC, RCM remain E11. |
 | F16 | Taxable additional charges with SAC | P/P/P | E04 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F17 | Round-off modes/increments | P/P/P | E03 | verified | Shop default and per-bill `none`/`nearest`/`up`/`down` round-off across `₹0.50`/`₹1`/`₹5`/`₹10` increments verified across API, web, and Android. See [billing controls](evidence/E03/billing-controls.md). |
 | F18 | Split tender | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -73,8 +73,8 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | F26 | Terms and conditions by document type | P/P/P | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F27 | Transport fields and delivery acknowledgement | N/N/N | E07 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | F28 | Loyalty earning/redemption | N/N/N | E15 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| I01 | Product catalog, category, unit and codes | E/E/E | E02 | implementing | E02.3 catalog entry from checkout verified (exact code lookup, concurrent race mapping, zero-stock save, staff guard); evidence/E02/slice-3-catalog.md. Broader E02.3 account/settings/locale parity remains open. |
-| I02 | Service/non-stock items | P/P/P | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
+| I01 | Product catalog, category, unit and codes | E/E/E | E02 | implementing | E02.3 catalog entry from checkout verified (exact code lookup, concurrent race mapping, zero-stock save, staff guard); evidence/E02/slice-3-catalog.md. M1.0 (API `da24e07`/`44d75de`, web `20f5f53`, Android `530e507`): UI renamed to Items, full-screen create/edit item, category default GST/cess auto-fill + apply-to-items, bulk Set GST (`POST /products/bulk-tax`). Broader E02.3 account/settings/locale parity remains open. |
+| I02 | Service/non-stock items | P/P/P | E05 | implementing | M1.0 (API `da24e07`/`44d75de`, web `20f5f53`, Android `530e507`): `item_type` product/service end-to-end (Alembic `0030`, SQLite `v31`, sync contract); services never move stock or fail stock checks, SAC label. Repo + Docker integration checks pass; Android emulator and localhost browser walkthrough not run. |
 | I03 | HSN/SAC metadata | P/P/P | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I04 | Product photos / description | P/P/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I05 | MRP | P/P/P | E11 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -90,7 +90,7 @@ For each row, record four separate gates: repo/domain checks; Docker integration
 | I15 | Manufacturing/BOM | N/N/N | E09 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I16 | Product import/export | E/E/E | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I17 | Import catalog without posting stock | P/P/P | E13 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
-| I18 | Barcode/QR scan and labels | E/E/E | E02 | implementing | E02.3 checkout scan/search/unmatched-code creation and edited-barcode UUID return verified on localhost and Android; evidence/E02/slice-3-catalog.md. E02.3 non-checkout parity and E08 serial scan remain open. |
+| I18 | Barcode/QR scan and labels | E/E/E | E02 | implementing | E02.3 checkout scan/search/unmatched-code creation and edited-barcode UUID return verified on localhost and Android; evidence/E02/slice-3-catalog.md. M1.0 (API `da24e07`/`44d75de`, web `20f5f53`, Android `530e507`) adds Scan + Generate (EAN-13 in-store `2…` code, `POST /products/generate-code`, local collision check on Android) on the item form. E08 serial scan remains open. |
 | I19 | Customer/supplier master and balances | E/E/E | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I20 | Party opening balance/date/direction | N/N/N | E06 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
 | I21 | Party groups | N/N/N | E05 | planned | Not run; add slice contract, implementation and paired acceptance evidence. |
@@ -198,6 +198,7 @@ Source divergences must be reproduced/characterized in E00 and closed by the pha
 | E03.3C cross-device single-consumer draft handoff (`O16`) and E03 phase exit | verified | [Draft handoff](evidence/E03/draft-handoff.md) |
 | E04.1 purchase & supplier parity (`D06–D08`, `T04`, `T08`, `T09`) and purchase returns / debit notes | verified | [Purchase & supplier parity](evidence/E04/purchase-supplier-parity.md) |
 | E12.1–E12.2 invoice PDF, print & share parity (`O01`, `O02`, `O04`, `D13`) across A4/A5/80mm/58mm | verified | [Invoice output parity](evidence/E12/invoice-output-parity.md) |
+| M1.0 items rename, full-screen item form, service items (`I02`), item/category GST + cess (`F15` part), bulk GST, code Generate/Scan, Create Bill customer bar | implementing (repo + Docker verified; emulator/browser walkthrough and owner UX review pending) | Commits: API `da24e07`, `44d75de`; web `20f5f53`; Android `530e507` |
 | E17 (lite) Base v1 pilot release hardening (PG 18.6 migration `0029`, `O12` backup/restore, clean release APK) | verified | [Pilot release hardening](evidence/E17/pilot-release-hardening.md) |
 
 ## Phase readiness

@@ -56,10 +56,7 @@ class BillPdfGenerator {
         margin: pw.EdgeInsets.all(isA5 ? 18 : 28),
         build: (context) => [
           _header(bill, shop, billSettings, billHasGst: billHasGst),
-          if (bill.isCancelled) ...[
-            pw.SizedBox(height: 8),
-            _voidBanner(bill),
-          ],
+          if (bill.isCancelled) ...[pw.SizedBox(height: 8), _voidBanner(bill)],
           if (_showHeader(billSettings)) pw.SizedBox(height: 10),
           _partyBlock(bill, shop, billSettings),
           pw.SizedBox(height: 10),
@@ -186,7 +183,10 @@ class BillPdfGenerator {
   /// columns/rows can appear, independent of the shop's current registration
   /// flag — so historical GST bills always render their tax breakdown.
   static bool _billHasGst(Bill bill) {
-    if (bill.cgstAmount > 0 || bill.sgstAmount > 0 || bill.igstAmount > 0) {
+    if (bill.cgstAmount > 0 ||
+        bill.sgstAmount > 0 ||
+        bill.igstAmount > 0 ||
+        bill.cessAmount > 0) {
       return true;
     }
     return bill.items.any((item) => item.totalGst > 0);
@@ -490,6 +490,7 @@ class BillPdfGenerator {
               _totalRow('SGST', bill.sgstAmount),
             if (settings.showCgstSgstIgst && bill.igstAmount > 0)
               _totalRow('IGST', bill.igstAmount),
+            if (bill.cessAmount > 0) _totalRow('Cess', bill.cessAmount),
             if (settings.showGstTotal && gstTotal > 0)
               _totalRow('GST Total', gstTotal),
             if (bill.roundOffAmount != 0)
@@ -602,6 +603,7 @@ class BillPdfGenerator {
         () => _HsnRow(hsn: hsn, rate: rate),
       );
       row.taxable += item.totalTaxableValue;
+      row.cess += item.totalCess;
       if (item.totalIgst > 0) {
         row.igst += item.totalIgst;
       } else {
@@ -610,11 +612,13 @@ class BillPdfGenerator {
     }
     final rows = groups.values.toList()..sort((a, b) => a.hsn.compareTo(b.hsn));
     final hasIgst = rows.any((r) => r.igst > 0);
+    final hasCess = rows.any((r) => r.cess > 0);
     final headers = [
       'HSN/SAC',
       'Taxable',
       'Rate',
       if (hasIgst) 'IGST' else ...['CGST', 'SGST'],
+      if (hasCess) 'Cess',
       'Total Tax',
     ];
     final data = [
@@ -624,7 +628,8 @@ class BillPdfGenerator {
           _money(r.taxable),
           _taxLabel(r.rate),
           if (hasIgst) _money(r.igst) else ...[_money(r.cgst), _money(r.sgst)],
-          _money(r.cgst + r.sgst + r.igst),
+          if (hasCess) _money(r.cess),
+          _money(r.cgst + r.sgst + r.igst + r.cess),
         ],
     ];
     // A Container (not a spanning Column) moves the heading and table to the
@@ -977,6 +982,7 @@ class _HsnRow {
   double taxable = 0;
   double intraGst = 0;
   double igst = 0;
+  double cess = 0;
 
   _HsnRow({required this.hsn, required this.rate});
 

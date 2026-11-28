@@ -138,7 +138,11 @@ Map<String, dynamic> _request(dynamic decoded) {
   final items = _rows(capture['items']);
   final movements = _rows(capture['movements']);
   final payments = _rows(capture['payments']);
-  if (items.isEmpty || items.length > 200 || movements.length != items.length) {
+  // Service lines never move stock, so they carry no movement.
+  final stockLines = items
+      .where((row) => (row['item_type_snapshot'] ?? 'product') != 'service')
+      .length;
+  if (items.isEmpty || items.length > 200 || movements.length != stockLines) {
     _unsupported();
   }
   final movementByProduct = <String, Map<String, dynamic>>{};
@@ -181,6 +185,7 @@ Map<String, dynamic> _request(dynamic decoded) {
   var taxable = BigInt.zero;
   var tax = BigInt.zero;
   var exclusiveGst = BigInt.zero;
+  var cess = BigInt.zero;
   var net = BigInt.zero;
   final products = <String>{};
   final cartItems = <Map<String, dynamic>>[];
@@ -194,6 +199,9 @@ Map<String, dynamic> _request(dynamic decoded) {
         _amount(row['commission_snapshot']) != BigInt.zero) {
       _unsupported();
     }
+    final itemType = row['item_type_snapshot'] ?? 'product';
+    if (itemType != 'product' && itemType != 'service') _unsupported();
+    final isService = itemType == 'service';
     final quantity = _scaled(row['quantity'], 3, max: BigInt.from(1000000000));
     if (quantity == BigInt.zero) _unsupported();
     final lineDiscountMode = row['discount_mode'] ?? 'percent';
@@ -231,18 +239,24 @@ Map<String, dynamic> _request(dynamic decoded) {
     if (_amount(row['subtotal']) != lineSubtotal) _unsupported();
     final lineTaxable = _amount(item.totalTaxableValue);
     final lineTotal = _amount(item.lineAmount);
+    // tax_amount stays GST-only; cess travels separately.
     final lineTax = _amount(item.totalGst);
+    final lineCess = _amount(item.totalCess);
     final movement = movementByProduct.remove(product);
-    if (movement == null ||
-        _scaled(movement['quantity_delta'], 3, signed: true) != -quantity) {
+    if (isService
+        ? movement != null
+        : (movement == null ||
+              _scaled(movement['quantity_delta'], 3, signed: true) !=
+                  -quantity)) {
       _unsupported();
     }
     final effectiveLineTaxMode = (lineTaxMode as String?) ?? billTaxMode;
     subtotal += lineSubtotal;
     taxable += lineTaxable;
     tax += lineTax;
+    cess += lineCess;
     if (effectiveLineTaxMode == 'exclusive') {
-      exclusiveGst += lineTax;
+      exclusiveGst += lineTax + lineCess;
     }
     net += lineTotal;
     cartItems.add({
@@ -256,13 +270,14 @@ Map<String, dynamic> _request(dynamic decoded) {
     });
     lines.add({
       'line_uuid': identity(row['uuid']),
-      'movement_uuid': identity(movement['uuid']),
+      if (movement != null) 'movement_uuid': identity(movement['uuid']),
       'product_uuid': product,
       'name': _text(row['product_name'], 200),
       'quantity': decimalTextFromScaled(quantity, scale: 3),
       'subtotal': _money(lineSubtotal),
       'taxable_amount': _money(lineTaxable),
       'tax_amount': _money(lineTax),
+      if (lineCess != BigInt.zero) 'cess_amount': _money(lineCess),
       'total_amount': _money(lineTotal),
       'snapshot': _lineSnapshot(row),
     });
@@ -320,7 +335,8 @@ Map<String, dynamic> _request(dynamic decoded) {
               header['sgst_amount']! +
               header['igst_amount']! ||
       subtotal - header['discount_amount']! != net - exclusiveGst ||
-      taxable + tax != net ||
+      taxable + tax + cess != net ||
+      _amount(invoice['cess_amount'] ?? 0) != cess ||
       net + header['round_off_amount']! != header['total_amount'] ||
       header['paid_amount']! + header['balance_due']! !=
           header['total_amount']) {
@@ -398,6 +414,7 @@ Map<String, dynamic> _request(dynamic decoded) {
     'cart': cart,
     'lines': lines,
     for (final entry in header.entries) entry.key: _money(entry.value),
+    if (cess != BigInt.zero) 'cess_amount': _money(cess),
     'payment_uuid': paymentUuid,
     'payment': {
       'amount': _money(paid),

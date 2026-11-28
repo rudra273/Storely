@@ -28,7 +28,11 @@ http.Response _failure(int status, String code, String message) => _json({
   'error': {'code': code, 'message': message},
 }, status);
 
-const _tokens = {'access_token': 'tok-1', 'refresh_token': 'ref-1', 'expires_in': 900};
+const _tokens = {
+  'access_token': 'tok-1',
+  'refresh_token': 'ref-1',
+  'expires_in': 900,
+};
 const _me = {'id': 'u1', 'email': 'owner@shop.test', 'email_verified': true};
 
 class _HandoffServerHarness {
@@ -285,10 +289,7 @@ void main() {
       );
 
       // Local-only mode: no Send to another device button and no Held button when 0 held bills.
-      expect(
-        find.byKey(const ValueKey('checkout-send-handoff')),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('checkout-send-handoff')), findsNothing);
       expect(find.byKey(const ValueKey('checkout-held-list')), findsNothing);
 
       // Hold the bill locally and verify _HeldBillsSheet hides Cloud handoffs.
@@ -334,16 +335,13 @@ void main() {
         // Pre-populate a saved draft with checkout metadata so we verify metadata upload.
         final scope = (await tester.runAsync(() async {
           final scope = await db.captureCheckoutScope();
-          final savedCart = await db.saveCartDraft(
-            [
-              BillItem(
-                productName: 'Basmati Rice',
-                quantity: 2,
-                sellingPriceSnapshot: 120,
-              ),
-            ],
-            expectedScope: scope,
-          );
+          final savedCart = await db.saveCartDraft([
+            BillItem(
+              productName: 'Basmati Rice',
+              quantity: 2,
+              sellingPriceSnapshot: 120,
+            ),
+          ], expectedScope: scope);
           await db.writeCheckoutState(savedCart!, {
             'version': 1,
             'raw': {'name': 'Kiran', 'notes': 'Deliver evening'},
@@ -369,10 +367,7 @@ void main() {
           'Kiran',
         );
         expect(find.text('Basmati Rice'), findsNothing);
-        expect(
-          find.textContaining('Sent to another device:'),
-          findsOneWidget,
-        );
+        expect(find.textContaining('Sent to another device:'), findsOneWidget);
 
         final afterCart = await tester.runAsync(
           () => db.loadCheckoutCart(scope),
@@ -488,7 +483,9 @@ void main() {
         expect(find.text('Active Cart'), findsOneWidget);
 
         // 1) 409 draft_already_claimed shows clear message and refreshes list.
-        await tester.tap(find.byKey(const ValueKey('handoff-claim-h-conflict')));
+        await tester.tap(
+          find.byKey(const ValueKey('handoff-claim-h-conflict')),
+        );
         await _settleIo(tester);
         expect(
           find.text('This cart was already claimed on another device.'),
@@ -508,10 +505,7 @@ void main() {
         await _settleIo(tester);
 
         expect(find.text('Filter Coffee'), findsNWidgets(2));
-        expect(
-          find.text('Took over cart from Web Desk'),
-          findsOneWidget,
-        );
+        expect(find.text('Took over cart from Web Desk'), findsOneWidget);
 
         final hydratedCart = await tester.runAsync(() async {
           final scope = await db.captureCheckoutScope();
@@ -525,7 +519,15 @@ void main() {
         // Open checkout sheet and verify customer metadata hydrated into form.
         await tester.tap(find.bySemanticsIdentifier(TestKeys.scanBillBtn));
         await _settleIo(tester);
-        expect(find.text('Meera'), findsOneWidget);
+        // Hydrated into the checkout form and the Create Bill party bar.
+        expect(find.widgetWithText(TextField, 'Meera'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('bill-party-bar')),
+            matching: find.text('Meera'),
+          ),
+          findsOneWidget,
+        );
 
         await tester.pumpWidget(const SizedBox());
         await _settleIo(tester);

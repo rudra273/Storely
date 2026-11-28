@@ -10,6 +10,73 @@ const double stockQuantityEpsilon = 1e-6;
 bool exceedsStock(double requested, double available) =>
     requested > available + stockQuantityEpsilon;
 
+/// What an item is: a stock-tracked [product] or a non-stock [service].
+class ItemType {
+  static const product = 'product';
+  static const service = 'service';
+
+  static String clean(Object? value) =>
+      value?.toString() == service ? service : product;
+}
+
+/// GST taxability of an item. [none] (non-GST supply) and [exempt] always
+/// compute zero GST and cess; the snapshot keeps them apart for GST returns.
+class TaxType {
+  static const taxable = 'taxable';
+  static const exempt = 'exempt';
+  static const none = 'none';
+
+  static String clean(Object? value) {
+    final text = value?.toString();
+    return text == exempt || text == none ? text! : taxable;
+  }
+
+  static String? cleanOptional(Object? value) {
+    final text = value?.toString();
+    return text == taxable || text == exempt || text == none ? text : null;
+  }
+}
+
+/// Standard GST slabs offered by the item GST selector.
+const gstRatePresets = <double>[0, 5, 12, 18, 28];
+
+/// Every GST rate the Storely API accepts. Less common slabs (0.25%, 3%, 40%)
+/// are offered under "Other rate"; no other value can be saved.
+const allowedGstRates = <double>[0, 0.25, 3, 5, 12, 18, 28, 40];
+
+/// True when [rate] is a GST rate the API accepts.
+bool isAllowedGstRate(double rate) =>
+    allowedGstRates.any((allowed) => (allowed - rate).abs() < 1e-9);
+
+/// Common compensation cess rates offered by the cess picker.
+const cessRatePresets = <double>[1, 3, 5, 12, 15, 22];
+
+String _percentText(double value) => value == value.roundToDouble()
+    ? value.toStringAsFixed(0)
+    : value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+
+/// Short label for an item's tax setting, e.g. "GST 28% + Cess 12%".
+String taxLabel(String taxType, double? gstPercent, double cessPercent) {
+  switch (TaxType.clean(taxType)) {
+    case TaxType.none:
+      return 'None';
+    case TaxType.exempt:
+      return 'Tax Exempt';
+  }
+  final gst = 'GST ${_percentText(gstPercent ?? 0)}%';
+  return cessPercent > 0 ? '$gst + Cess ${_percentText(cessPercent)}%' : gst;
+}
+
+/// EAN-13 check digit for a 12-digit [body].
+int ean13CheckDigit(String body) {
+  var sum = 0;
+  for (var i = 0; i < body.length; i++) {
+    final digit = body.codeUnitAt(i) - 48;
+    sum += i.isEven ? digit : digit * 3;
+  }
+  return (10 - sum % 10) % 10;
+}
+
 class ProductSource {
   static const mobile = 'mobile';
   static const imported = 'imported';
@@ -50,6 +117,15 @@ class Product {
   final bool directPriceToggle;
   final double? manualPrice;
   final double quantity;
+
+  /// [ItemType.product] or [ItemType.service]. Services never track stock.
+  final String itemType;
+
+  /// [TaxType.taxable], [TaxType.exempt] or [TaxType.none].
+  final String taxType;
+
+  /// Compensation cess % charged on the taxable value (0 = none).
+  final double cessPercent;
 
   /// False for services and loose items: billing never checks or warns
   /// about their stock.
@@ -99,7 +175,10 @@ class Product {
     this.directPriceToggle = false,
     this.manualPrice,
     required num quantity,
-    this.trackStock = true,
+    String itemType = ItemType.product,
+    String taxType = TaxType.taxable,
+    double cessPercent = 0,
+    bool trackStock = true,
     this.reorderLevel,
     this.printedMrp,
     this.purchaseBatchNo,
@@ -120,10 +199,21 @@ class Product {
        sellingPrice = sellingPrice ?? mrp ?? 0,
        purchasePrice = purchasePrice ?? sellingPrice ?? mrp ?? 0,
        quantity = quantity.toDouble(),
+       itemType = ItemType.clean(itemType),
+       taxType = TaxType.clean(taxType),
+       cessPercent = cessPercent.isFinite && cessPercent > 0 ? cessPercent : 0,
+       trackStock = ItemType.clean(itemType) == ItemType.service
+           ? false
+           : trackStock,
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
   String? get itemCode => productCode;
+
+  bool get isService => itemType == ItemType.service;
+
+  /// Goods use HSN codes; services use SAC codes.
+  String get taxCodeLabel => isService ? 'SAC' : 'HSN';
 
   /// Tracked stock at or below this product's reorder level (or the shop
   /// default [shopThreshold] when it has none).
@@ -180,6 +270,9 @@ class Product {
     'direct_price_toggle': directPriceToggle ? 1 : 0,
     'manual_price': manualPrice,
     'quantity_cache': quantity,
+    'item_type': itemType,
+    'tax_type': taxType,
+    'cess_percent': cessPercent,
     'track_stock': trackStock ? 1 : 0,
     'reorder_level': reorderLevel,
     'mrp_price': printedMrp,
@@ -227,6 +320,9 @@ class Product {
         (map['quantity_cache'] as num?)?.toDouble() ??
         (map['quantity'] as num?)?.toDouble() ??
         0,
+    itemType: ItemType.clean(map['item_type']),
+    taxType: TaxType.clean(map['tax_type']),
+    cessPercent: (map['cess_percent'] as num?)?.toDouble() ?? 0,
     trackStock: (map['track_stock'] as num? ?? 1) != 0,
     reorderLevel: (map['reorder_level'] as num?)?.toDouble(),
     printedMrp: (map['mrp_price'] as num?)?.toDouble(),
@@ -301,6 +397,9 @@ class Product {
     bool clearManualPrice = false,
     double? manualPrice,
     num? quantity,
+    String? itemType,
+    String? taxType,
+    double? cessPercent,
     bool? trackStock,
     bool clearReorderLevel = false,
     double? reorderLevel,
@@ -345,6 +444,9 @@ class Product {
     directPriceToggle: directPriceToggle ?? this.directPriceToggle,
     manualPrice: clearManualPrice ? null : manualPrice ?? this.manualPrice,
     quantity: quantity ?? this.quantity,
+    itemType: itemType ?? this.itemType,
+    taxType: taxType ?? this.taxType,
+    cessPercent: cessPercent ?? this.cessPercent,
     trackStock: trackStock ?? this.trackStock,
     reorderLevel: clearReorderLevel ? null : reorderLevel ?? this.reorderLevel,
     printedMrp: clearPrintedMrp ? null : printedMrp ?? this.printedMrp,

@@ -323,7 +323,7 @@ void main() {
       final upgraded = await helper.database;
       expect(
         (await upgraded.rawQuery('PRAGMA user_version')).single.values.first,
-        30,
+        31,
       );
       final settings = await helper.getBillSettings();
       expect(settings.roundOffTotal, isFalse);

@@ -1,4 +1,5 @@
 import 'bill_totals.dart';
+import 'product.dart';
 import '../utils/exact_decimal.dart';
 import '../utils/money.dart';
 
@@ -49,6 +50,9 @@ class Bill {
   final double sgstAmount;
   final double igstAmount;
 
+  /// Compensation cess on the bill (sum of line cess), added to the total.
+  final double cessAmount;
+
   /// Added to the line total to reach the rounded grand total.
   final double roundOffAmount;
   final String roundOffMode;
@@ -77,6 +81,7 @@ class Bill {
         'cgst_amount': neg(cgstAmount),
         'sgst_amount': neg(sgstAmount),
         'igst_amount': neg(igstAmount),
+        'cess_amount': neg(cessAmount),
         'round_off_amount': neg(roundOffAmount),
         'total_amount': neg(totalAmount),
         'paid_amount': neg(paidAmount),
@@ -140,6 +145,7 @@ class Bill {
     this.cgstAmount = 0,
     this.sgstAmount = 0,
     this.igstAmount = 0,
+    this.cessAmount = 0,
     this.roundOffAmount = 0,
     String roundOffMode = roundOffNearest,
     double roundOffIncrement = 1.0,
@@ -226,6 +232,7 @@ class Bill {
     'cgst_amount': cgstAmount,
     'sgst_amount': sgstAmount,
     'igst_amount': igstAmount,
+    'cess_amount': cessAmount,
     'round_off_amount': roundOffAmount,
     'round_off_mode': roundOffMode,
     'round_off_increment': roundOffIncrement,
@@ -293,6 +300,7 @@ class Bill {
       cgstAmount: (map['cgst_amount'] as num?)?.toDouble() ?? 0,
       sgstAmount: (map['sgst_amount'] as num?)?.toDouble() ?? 0,
       igstAmount: (map['igst_amount'] as num?)?.toDouble() ?? 0,
+      cessAmount: (map['cess_amount'] as num?)?.toDouble() ?? 0,
       roundOffAmount: (map['round_off_amount'] as num?)?.toDouble() ?? 0,
       roundOffMode: _cleanRoundOffMode(map['round_off_mode']),
       roundOffIncrement: _cleanRoundOffIncrement(map['round_off_increment']),
@@ -360,6 +368,7 @@ class Bill {
     double? cgstAmount,
     double? sgstAmount,
     double? igstAmount,
+    double? cessAmount,
     double? roundOffAmount,
     String? roundOffMode,
     double? roundOffIncrement,
@@ -416,6 +425,7 @@ class Bill {
       cgstAmount: cgstAmount ?? this.cgstAmount,
       sgstAmount: sgstAmount ?? this.sgstAmount,
       igstAmount: igstAmount ?? this.igstAmount,
+      cessAmount: cessAmount ?? this.cessAmount,
       roundOffAmount: roundOffAmount ?? this.roundOffAmount,
       roundOffMode: roundOffMode ?? this.roundOffMode,
       roundOffIncrement: roundOffIncrement ?? this.roundOffIncrement,
@@ -468,6 +478,16 @@ class BillItem {
   final double cgstAmountSnapshot;
   final double sgstAmountSnapshot;
   final double igstAmountSnapshot;
+
+  /// [ItemType] of the product at billing time. Service lines never move stock.
+  final String itemTypeSnapshot;
+
+  /// [TaxType] at billing time; exempt/none lines carry zero GST and cess.
+  final String taxTypeSnapshot;
+  final double cessPercentSnapshot;
+
+  /// Cess per unit after discounts, like [gstSnapshot] (full precision).
+  final double cessAmountSnapshot;
   final bool wasDirectPrice;
   double quantity;
   String discountMode;
@@ -511,13 +531,32 @@ class BillItem {
   // (never rounded per unit and then multiplied), and GST is derived as
   // line amount - taxable so the two always add up. See [BillTotals].
 
-  /// Line value after bill discount, including tax.
+  bool get isService => itemTypeSnapshot == ItemType.service;
+
+  /// Line value after bill discount, including GST and cess.
   double get lineAmount =>
       (((ExactDecimal.fromNum(taxableValueSnapshot) +
-                      ExactDecimal.fromNum(gstSnapshot)) *
+                      ExactDecimal.fromNum(gstSnapshot) +
+                      ExactDecimal.fromNum(cessAmountSnapshot)) *
                   ExactDecimal.fromNum(quantity))
               .roundHalfAway(scale: 12))
           .toMoneyDouble();
+
+  /// Line cess, rounded once for the whole line. A cess-only line (no GST)
+  /// takes the rounding remainder, so taxable + GST + cess = line amount.
+  double get totalCess {
+    if (cessAmountSnapshot == 0) return 0;
+    if (gstSnapshot == 0) {
+      return (ExactDecimal.fromNum(lineAmount) -
+              ExactDecimal.fromNum(totalTaxableValue))
+          .toMoneyDouble();
+    }
+    return ((ExactDecimal.fromNum(cessAmountSnapshot) *
+                ExactDecimal.fromNum(quantity))
+            .roundHalfAway(scale: 12))
+        .toMoneyDouble();
+  }
+
   double get totalTaxableValue =>
       ((ExactDecimal.fromNum(taxableValueSnapshot) *
                   ExactDecimal.fromNum(quantity))
@@ -525,7 +564,8 @@ class BillItem {
           .toMoneyDouble();
   double get totalGst =>
       (ExactDecimal.fromNum(lineAmount) -
-              ExactDecimal.fromNum(totalTaxableValue))
+              ExactDecimal.fromNum(totalTaxableValue) -
+              ExactDecimal.fromNum(totalCess))
           .toMoneyDouble();
   double get totalIgst => igstAmountSnapshot > 0 ? totalGst : 0;
   double get totalCgst => cgstAmountSnapshot > 0
@@ -584,6 +624,10 @@ class BillItem {
     this.cgstAmountSnapshot = 0,
     this.sgstAmountSnapshot = 0,
     this.igstAmountSnapshot = 0,
+    String itemTypeSnapshot = ItemType.product,
+    String taxTypeSnapshot = TaxType.taxable,
+    this.cessPercentSnapshot = 0,
+    this.cessAmountSnapshot = 0,
     this.wasDirectPrice = true,
     num quantity = 1,
     String discountMode = Bill.discountModePercent,
@@ -609,6 +653,8 @@ class BillItem {
            taxableValueSnapshot ??
            ((sellingPriceSnapshot ?? mrp ?? 0) - (gstSnapshot ?? 0)),
        quantity = quantity.toDouble(),
+       itemTypeSnapshot = ItemType.clean(itemTypeSnapshot),
+       taxTypeSnapshot = TaxType.clean(taxTypeSnapshot),
        discountMode = _cleanDiscountMode(discountMode),
        taxMode = _cleanOptionalTaxMode(taxMode),
        createdAt = createdAt ?? DateTime.now(),
@@ -637,6 +683,10 @@ class BillItem {
     'cgst_amount_snapshot': cgstAmountSnapshot,
     'sgst_amount_snapshot': sgstAmountSnapshot,
     'igst_amount_snapshot': igstAmountSnapshot,
+    'item_type_snapshot': itemTypeSnapshot,
+    'tax_type_snapshot': taxTypeSnapshot,
+    'cess_percent_snapshot': cessPercentSnapshot,
+    'cess_amount_snapshot': cessAmountSnapshot,
     'was_direct_price': wasDirectPrice ? 1 : 0,
     'quantity': quantity,
     'discount_mode': discountMode,
@@ -684,6 +734,12 @@ class BillItem {
           (map['sgst_amount_snapshot'] as num?)?.toDouble() ?? 0,
       igstAmountSnapshot:
           (map['igst_amount_snapshot'] as num?)?.toDouble() ?? 0,
+      itemTypeSnapshot: ItemType.clean(map['item_type_snapshot']),
+      taxTypeSnapshot: TaxType.clean(map['tax_type_snapshot']),
+      cessPercentSnapshot:
+          (map['cess_percent_snapshot'] as num?)?.toDouble() ?? 0,
+      cessAmountSnapshot:
+          (map['cess_amount_snapshot'] as num?)?.toDouble() ?? 0,
       wasDirectPrice: (map['was_direct_price'] as int? ?? 1) == 1,
       quantity: (map['quantity'] as num).toDouble(),
       discountMode: _cleanDiscountMode(map['discount_mode']),

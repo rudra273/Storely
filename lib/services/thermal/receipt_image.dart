@@ -77,7 +77,9 @@ class ReceiptImage {
         pw.Text(r, style: style(bold: bold)),
       ],
     );
-    final hasGst = bill.cgstAmount + bill.sgstAmount + bill.igstAmount > 0.005;
+    final hasGst =
+        bill.cgstAmount + bill.sgstAmount + bill.igstAmount + bill.cessAmount >
+        0.005;
     final title = bill.isCreditNote
         ? 'CREDIT NOTE'
         : settings.documentTitle(
@@ -176,6 +178,7 @@ class ReceiptImage {
               if (bill.cgstAmount > 0) row('CGST', rupees(bill.cgstAmount)),
               if (bill.sgstAmount > 0) row('SGST', rupees(bill.sgstAmount)),
               if (bill.igstAmount > 0) row('IGST', rupees(bill.igstAmount)),
+              if (bill.cessAmount > 0) row('Cess', rupees(bill.cessAmount)),
             ] else
               row('Subtotal', rupees(bill.subtotalAmount)),
             if (bill.discountAmount > 0.005)

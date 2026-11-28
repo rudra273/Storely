@@ -176,9 +176,17 @@ class CategoryPricingSettings {
   final String? hsnType;
   final String? hsnDescription;
 
+  /// Default [TaxType] for new items in this category (null = no default).
+  final String? taxType;
+
+  /// Default cess % for new items in this category (null = no default).
+  final double? cessPercent;
+
   const CategoryPricingSettings({
     this.id,
     required this.name,
+    this.taxType,
+    this.cessPercent,
     this.gstPercent,
     this.overheadCost,
     this.profitMarginPercent,
@@ -201,8 +209,14 @@ class CategoryPricingSettings {
       hsnCode: _cleanHsnCode(map['hsn_code']?.toString()),
       hsnType: _cleanOptional(map['hsn_type']?.toString()),
       hsnDescription: _cleanOptional(map['hsn_description']?.toString()),
+      taxType: TaxType.cleanOptional(map['tax_type']),
+      cessPercent: _optionalDouble(map['cess_percent']),
     );
   }
+
+  /// True when the category carries any default tax setting for new items.
+  bool get hasTaxDefault =>
+      taxType != null || gstPercent != null || cessPercent != null;
 
   Map<String, dynamic> toPricingMap() => {
     'gst_percent': gstPercent,
@@ -213,6 +227,8 @@ class CategoryPricingSettings {
     'hsn_code': hsnCode,
     'hsn_type': hsnType,
     'hsn_description': hsnDescription,
+    'tax_type': taxType,
+    'cess_percent': cessPercent,
   };
 
   CategoryPricingSettings copyWith({
@@ -231,10 +247,16 @@ class CategoryPricingSettings {
     bool clearHsnType = false,
     String? hsnDescription,
     bool clearHsnDescription = false,
+    String? taxType,
+    bool clearTaxType = false,
+    double? cessPercent,
+    bool clearCessPercent = false,
   }) {
     return CategoryPricingSettings(
       id: id,
       name: name,
+      taxType: clearTaxType ? null : taxType ?? this.taxType,
+      cessPercent: clearCessPercent ? null : cessPercent ?? this.cessPercent,
       gstPercent: clearGstPercent ? null : gstPercent ?? this.gstPercent,
       overheadCost: clearOverheadCost
           ? null
@@ -306,8 +328,12 @@ class PricingCalculator {
     CategoryPricingSettings? category,
   ) {
     final purchasePrice = product.purchasePrice;
-    final gstPercent =
-        product.gstPercent ?? category?.gstPercent ?? global.defaultGstPercent;
+    // Exempt and non-GST items never carry GST, whatever the rate field says.
+    final gstPercent = product.taxType != TaxType.taxable
+        ? 0.0
+        : product.gstPercent ??
+              category?.gstPercent ??
+              global.defaultGstPercent;
     final overheadCost =
         product.overheadCost ??
         category?.overheadCost ??

@@ -6,14 +6,15 @@ import 'package:storely/models/bill_settings.dart';
 void main() {
   for (final raw in ['80mm', '58mm']) {
     test(
-      '$raw survives unrelated model edits with the existing A4 projection',
+      // Thermal sizes are first-class paper choices since E12.
+      '$raw survives unrelated model edits as a thermal paper size',
       () {
         final original = BillSettings.fromMap({'paper_size': raw});
-        expect(original.paperSize, BillSettings.paperA4);
+        expect(original.paperSize, raw);
         final edited = original
             .copyWith(invoiceTitle: 'Custom title')
             .copyWith(footerText: 'Custom footer');
-        expect(edited.paperSize, BillSettings.paperA4);
+        expect(edited.paperSize, raw);
         expect(edited.toMap()['paper_size'], raw);
         expect(edited.toMap().containsKey('preservedPaperSize'), isFalse);
         for (final explicit in [BillSettings.paperA4, BillSettings.paperA5]) {
@@ -31,7 +32,12 @@ void main() {
   test(
     'supported and malformed paper values retain the existing fallback policy',
     () {
-      for (final supported in [BillSettings.paperA4, BillSettings.paperA5]) {
+      for (final supported in [
+        BillSettings.paperA4,
+        BillSettings.paperA5,
+        BillSettings.paper80mm,
+        BillSettings.paper58mm,
+      ]) {
         final settings = BillSettings.fromMap({'paper_size': supported});
         expect(settings.paperSize, supported);
         expect(
@@ -39,7 +45,7 @@ void main() {
           supported,
         );
       }
-      for (final unknown in [null, '', 'unknown', '80MM', '80mm ', 80]) {
+      for (final unknown in [null, '', 'unknown', '80mm ', 80]) {
         final settings = BillSettings.fromMap({'paper_size': unknown});
         expect(settings.paperSize, BillSettings.paperA4);
         expect(
@@ -79,7 +85,7 @@ void main() {
           final baseline = await db.captureSettingsEditBaseline();
           final loaded = await db.getBillSettings();
           final series = await db.getDefaultInvoiceSeriesSettings();
-          expect(loaded.paperSize, BillSettings.paperA4);
+          expect(loaded.paperSize, raw);
           await db.saveInvoiceSettings(
             loaded.copyWith(
               invoiceTitle: 'Edited title',

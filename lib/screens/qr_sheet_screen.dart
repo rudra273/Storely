@@ -95,7 +95,7 @@ class _QrSheetScreenState extends State<QrSheetScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: navyAppBar(title: 'Product labels'),
+      appBar: navyAppBar(title: 'Item labels'),
       body: Column(
         children: [
           Padding(

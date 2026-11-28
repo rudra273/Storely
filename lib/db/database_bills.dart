@@ -768,6 +768,10 @@ mixin DatabaseBills {
             cgstAmountSnapshot: item.cgstAmountSnapshot,
             sgstAmountSnapshot: item.sgstAmountSnapshot,
             igstAmountSnapshot: item.igstAmountSnapshot,
+            itemTypeSnapshot: item.itemTypeSnapshot,
+            taxTypeSnapshot: item.taxTypeSnapshot,
+            cessPercentSnapshot: item.cessPercentSnapshot,
+            cessAmountSnapshot: item.cessAmountSnapshot,
             wasDirectPrice: item.wasDirectPrice,
             quantity: -qty,
             discountMode: item.discountMode,
@@ -824,6 +828,7 @@ mixin DatabaseBills {
           cgstAmount: totals.cgstAmount,
           sgstAmount: totals.sgstAmount,
           igstAmount: totals.igstAmount,
+          cessAmount: totals.cessAmount,
           roundOffAmount: totals.roundOffAmount,
           roundOffMode: original.roundOffMode,
           roundOffIncrement: original.roundOffIncrement,
@@ -859,7 +864,9 @@ mixin DatabaseBills {
           >[];
       for (final line in lines) {
         String? movementUuid;
-        if (line.productId != null && line.productUuid != null) {
+        if (line.productId != null &&
+            line.productUuid != null &&
+            !line.isService) {
           movementUuid = _newUuid();
           await _insertBillStockMovement(
             txn,
@@ -961,10 +968,7 @@ mixin DatabaseBills {
           reservedUuids: {
             'bills': [creditNoteUuid, if (isAdjust) original.uuid],
             'bill_items': [for (final line in lines) line.uuid],
-            'bill_payments': [
-              ?notePaymentUuid,
-              ?invoiceAdjustmentPaymentUuid,
-            ],
+            'bill_payments': [?notePaymentUuid, ?invoiceAdjustmentPaymentUuid],
             'stock_movements': [
               for (final entry in commandLines)
                 if (entry.movementUuid != null) entry.movementUuid!,
@@ -1246,7 +1250,13 @@ mixin DatabaseBills {
     return db.transaction((txn) async {
       final rows = await txn.query(
         'bills',
-        columns: ['uuid', 'shop_id', 'customer_id', 'total_amount', 'deleted_at'],
+        columns: [
+          'uuid',
+          'shop_id',
+          'customer_id',
+          'total_amount',
+          'deleted_at',
+        ],
         where: 'id = ?',
         whereArgs: [id],
         limit: 1,
@@ -1329,7 +1339,9 @@ mixin DatabaseBills {
       for (final row in itemRows) {
         final item = BillItem.fromMap(row);
         reservedItemUuids.add(item.uuid);
-        if (item.productId != null && item.productUuid != null) {
+        if (item.productId != null &&
+            item.productUuid != null &&
+            !item.isService) {
           final voidMovementUuid = 'void-$billUuid-${item.uuid}';
           reservedVoidMovementUuids.add(voidMovementUuid);
           await _insertBillStockMovement(
@@ -2039,7 +2051,8 @@ mixin DatabaseBills {
     required String billUuid,
     required DateTime createdAt,
   }) async {
-    if (item.quantity <= 0 || item.productId == null) return;
+    // Services never move stock: no ledger row, no stock check.
+    if (item.quantity <= 0 || item.productId == null || item.isService) return;
     final productRows = await executor.query(
       'products',
       columns: ['uuid'],

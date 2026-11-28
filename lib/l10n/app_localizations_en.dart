@@ -12,7 +12,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navHome => 'Home';
 
   @override
-  String get navProducts => 'Products';
+  String get navProducts => 'Items';
 
   @override
   String get navBills => 'Bills';
@@ -30,7 +30,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get scanAndBill => 'Scan & Bill';
 
   @override
-  String get addProduct => 'Add Product';
+  String get addProduct => 'Add Item';
 
   @override
   String get labels => 'Labels';
@@ -72,13 +72,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billsToday => 'Bills Today';
 
   @override
-  String get products => 'Products';
+  String get products => 'Items';
 
   @override
   String get searchItems => 'Search items...';
 
   @override
-  String get searchEverything => 'Search products, bills, customers...';
+  String get searchEverything => 'Search items, bills, customers...';
 
   @override
   String get notifications => 'Notifications';
@@ -89,7 +89,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get searchProducts => 'Search products';
+  String get searchProducts => 'Search items';
 
   @override
   String get addItems => 'Add items';
@@ -233,10 +233,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get waitingToSync => 'Saved on this phone · waiting to sync';
 
   @override
-  String get quickAddProduct => 'Quick add product';
+  String get quickAddProduct => 'Add item';
 
   @override
-  String get productNameReq => 'Product name *';
+  String get productNameReq => 'Item name *';
 
   @override
   String get sellingPriceReq => 'Selling price *';
@@ -299,7 +299,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get stockNotTracked => 'Stock not tracked';
 
   @override
-  String get noProductsYet => 'No products yet';
+  String get noProductsYet => 'No items yet';
 
   @override
   String get addProductsHint =>
@@ -309,7 +309,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get newPurchaseImport => 'New purchase / import';
 
   @override
-  String get addProductLower => 'Add product';
+  String get addProductLower => 'Add item';
 
   @override
   String get language => 'Language';
@@ -379,13 +379,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemAdded => 'Item added!';
 
   @override
-  String get addProductsFirst => 'Add products before manual billing';
+  String get addProductsFirst => 'Add items before manual billing';
 
   @override
-  String get noMatchingProducts => 'No matching products';
+  String get noMatchingProducts => 'No matching items';
 
   @override
-  String get pointCamera => 'Point camera at product QR code';
+  String get pointCamera => 'Point camera at item QR code';
 
   @override
   String get heldBills => 'Held bills';
@@ -464,7 +464,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get back => 'Back';
 
   @override
-  String get addSampleProducts => 'Add a few sample products';
+  String get addSampleProducts => 'Add a few sample items';
 
   @override
   String get sampleProductsHint =>

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
 import '../models/pricing.dart';
+import '../models/product.dart';
+import 'shared/tax_selector.dart';
 
 /// Consolidated GST & Pricing screen.
 ///
@@ -87,6 +89,16 @@ class _PricingScreenState extends State<PricingScreen> {
 
   Future<void> _saveDefaults() async {
     if (_savingDefaults || _settingsBaseline == null) return;
+    final gst = double.tryParse(_gstCtrl.text.trim());
+    if (_gstCtrl.text.trim().isNotEmpty &&
+        (gst == null || !isAllowedGstRate(gst))) {
+      _showError(
+        FormatException(
+          'Default GST must be one of ${allowedGstRates.map((r) => r == r.roundToDouble() ? r.toStringAsFixed(0) : r.toString()).join(', ')}%.',
+        ),
+      );
+      return;
+    }
     try {
       final updated = _settings.editedDefaults(
         gst: _gstCtrl.text,
@@ -125,17 +137,82 @@ class _PricingScreenState extends State<PricingScreen> {
       builder: (_) =>
           _CategoryPricingSheet(settings: current, global: _settings),
     );
-    if (result == null) return;
+    if (result == null || !mounted) return;
+    final taxChanged =
+        result.taxType != current.taxType ||
+        result.gstPercent != current.gstPercent ||
+        result.cessPercent != current.cessPercent;
     try {
-      await DatabaseHelper.instance.saveCategoryPricing(result);
-      await DatabaseHelper.instance.refreshAllProductSellingPrices();
+      final db = DatabaseHelper.instance;
+      await db.saveCategoryPricing(result);
+      var updatedItems = 0;
+      if (taxChanged && result.hasTaxDefault) {
+        final ids = await db.getProductIdsInCategory(name);
+        if (ids.isNotEmpty && mounted) {
+          final tax = TaxSelection(
+            taxType: result.taxType ?? TaxType.taxable,
+            gstPercent: result.gstPercent ?? _settings.defaultGstPercent,
+            cessPercent: result.cessPercent ?? 0,
+          ).normalised();
+          final apply = await _confirmApplyToItems(name, ids.length, tax);
+          if (apply == true) {
+            updatedItems = await db.bulkSetProductTax(
+              ids,
+              taxType: tax.taxType,
+              gstPercent: tax.gstPercent,
+              cessPercent: tax.cessPercent,
+            );
+          }
+        }
+      }
+      await db.refreshAllProductSellingPrices();
       if (!mounted) return;
       setState(() {
         _categoryPricing = {..._categoryPricing, name: result};
       });
+      if (updatedItems > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Updated tax on $updatedItems item${updatedItems == 1 ? '' : 's'} in $name',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       _showError(e);
     }
+  }
+
+  /// Category defaults only fill new items; existing items change only when
+  /// the owner says so here. Issued bills are never touched.
+  Future<bool?> _confirmApplyToItems(
+    String category,
+    int count,
+    TaxSelection tax,
+  ) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Also update existing items in this category?'),
+        content: Text(
+          'Set ${tax.label} on $count existing item${count == 1 ? '' : 's'} in $category. '
+          'Bills already issued keep their GST.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('category-tax-new-only'),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('New items only'),
+          ),
+          FilledButton(
+            key: const ValueKey('category-tax-update-items'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Update $count'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -281,9 +358,15 @@ class _CategoryPricingRow extends StatelessWidget {
     final p = pricing;
     if (p == null) return 'Using defaults';
     final parts = <String>[];
-    if (p.gstPercent != null) {
+    if (p.taxType != null && p.taxType != TaxType.taxable) {
+      parts.add(taxLabel(p.taxType!, null, 0));
+    } else if (p.gstPercent != null || (p.cessPercent ?? 0) > 0) {
       parts.add(
-        'GST ${p.gstPercent!.toStringAsFixed(p.gstPercent! % 1 == 0 ? 0 : 2)}%',
+        taxLabel(
+          TaxType.taxable,
+          p.gstPercent ?? global.defaultGstPercent,
+          p.cessPercent ?? 0,
+        ),
       );
     }
     if (p.profitMarginPercent != null) {
@@ -303,7 +386,7 @@ class _CategoryPricingRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasOverride =
         pricing != null &&
-        (pricing!.gstPercent != null ||
+        (pricing!.hasTaxDefault ||
             pricing!.profitMarginPercent != null ||
             pricing!.overheadCost != null);
     return AppCard(
@@ -396,16 +479,18 @@ class _CategoryPricingSheet extends StatefulWidget {
 }
 
 class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
-  late final TextEditingController _gstCtrl;
   late final TextEditingController _overheadCtrl;
   late final TextEditingController _marginCtrl;
+  late bool _hasTaxDefault = widget.settings.hasTaxDefault;
+  late TaxSelection _tax = TaxSelection(
+    taxType: widget.settings.taxType ?? TaxType.taxable,
+    gstPercent: widget.settings.gstPercent ?? widget.global.defaultGstPercent,
+    cessPercent: widget.settings.cessPercent ?? 0,
+  ).normalised();
 
   @override
   void initState() {
     super.initState();
-    _gstCtrl = TextEditingController(
-      text: widget.settings.gstPercent?.toStringAsFixed(2) ?? '',
-    );
     _overheadCtrl = TextEditingController(
       text: widget.settings.overheadCost?.toStringAsFixed(2) ?? '',
     );
@@ -416,20 +501,24 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
 
   @override
   void dispose() {
-    _gstCtrl.dispose();
     _overheadCtrl.dispose();
     _marginCtrl.dispose();
     super.dispose();
   }
 
   void _save() {
-    final gst = double.tryParse(_gstCtrl.text);
+    final tax = _tax.normalised();
+    final gst = _hasTaxDefault ? tax.gstPercent : null;
     final overhead = double.tryParse(_overheadCtrl.text);
     final margin = double.tryParse(_marginCtrl.text);
     // copyWith preserves directPriceToggle / manualPrice / hsn fields.
     final result = widget.settings.copyWith(
       gstPercent: gst,
       clearGstPercent: gst == null,
+      taxType: _hasTaxDefault ? tax.taxType : null,
+      clearTaxType: !_hasTaxDefault,
+      cessPercent: _hasTaxDefault ? tax.cessPercent : null,
+      clearCessPercent: !_hasTaxDefault,
       overheadCost: overhead,
       clearOverheadCost: overhead == null,
       profitMarginPercent: margin,
@@ -446,10 +535,24 @@ class _CategoryPricingSheetState extends State<_CategoryPricingSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _MoneyField(
-            controller: _gstCtrl,
-            label: 'GST % (blank = ${g.defaultGstPercent.toStringAsFixed(2)}%)',
+          SwitchListTile(
+            key: const ValueKey('category-tax-default'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Default tax for new items'),
+            subtitle: Text(
+              _hasTaxDefault
+                  ? 'New items in this category start with this GST and cess.'
+                  : 'Off: items use the shop default GST ${g.defaultGstPercent.toStringAsFixed(g.defaultGstPercent % 1 == 0 ? 0 : 2)}%.',
+              style: AppText.caption,
+            ),
+            value: _hasTaxDefault,
+            onChanged: (value) => setState(() => _hasTaxDefault = value),
           ),
+          if (_hasTaxDefault)
+            TaxSelector(
+              value: _tax,
+              onChanged: (value) => setState(() => _tax = value.normalised()),
+            ),
           const SizedBox(height: 10),
           _MoneyField(
             controller: _overheadCtrl,

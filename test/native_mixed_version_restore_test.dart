@@ -408,7 +408,7 @@ void main() {
       expect(indexCheck, hasLength(1));
 
       final versionCheck = await upgraded.rawQuery('PRAGMA user_version');
-      expect(versionCheck.single.values.first, 30);
+      expect(versionCheck.single.values.first, 31);
 
       final afterRows = await upgraded.query(
         'checkout_acceptances',

@@ -360,7 +360,9 @@ void main() {
       final apiFixture = File(
         '../storelyapi/tests/fixtures/sync_data_contract.json',
       );
-      if (await apiFixture.parent.exists()) {
+      // Copying into storelyapi is opt-in; the API owner syncs its fixture.
+      if (Platform.environment['STORELY_WRITE_API_FIXTURE'] == '1' &&
+          await apiFixture.parent.exists()) {
         await apiFixture.writeAsString(
           '${const JsonEncoder.withIndent('  ').convert(result)}\n',
         );

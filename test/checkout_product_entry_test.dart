@@ -465,7 +465,7 @@ void main() {
         await saveRawCheckoutEntries(tester);
 
         await submitSearchCode(tester, 'MISSING-CANCEL-101');
-        expect(find.text('Product not found'), findsOneWidget);
+        expect(find.text('Item not found'), findsOneWidget);
         await tapVisible(
           tester,
           find.byKey(const ValueKey('checkout-create-product')),
@@ -630,7 +630,7 @@ void main() {
         );
         await tapVisible(tester, find.byKey(const ValueKey('quick-add-save')));
         final zeroSnack = find.text(
-          'Product saved. Add stock before adding it to this bill.',
+          'Item saved. Add stock before adding it to this bill.',
         );
         await waitForFinder(tester, zeroSnack);
 
@@ -668,7 +668,7 @@ void main() {
           find.text('2 products match "Rice". Choose one from the list.'),
           findsOneWidget,
         );
-        expect(find.text('Product not found'), findsNothing);
+        expect(find.text('Item not found'), findsNothing);
         expect(
           find.byKey(const ValueKey('checkout-create-product')),
           findsNothing,
@@ -679,14 +679,14 @@ void main() {
           find.text('1 products match "Basmati". Choose one from the list.'),
           findsOneWidget,
         );
-        expect(find.text('Product not found'), findsNothing);
+        expect(find.text('Item not found'), findsNothing);
 
         await submitSearchCode(tester, '[1, 2, 3]');
         expect(
-          find.text('Product not found. Search the catalog for this label.'),
+          find.text('Item not found. Search the catalog for this label.'),
           findsOneWidget,
         );
-        expect(find.text('Product not found'), findsNothing);
+        expect(find.text('Item not found'), findsNothing);
 
         await unmountScanScreen(tester);
       },
@@ -706,7 +706,7 @@ void main() {
           ),
           findsOneWidget,
         );
-        expect(find.text('Product not found'), findsNothing);
+        expect(find.text('Item not found'), findsNothing);
         expect(
           find.byKey(const ValueKey('checkout-create-product')),
           findsNothing,
@@ -738,7 +738,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Product not found'), findsNothing);
+      expect(find.text('Item not found'), findsNothing);
 
       await submitSearchCode(tester, 'RICE-01');
       expect(
