@@ -6,11 +6,8 @@ part of '../products_screen.dart';
 /// purchase price, opening stock, low-stock alert and HSN/SAC live in the
 /// collapsible "More details" sections. Pops:
 /// - the saved [Product] when [checkoutScope] is set (billing quick add),
-/// - [ItemFormScreen.openPurchase] when the user asks for the purchase flow,
 /// - `true` after any other save.
 class ItemFormScreen extends StatefulWidget {
-  static const openPurchase = 'purchase';
-
   /// The item being edited; null creates a new item.
   final Product? product;
   final List<String> categories;
@@ -701,17 +698,6 @@ class _ItemFormScreenState extends State<ItemFormScreen> {
                   ),
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                if (!_isEditing && !inCheckout)
-                  TextButton.icon(
-                    onPressed: _saving
-                        ? null
-                        : () => Navigator.pop<Object?>(
-                            context,
-                            ItemFormScreen.openPurchase,
-                          ),
-                    icon: const Icon(Icons.add_shopping_cart_rounded),
-                    label: Text(context.l10n.fullPurchaseEntry),
-                  ),
               ],
             ),
           ),

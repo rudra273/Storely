@@ -5,6 +5,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:storely/db/database_helper.dart';
 import 'package:storely/models/product.dart';
 import 'package:storely/models/product_purchase.dart';
+import 'package:storely/l10n/app_localizations.dart';
+import 'package:storely/screens/products_screen.dart';
 import 'package:storely/screens/purchase_history_screen.dart';
 
 void main() {
@@ -77,6 +79,65 @@ void main() {
         findsOneWidget,
       );
       expect(find.byType(ListTile), findsNothing);
+      expect(find.text('New purchase'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Purchases owns New purchase while Items and Create Item stay decoupled',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: PurchaseHistoryScreen(),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      expect(find.text('Purchases'), findsOneWidget);
+      expect(find.text('New purchase'), findsOneWidget);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: ProductsScreen(),
+        ),
+      );
+      for (var i = 0; i < 10 && find.text('Add item').evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+        await tester.pump();
+      }
+      expect(find.text('Add purchase'), findsNothing);
+      expect(find.text('New purchase / import'), findsNothing);
+      expect(find.byTooltip('Purchase history'), findsNothing);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: ItemFormScreen(
+            categories: const [],
+            units: const ['pcs'],
+            scanBarcode: (_) async => null,
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 150)),
+      );
+      await tester.pump();
+      expect(find.textContaining('Full purchase entry'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
       expect(tester.takeException(), isNull);
     },
   );

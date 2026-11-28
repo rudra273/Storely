@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'purchase_history_screen.dart';
 import 'supplier_payments_screen.dart';
 import '../theme/app_theme.dart';
 import '../db/database_helper.dart';
@@ -133,7 +134,21 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
         final canManage = cloudState.isAdmin;
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: navyAppBar(title: 'Suppliers'),
+          appBar: navyAppBar(
+            title: 'Suppliers',
+            actions: [
+              if (canManage)
+                IconButton(
+                  tooltip: 'Purchases',
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const PurchaseHistoryScreen(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
           // Hidden when the list is empty — the centered empty-state button is
           // the single add action there. Shown once suppliers exist.
           floatingActionButton: canManage && _suppliers.isNotEmpty

@@ -27,6 +27,7 @@ import '../services/sync_status.dart';
 import '../main.dart' show AppGate;
 import 'about_app_screen.dart';
 import 'privacy_policy_screen.dart';
+import 'purchase_history_screen.dart';
 import 'suppliers_screen.dart';
 import 'store/audit_log_screen.dart';
 import 'store/bill_settings_screen.dart';
@@ -677,6 +678,23 @@ class _StoreScreenState extends State<StoreScreen> {
       onTap: _showCategoryManager,
     ),
     const SizedBox(height: AppSpacing.sm),
+    if (DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true) ...[
+      _StoreActionRow(
+        key: const ValueKey('store-purchases'),
+        title: 'Purchases',
+        subtitle: 'Purchase bills, returns & stock-in',
+        icon: Icons.add_shopping_cart_outlined,
+        onTap: () async {
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => const PurchaseHistoryScreen(),
+            ),
+          );
+          if (mounted) await _loadStoreData();
+        },
+      ),
+      const SizedBox(height: AppSpacing.sm),
+    ],
     _StoreActionRow(
       title: 'Suppliers',
       subtitle:

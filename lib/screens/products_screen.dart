@@ -20,7 +20,6 @@ import '../services/product_export.dart';
 import '../services/cloud_service.dart';
 import 'qr_sheet_screen.dart';
 import 'shared/tax_selector.dart';
-import 'purchase_history_screen.dart';
 import '../utils/money.dart';
 import '../services/home_search.dart';
 
@@ -62,6 +61,10 @@ Future<Product?> showCheckoutQuickAdd(
   );
   return result is Product ? result : null;
 }
+
+/// Opens the standalone New Purchase flow from Purchases (decoupled from Items).
+Future<void> openNewPurchaseFlow(BuildContext context) =>
+    _ProductsScreenState.openNewPurchaseFlow(context);
 
 class ProductsScreen extends StatefulWidget {
   final String? initialProductUuid;
@@ -371,19 +374,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     _applyFilter();
   }
 
-  List<Product> _matchingProducts(String query) {
-    final q = query.trim().toLowerCase();
-    if (q.length < 2) return const [];
-    return _allProducts
-        .where((product) {
-          return product.name.toLowerCase().contains(q) ||
-              (product.itemCode?.toLowerCase().contains(q) ?? false) ||
-              (product.barcode?.toLowerCase().contains(q) ?? false);
-        })
-        .take(5)
-        .toList();
-  }
-
   Future<void> _showBulkCategoryPicker() async {
     final selected = await _showBulkOptionPicker(
       title: 'Set Category',
@@ -480,6 +470,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 title: Text(addLabel),
                 onTap: () async {
                   final value = await _showAddOptionDialog(
+                    ctx,
                     title.replaceFirst('Set ', ''),
                   );
                   if (value == null || !mounted || !ctx.mounted) return;
@@ -634,12 +625,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   // ── CSV/Excel Import ──
   /// Picks a file and parses it into products. Shows a loading spinner over
-  /// [dialogContext] (defaults to the screen). Returns null on cancel/empty/
-  /// error (an error is surfaced via snackbar/dialog).
-  Future<ImportParseResult?> _pickAndParseImport([
-    BuildContext? dialogContext,
-  ]) async {
-    final ctx = dialogContext ?? context;
+  /// [dialogContext]. Returns null on cancel/empty/error.
+  static Future<ImportParseResult?> _pickAndParseImportFile(
+    BuildContext dialogContext,
+  ) async {
+    final ctx = dialogContext;
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['csv', 'txt', 'xlsx'],
@@ -681,14 +671,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
       }
       return parsed;
     } catch (e) {
-      if (ctx.mounted) Navigator.pop(ctx); // dismiss loading
-      _showImportError(e);
+      if (ctx.mounted) {
+        Navigator.pop(ctx); // dismiss loading
+        _showImportErrorDialog(ctx, e);
+      }
       return null;
     }
   }
 
-  void _showImportError(Object error) {
-    if (!mounted) return;
+  static void _showImportErrorDialog(BuildContext context, Object error) {
+    if (!context.mounted) return;
     final message = error.toString().replaceFirst('Exception: ', '');
     showDialog(
       context: context,
@@ -705,6 +697,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
       ),
     );
   }
+
+  void _showImportError(Object error) => _showImportErrorDialog(context, error);
 
   Future<void> _exportProducts(ExportFormat format) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -736,7 +730,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Future<void> _showQuickAdd() async {
-    final result = await Navigator.of(context).push<Object?>(
+    await Navigator.of(context).push<Object?>(
       MaterialPageRoute<Object?>(
         builder: (_) => ItemFormScreen(
           units: _units,
@@ -747,8 +741,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
     if (!mounted) return;
     await _loadProducts();
-    if (!mounted || result != ItemFormScreen.openPurchase) return;
-    await _showNewPurchaseFlow();
   }
 
   /// Opens the full-screen item form for [product].
@@ -799,7 +791,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     );
   }
 
-  Future<String?> _scanBarcodeValue(BuildContext sheetContext) {
+  static Future<String?> _scanBarcodeValue(BuildContext sheetContext) {
     var scanned = false;
     return showModalBottomSheet<String>(
       context: sheetContext,
@@ -1031,7 +1023,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
     _applyFilter();
   }
 
-  Future<String?> _showAddOptionDialog(String label) async {
+  static Future<String?> _showAddOptionDialog(
+    BuildContext context,
+    String label,
+  ) async {
     return showDialog<String>(
       context: context,
       builder: (ctx) => _AddOptionDialog(label: label),
@@ -1039,49 +1034,58 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   // Purchase drafts are device-local and resume automatically on this shop.
-  Future<void> _showNewPurchaseFlow() async {
+  static Future<void> openNewPurchaseFlow(BuildContext context) async {
     try {
-      final draft = await DatabaseHelper.instance.openPurchaseDraft();
-      if (!mounted) return;
+      final db = DatabaseHelper.instance;
+      final draft = await db.openPurchaseDraft();
+      final catalog = await db.getAllProducts();
+      final suppliers = await db.getSuppliers();
+      final categories = await db.getCategories();
+      final units = await db.getUnits();
+      if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => NewPurchaseScreen(
             initialDraft: draft,
-            catalog: List<Product>.from(_allProducts),
-            suppliers: List<String>.from(_suppliers),
+            catalog: List<Product>.from(catalog),
+            suppliers: List<String>.from(suppliers),
             scanBarcode: _scanBarcodeValue,
             addSupplier: () async {
-              final value = await _showAddOptionDialog('Supplier');
+              final value = await _showAddOptionDialog(context, 'Supplier');
               if (value == null) return null;
-              await DatabaseHelper.instance.addSupplierOption(value);
-              if (mounted) {
-                setState(() {
-                  if (!_suppliers.contains(value)) _suppliers.add(value);
-                });
-              }
+              await db.addSupplierOption(value);
+              if (!suppliers.contains(value)) suppliers.add(value);
               return value;
             },
-            addProduct: (names, date, supplier) => _showAddEditSheet(
+            addProduct: (names, date, supplier) => _showPurchaseLineEditor(
+              context,
+              catalog: catalog,
+              categories: categories,
+              units: units,
               stageOnly: true,
               initialPurchaseDate: date,
               initialSupplier: supplier,
               stagedNames: names,
             ),
-            editProduct: (line, names, date, supplier) => _showAddEditSheet(
-              product: line.product,
-              stageOnly: true,
-              initialPurchaseDate: date,
-              initialSupplier: supplier,
-              stagedNames: names,
-            ),
-            pickAndParseImport: _pickAndParseImport,
+            editProduct: (line, names, date, supplier) =>
+                _showPurchaseLineEditor(
+                  context,
+                  catalog: catalog,
+                  categories: categories,
+                  units: units,
+                  product: line.product,
+                  stageOnly: true,
+                  initialPurchaseDate: date,
+                  initialSupplier: supplier,
+                  stagedNames: names,
+                ),
+            pickAndParseImport: _pickAndParseImportFile,
             commitBatch: _commitPurchaseBatch,
           ),
         ),
       );
-      if (mounted) await _loadProducts();
     } catch (error) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(friendlyError(error))));
@@ -1091,7 +1095,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   /// Confirm the saved snapshot; draft revision and posting guard are checked
   /// inside the same SQLite transaction as stock and receipt creation.
-  Future<int> _commitPurchaseBatch(PurchaseComposerDraft draft) =>
+  static Future<int> _commitPurchaseBatch(PurchaseComposerDraft draft) =>
       DatabaseHelper.instance.commitProductPurchaseBatch(
         [
           for (final line in draft.lines)
@@ -1108,11 +1112,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
         composerDraft: draft,
       );
 
-  // ── Add/Edit Sheet ──
+  // ── Purchase Line Editor ──
   // When [stageOnly] is true, saving does NOT touch the DB; it returns a
   // [_PurchaseDraft] for the caller (the batch staging screen) to commit later.
   // [stagedNames] are names already in the current batch, blocked as duplicates.
-  Future<_PurchaseDraft?> _showAddEditSheet({
+  static Future<_PurchaseDraft?> _showPurchaseLineEditor(
+    BuildContext context, {
+    required List<Product> catalog,
+    required List<String> categories,
+    required List<String> units,
     Product? product,
     DateTime? initialPurchaseDate,
     String? initialSupplier,
@@ -1127,12 +1135,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     var selectedCategoryPricing = product?.category == null
         ? null
         : await db.getCategoryPricing(product!.category!);
-    if (widget.searchScope != null &&
-        (!(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true) ||
-            !await isCurrentHomeSearchScope(widget.searchScope!))) {
-      return null;
-    }
-    if (!mounted) return null;
+    if (!context.mounted) return null;
 
     final nameCtrl = TextEditingController(text: product?.name ?? '');
     final productCodeCtrl = TextEditingController(
@@ -1345,7 +1348,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         }
       }
       updateMarginFromDirectPrice();
-      if (mounted) setSheet(() {});
+      if (context.mounted) setSheet(() {});
     }
 
     purchaseCtrl.addListener(updateTotalFromPriceAndQty);
@@ -1521,7 +1524,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       );
                       hasUserEdited = false;
                       if (ctx.mounted) Navigator.pop(ctx);
-                      _loadProducts();
                       return;
                     }
                     final p = Product(
@@ -1594,10 +1596,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     }
                     hasUserEdited = false;
                     if (ctx.mounted) Navigator.pop(ctx);
-                    _loadProducts();
                   } catch (e) {
                     if (ctx.mounted) setSheet(() => isSaving = false);
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(
                         context,
                       ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
@@ -1700,15 +1701,32 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           ),
                                           if (!isEditing &&
                                               !hideProductSuggestions &&
-                                              _matchingProducts(
-                                                nameCtrl.text,
-                                              ).isNotEmpty) ...[
+                                              () {
+                                                final q = nameCtrl.text
+                                                    .trim()
+                                                    .toLowerCase();
+                                                if (q.isEmpty) return false;
+                                                return catalog.any(
+                                                  (p) => p.name
+                                                      .toLowerCase()
+                                                      .contains(q),
+                                                );
+                                              }()) ...[
                                             const SizedBox(height: 10),
                                             _ProductSuggestionList(
-                                              products: _matchingProducts(
-                                                nameCtrl.text,
-                                              ),
-                                              summaries: _purchaseSummaries,
+                                              products: catalog
+                                                  .where(
+                                                    (p) => p.name
+                                                        .toLowerCase()
+                                                        .contains(
+                                                          nameCtrl.text
+                                                              .trim()
+                                                              .toLowerCase(),
+                                                        ),
+                                                  )
+                                                  .take(4)
+                                                  .toList(),
+                                              summaries: const {},
                                               onSelected: (match) {
                                                 setSheet(() {
                                                   selectedExistingProduct =
@@ -1890,7 +1908,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           _OptionDropdown(
                                             label: 'Category',
                                             value: selectedCategory,
-                                            options: _categories,
+                                            options: categories,
                                             onChanged: (value) {
                                               markEdited();
                                               updateCategoryPricing(
@@ -1901,26 +1919,22 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             onAdd: () async {
                                               final value =
                                                   await _showAddOptionDialog(
+                                                    ctx,
                                                     'Category',
                                                   );
                                               if (value == null ||
-                                                  !mounted ||
                                                   !ctx.mounted) {
                                                 return;
                                               }
                                               await DatabaseHelper.instance
                                                   .addCategoryOption(value);
-                                              if (!mounted || !ctx.mounted) {
+                                              if (!ctx.mounted) {
                                                 return;
                                               }
-                                              setState(() {
-                                                if (!_categories.contains(
-                                                  value,
-                                                )) {
-                                                  _categories.add(value);
-                                                  _categories.sort();
-                                                }
-                                              });
+                                              if (!categories.contains(value)) {
+                                                categories.add(value);
+                                                categories.sort();
+                                              }
                                               await updateCategoryPricing(
                                                 value,
                                                 setSheet,
@@ -1971,7 +1985,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           _OptionDropdown(
                                             label: context.l10n.unit,
                                             value: selectedUnit,
-                                            options: _units,
+                                            options: units,
                                             noValueLabel: 'No Unit',
                                             addLabel: 'Add custom',
                                             onChanged: (value) {
@@ -1983,34 +1997,32 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                             onAdd: () async {
                                               final value =
                                                   await _showAddOptionDialog(
+                                                    ctx,
                                                     'Unit',
                                                   );
                                               if (value == null ||
-                                                  !mounted ||
                                                   !ctx.mounted) {
                                                 return;
                                               }
                                               await DatabaseHelper.instance
                                                   .addUnitOption(value);
-                                              if (!mounted || !ctx.mounted) {
+                                              if (!ctx.mounted) {
                                                 return;
                                               }
-                                              setState(() {
-                                                if (!_units.any(
-                                                  (unit) =>
-                                                      unit.toLowerCase() ==
-                                                      value.toLowerCase(),
-                                                )) {
-                                                  _units.add(value);
-                                                  _units.sort(
-                                                    (a, b) => a
-                                                        .toLowerCase()
-                                                        .compareTo(
-                                                          b.toLowerCase(),
-                                                        ),
-                                                  );
-                                                }
-                                              });
+                                              if (!units.any(
+                                                (unit) =>
+                                                    unit.toLowerCase() ==
+                                                    value.toLowerCase(),
+                                              )) {
+                                                units.add(value);
+                                                units.sort(
+                                                  (a, b) => a
+                                                      .toLowerCase()
+                                                      .compareTo(
+                                                        b.toLowerCase(),
+                                                      ),
+                                                );
+                                              }
                                               markEdited();
                                               setSheet(
                                                 () => selectedUnit = value,
@@ -2437,17 +2449,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 tooltip: 'Clear selection',
               ),
             ] else ...[
-              if (DatabaseHelper.instance.isAdminMutationAllowed?.call() ??
-                  true)
-                IconButton(
-                  tooltip: 'Purchase history',
-                  icon: const Icon(Icons.receipt_long_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const PurchaseHistoryScreen(),
-                    ),
-                  ),
-                ),
               if (_allProducts.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -2486,16 +2487,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
               const AppInfoAction(
                 title: 'Items Help',
                 intro:
-                    'Add an item quickly, or enter a purchase so stock, supplier, and date stay accurate.',
+                    'Manage your item catalog, pricing, GST/cess, barcodes, and opening stock here. Record supplier purchases from Store → Purchases.',
                 sections: [
-                  AppInfoSection(
-                    title: 'Add stock',
-                    points: [
-                      'Add purchase keeps a local draft with date, optional supplier and staged items.',
-                      'Choose an existing item to restock using quantity and cost; item pricing stays unchanged.',
-                      'Product import is inside New Purchase; it is not a separate catalog action.',
-                    ],
-                  ),
                   AppInfoSection(
                     title: 'Find and manage items',
                     points: [
@@ -2515,35 +2508,20 @@ class _ProductsScreenState extends State<ProductsScreen> {
             : _allProducts.isEmpty
             ? _buildEmpty()
             : _buildContent(),
-        floatingActionButton: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _selectionMode || !widget.isActiveMainTab
-              ? []
-              : [
-                  if (DatabaseHelper.instance.isAdminMutationAllowed?.call() ??
-                      true) ...[
-                    FloatingActionButton.extended(
-                      heroTag: 'purchase',
-                      onPressed: _showNewPurchaseFlow,
-                      icon: const Icon(Icons.add_shopping_cart_outlined),
-                      label: const Text('Add purchase'),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  TestKeys.tag(
-                    TestKeys.addProductBtn,
-                    FloatingActionButton.extended(
-                      heroTag: 'add',
-                      tooltip: 'Add item',
-                      onPressed: _showQuickAdd,
-                      icon: const Icon(Icons.add_rounded),
-                      label: Text(context.l10n.addProductLower),
-                    ),
-                    label: context.l10n.addProductLower,
-                    button: true,
-                  ),
-                ],
-        ),
+        floatingActionButton: _selectionMode || !widget.isActiveMainTab
+            ? null
+            : TestKeys.tag(
+                TestKeys.addProductBtn,
+                FloatingActionButton.extended(
+                  heroTag: 'add',
+                  tooltip: 'Add item',
+                  onPressed: _showQuickAdd,
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(context.l10n.addProductLower),
+                ),
+                label: context.l10n.addProductLower,
+                button: true,
+              ),
       ),
     );
   }
@@ -2555,11 +2533,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
       message: context.l10n.addProductsHint,
       actionLabel: context.l10n.addProductLower,
       onAction: _showQuickAdd,
-      secondaryAction: OutlinedButton.icon(
-        onPressed: _showNewPurchaseFlow,
-        icon: const Icon(Icons.add_shopping_cart_rounded),
-        label: Text(context.l10n.newPurchaseImport),
-      ),
     );
   }
 

@@ -7,6 +7,7 @@ import '../models/supplier.dart';
 import '../services/api/api_client.dart';
 import '../services/cloud_service.dart';
 import '../utils/decimal_text.dart';
+import 'products_screen.dart' show openNewPurchaseFlow;
 import 'supplier_payments_screen.dart';
 
 class PurchaseHistoryScreen extends StatefulWidget {
@@ -62,7 +63,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
         DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Purchase history'),
+        title: const Text('Purchases'),
         actions: [
           IconButton(
             tooltip: 'Refresh purchases',
@@ -75,6 +76,17 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
           ),
         ],
       ),
+      floatingActionButton: allowed
+          ? FloatingActionButton.extended(
+              heroTag: 'new-purchase',
+              onPressed: () async {
+                await openNewPurchaseFlow(context);
+                if (mounted) await _refresh();
+              },
+              icon: const Icon(Icons.add_shopping_cart_outlined),
+              label: const Text('New purchase'),
+            )
+          : null,
       body: !allowed
           ? const Center(
               child: Text(
