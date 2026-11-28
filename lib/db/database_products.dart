@@ -249,6 +249,109 @@ mixin DatabaseProducts {
     return result.isEmpty;
   }
 
+  /// True when no item (live or deleted) uses [code] as its item code or
+  /// barcode (case-insensitive), apart from [excludeId].
+  /// Deleted items count too, so a generated code never collides with a
+  /// code the cloud still remembers.
+  Future<bool> isItemCodeAvailable(String code, {int? excludeId}) async {
+    final value = _normaliseName(code);
+    if (value == null) return true;
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT id FROM products '
+      'WHERE (LOWER(product_code) = LOWER(?) OR LOWER(barcode) = LOWER(?))'
+      '${excludeId == null ? '' : ' AND id != ?'} LIMIT 1',
+      [value, value, ?excludeId],
+    );
+    return rows.isEmpty;
+  }
+
+  /// A new shop-unique numeric item code: an EAN-13 in the in-store range
+  /// (prefix 2) so it prints as a scannable label. Checked against every
+  /// live item's code and barcode in this shop.
+  Future<String> generateUniqueItemCode({Random? random}) async {
+    final rng = random ?? Random.secure();
+    for (var attempt = 0; attempt < 50; attempt++) {
+      final body = StringBuffer('2');
+      for (var i = 0; i < 11; i++) {
+        body.write(rng.nextInt(10));
+      }
+      final code = '$body${ean13CheckDigit(body.toString())}';
+      if (await isItemCodeAvailable(code)) return code;
+    }
+    throw StateError('Could not generate a unique item code. Try again.');
+  }
+
+  /// Sets GST taxability, GST % and cess % on [productIds] in one batch.
+  /// Only catalog rows change (and sync like any item edit); issued bills
+  /// keep their snapshots. Returns how many items changed.
+  Future<int> bulkSetProductTax(
+    Iterable<int> productIds, {
+    required String taxType,
+    required double gstPercent,
+    required double cessPercent,
+  }) async {
+    await _requireAdminMutation();
+    final ids = productIds.toSet();
+    if (ids.isEmpty) return 0;
+    final cleanType = TaxType.clean(taxType);
+    final taxable = cleanType == TaxType.taxable;
+    final db = await database;
+    final changed = await db.transaction((txn) async {
+      var count = 0;
+      for (final id in ids) {
+        final rows = await _queryProducts(
+          txn,
+          where: 'p.id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (rows.isEmpty) continue;
+        final current = Product.fromMap(rows.single);
+        final next = await _prepareProductForWrite(
+          txn,
+          current.copyWith(
+            taxType: cleanType,
+            gstPercent: taxable ? gstPercent : 0,
+            cessPercent: taxable ? cessPercent : 0,
+          ),
+        );
+        if (next.taxType == current.taxType &&
+            next.gstPercent == current.gstPercent &&
+            next.cessPercent == current.cessPercent) {
+          continue;
+        }
+        final map = next.toMap()
+          ..remove('id')
+          ..remove('quantity_cache');
+        await txn.update('products', map, where: 'id = ?', whereArgs: [id]);
+        await _logAuditEvent(
+          txn,
+          entityType: 'product',
+          entityUuid: next.uuid,
+          action: AuditAction.updated,
+          details:
+              '${next.name} · Tax: ${taxLabel(current.taxType, current.gstPercent, current.cessPercent)} → ${taxLabel(next.taxType, next.gstPercent, next.cessPercent)}',
+        );
+        count++;
+      }
+      return count;
+    });
+    if (changed > 0) notifyDatabaseChanged();
+    return changed;
+  }
+
+  /// IDs of live items in [category] (case-insensitive).
+  Future<List<int>> getProductIdsInCategory(String category) async {
+    final db = await database;
+    final rows = await _queryProducts(
+      db,
+      where: 'LOWER(c.name) = LOWER(?)',
+      whereArgs: [category],
+    );
+    return [for (final row in rows) row['id'] as int];
+  }
+
   Future<int> updateProduct(
     Product product, {
     DateTime? expectedUpdatedAt,
@@ -294,9 +397,7 @@ mixin DatabaseProducts {
       if (count > 0 && current != null) {
         final productChanges = <String>[];
         if (current.name != productToUpdate.name) {
-          productChanges.add(
-            'Name: ${current.name} → ${productToUpdate.name}',
-          );
+          productChanges.add('Name: ${current.name} → ${productToUpdate.name}');
         }
         if ((current.sellingPrice - productToUpdate.sellingPrice).abs() >
             0.005) {
@@ -1077,6 +1178,11 @@ mixin DatabaseProducts {
       commissionSnapshot: 0,
       gstSnapshot: outputGst,
       gstPercentSnapshot: breakdown.gstPercent,
+      itemTypeSnapshot: product.itemType,
+      taxTypeSnapshot: product.taxType,
+      cessPercentSnapshot: product.taxType == TaxType.taxable
+          ? product.cessPercent
+          : 0,
       taxableValueSnapshot: breakdown.preGstSellingPrice,
       cgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
       sgstAmountSnapshot: breakdown.gstRegistered ? outputGst / 2 : 0,
@@ -1498,7 +1604,11 @@ mixin DatabaseProducts {
     final categoryPricing = product.category == null
         ? null
         : await _getCategoryPricing(executor, product.category!);
+    final taxable = product.taxType == TaxType.taxable;
     final pricedProduct = product.copyWith(
+      // Exempt / non-GST items store GST 0% and cess 0% (API contract).
+      gstPercent: taxable ? null : 0,
+      cessPercent: taxable ? null : 0,
       uuid: product.uuid.isEmpty ? _newUuid() : product.uuid,
       shopId: product.shopId.isEmpty || product.shopId == _legacyShopId
           ? shopId

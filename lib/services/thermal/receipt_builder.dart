@@ -94,7 +94,9 @@ class ReceiptBuilder {
         gen.text(_latin(line), styles: const PosStyles(align: PosAlign.center)),
       );
     }
-    final hasGst = bill.cgstAmount + bill.sgstAmount + bill.igstAmount > 0.005;
+    final hasGst =
+        bill.cgstAmount + bill.sgstAmount + bill.igstAmount + bill.cessAmount >
+        0.005;
     final title = bill.isCreditNote
         ? 'CREDIT NOTE'
         : settings.documentTitle(
@@ -172,6 +174,7 @@ class ReceiptBuilder {
       if (bill.cgstAmount > 0) kv('CGST', money(bill.cgstAmount));
       if (bill.sgstAmount > 0) kv('SGST', money(bill.sgstAmount));
       if (bill.igstAmount > 0) kv('IGST', money(bill.igstAmount));
+      if (bill.cessAmount > 0) kv('Cess', money(bill.cessAmount));
     } else {
       kv('Subtotal', money(bill.subtotalAmount));
     }

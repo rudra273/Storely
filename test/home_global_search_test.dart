@@ -339,7 +339,7 @@ void main() {
       await tester.enterText(search, 'Secret Vendor');
       await ready(
         tester,
-        find.text('No matching products, bills, or customers'),
+        find.text('No matching items, bills, or customers'),
       );
       await tester.enterText(search, 'CODE-A');
       await ready(tester, find.text('Match Product A'));

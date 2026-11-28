@@ -7,6 +7,7 @@ class _BulkSelectionBar extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onSetCategory;
   final VoidCallback onSetSupplier;
+  final VoidCallback onSetGst;
   final VoidCallback onDelete;
 
   const _BulkSelectionBar({
@@ -16,6 +17,7 @@ class _BulkSelectionBar extends StatelessWidget {
     required this.onClear,
     required this.onSetCategory,
     required this.onSetSupplier,
+    required this.onSetGst,
     required this.onDelete,
   });
 
@@ -59,6 +61,13 @@ class _BulkSelectionBar extends StatelessWidget {
                     icon: Icons.category_outlined,
                     label: 'Category',
                     onTap: onSetCategory,
+                  ),
+                  const SizedBox(width: 8),
+                  _BulkActionChip(
+                    key: const ValueKey('bulk-set-gst'),
+                    icon: Icons.percent_rounded,
+                    label: 'Set GST',
+                    onTap: onSetGst,
                   ),
                   const SizedBox(width: 8),
                   _BulkActionChip(
@@ -126,6 +135,7 @@ class _BulkActionChip extends StatelessWidget {
   final bool destructive;
 
   const _BulkActionChip({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,

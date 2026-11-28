@@ -46,7 +46,7 @@ class _PurchaseProductPickerState extends State<PurchaseProductPicker> {
           child: Column(
             children: [
               Text(
-                'Choose product to restock',
+                'Choose item to restock',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
@@ -72,7 +72,7 @@ class _PurchaseProductPickerState extends State<PurchaseProductPicker> {
                 child: matches.isEmpty
                     ? const Center(
                         child: Text(
-                          'No tracked products match. Add a new product from the purchase.',
+                          'No tracked items match. Add a new item from the purchase.',
                         ),
                       )
                     : ListView.builder(
@@ -216,7 +216,7 @@ class _PurchaseRestockSheetState extends State<PurchaseRestockSheet> {
                     Text('Current stock: ${widget.product.quantityLabel}'),
                     Text(
                       widget.product.directPriceToggle
-                          ? 'Selling price and product settings stay unchanged.'
+                          ? 'Selling price and item settings stay unchanged.'
                           : 'Pricing rules stay unchanged. Automatic selling prices may update with stock cost.',
                     ),
                     const SizedBox(height: 16),

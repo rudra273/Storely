@@ -450,7 +450,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icons.inventory_2_outlined,
           color: AppColors.navy,
           title: product.name,
-          subtitle: 'Product · ${product.quantityLabel} in stock',
+          subtitle: 'Item · ${product.quantityLabel} in stock',
           trailing: rupees(product.sellingPrice, decimals: 0),
           onTap: () => _openSearchProduct(product, scope),
         ),
@@ -601,7 +601,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (products.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Add products first!')));
+      ).showSnackBar(const SnackBar(content: Text('Add items first!')));
       return;
     }
     Navigator.push(
@@ -696,7 +696,7 @@ class _HomeSearchResults extends StatelessWidget {
     if (results.isEmpty) {
       return _EmptyState(
         icon: Icons.search_off_rounded,
-        message: 'No matching products, bills, or customers',
+        message: 'No matching items, bills, or customers',
       );
     }
     return CompactListCard(
@@ -1108,7 +1108,7 @@ class _FirstInvoiceGuide extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         Text(
           hasProduct
-              ? 'Pick products, choose payment and review the invoice before saving.'
+              ? 'Pick items, choose payment and review the invoice before saving.'
               : 'Start with a name, selling price and opening stock. You can bill offline.',
           style: AppText.caption,
         ),
@@ -1122,7 +1122,7 @@ class _FirstInvoiceGuide extends StatelessWidget {
             hasProduct ? Icons.receipt_long_outlined : Icons.add_rounded,
           ),
           label: Text(
-            hasProduct ? 'Create your first invoice' : 'Add your first product',
+            hasProduct ? 'Create your first invoice' : 'Add your first item',
           ),
         ),
       ],

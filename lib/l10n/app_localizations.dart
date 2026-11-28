@@ -107,7 +107,7 @@ abstract class AppLocalizations {
   /// No description provided for @navProducts.
   ///
   /// In en, this message translates to:
-  /// **'Products'**
+  /// **'Items'**
   String get navProducts;
 
   /// No description provided for @navBills.
@@ -143,7 +143,7 @@ abstract class AppLocalizations {
   /// No description provided for @addProduct.
   ///
   /// In en, this message translates to:
-  /// **'Add Product'**
+  /// **'Add Item'**
   String get addProduct;
 
   /// No description provided for @labels.
@@ -227,7 +227,7 @@ abstract class AppLocalizations {
   /// No description provided for @products.
   ///
   /// In en, this message translates to:
-  /// **'Products'**
+  /// **'Items'**
   String get products;
 
   /// No description provided for @searchItems.
@@ -239,7 +239,7 @@ abstract class AppLocalizations {
   /// No description provided for @searchEverything.
   ///
   /// In en, this message translates to:
-  /// **'Search products, bills, customers...'**
+  /// **'Search items, bills, customers...'**
   String get searchEverything;
 
   /// No description provided for @notifications.
@@ -257,7 +257,7 @@ abstract class AppLocalizations {
   /// No description provided for @searchProducts.
   ///
   /// In en, this message translates to:
-  /// **'Search products'**
+  /// **'Search items'**
   String get searchProducts;
 
   /// No description provided for @addItems.
@@ -545,13 +545,13 @@ abstract class AppLocalizations {
   /// No description provided for @quickAddProduct.
   ///
   /// In en, this message translates to:
-  /// **'Quick add product'**
+  /// **'Add item'**
   String get quickAddProduct;
 
   /// No description provided for @productNameReq.
   ///
   /// In en, this message translates to:
-  /// **'Product name *'**
+  /// **'Item name *'**
   String get productNameReq;
 
   /// No description provided for @sellingPriceReq.
@@ -677,7 +677,7 @@ abstract class AppLocalizations {
   /// No description provided for @noProductsYet.
   ///
   /// In en, this message translates to:
-  /// **'No products yet'**
+  /// **'No items yet'**
   String get noProductsYet;
 
   /// No description provided for @addProductsHint.
@@ -695,7 +695,7 @@ abstract class AppLocalizations {
   /// No description provided for @addProductLower.
   ///
   /// In en, this message translates to:
-  /// **'Add product'**
+  /// **'Add item'**
   String get addProductLower;
 
   /// No description provided for @language.
@@ -815,19 +815,19 @@ abstract class AppLocalizations {
   /// No description provided for @addProductsFirst.
   ///
   /// In en, this message translates to:
-  /// **'Add products before manual billing'**
+  /// **'Add items before manual billing'**
   String get addProductsFirst;
 
   /// No description provided for @noMatchingProducts.
   ///
   /// In en, this message translates to:
-  /// **'No matching products'**
+  /// **'No matching items'**
   String get noMatchingProducts;
 
   /// No description provided for @pointCamera.
   ///
   /// In en, this message translates to:
-  /// **'Point camera at product QR code'**
+  /// **'Point camera at item QR code'**
   String get pointCamera;
 
   /// No description provided for @heldBills.
@@ -965,7 +965,7 @@ abstract class AppLocalizations {
   /// No description provided for @addSampleProducts.
   ///
   /// In en, this message translates to:
-  /// **'Add a few sample products'**
+  /// **'Add a few sample items'**
   String get addSampleProducts;
 
   /// No description provided for @sampleProductsHint.

@@ -19,6 +19,7 @@ import '../utils/csv_importer.dart';
 import '../services/product_export.dart';
 import '../services/cloud_service.dart';
 import 'qr_sheet_screen.dart';
+import 'shared/tax_selector.dart';
 import 'purchase_history_screen.dart';
 import '../utils/money.dart';
 import '../services/home_search.dart';
@@ -35,26 +36,31 @@ part 'products/product_import_widgets.dart';
 part 'products/stock_history_sheet.dart';
 part 'products/product_cards.dart';
 part 'products/stock_adjust_sheet.dart';
-part 'products/quick_add_sheet.dart';
+part 'products/item_form_screen.dart';
 
-/// Billing reuses the catalog's form but returns the committed UUID-bearing row.
+/// Billing reuses the full-screen item form but returns the committed
+/// UUID-bearing row.
 Future<Product?> showCheckoutQuickAdd(
   BuildContext context, {
   required String barcode,
   required CheckoutScope scope,
 }) async {
-  final units = await DatabaseHelper.instance.getUnits();
+  final db = DatabaseHelper.instance;
+  final units = await db.getUnits();
+  final categories = await db.getCategories();
   if (!context.mounted) return null;
-  return showModalBottomSheet<Product>(
-    context: context,
-    isScrollControlled: true,
-    builder: (_) => _QuickAddSheet(
-      units: units,
-      scanBarcode: (_) async => null,
-      initialBarcode: barcode,
-      checkoutScope: scope,
+  final result = await Navigator.of(context).push<Object?>(
+    MaterialPageRoute<Object?>(
+      builder: (_) => ItemFormScreen(
+        units: units,
+        categories: categories,
+        scanBarcode: (_) async => null,
+        initialBarcode: barcode,
+        checkoutScope: scope,
+      ),
     ),
   );
+  return result is Product ? result : null;
 }
 
 class ProductsScreen extends StatefulWidget {
@@ -207,7 +213,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
         if (!await isCurrentHomeSearchScope(widget.searchScope!) || !mounted) {
           return;
         }
-        await _showAddEditSheet(product: targets.single);
+        await _openItemEditor(targets.single);
       }
     } catch (e) {
       // Never leave the screen stuck on the loading spinner: clear the loading
@@ -219,7 +225,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not load products: $e'),
+          content: Text('Could not load items: $e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -341,7 +347,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Sort Products',
+                'Sort Items',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
@@ -517,7 +523,43 @@ class _ProductsScreenState extends State<ProductsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Updated ${selectedIds.length} products'),
+          content: Text('Updated ${selectedIds.length} items'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      _showImportError(e);
+    }
+  }
+
+  /// "Set GST" bulk action: one batch update of tax type, GST % and cess %
+  /// on the selected items. Issued bills keep their own GST snapshots.
+  Future<void> _showBulkGstPicker() async {
+    final selectedIds = Set<int>.from(_selectedProductIds);
+    if (selectedIds.isEmpty) return;
+    final selection = await showTaxSelectionSheet(
+      context,
+      title: 'Set GST',
+      subtitle:
+          'Applies to ${selectedIds.length} selected item${selectedIds.length == 1 ? '' : 's'}. '
+          'Bills already issued keep their GST.',
+    );
+    if (selection == null || !mounted) return;
+    try {
+      final changed = await DatabaseHelper.instance.bulkSetProductTax(
+        selectedIds,
+        taxType: selection.taxType,
+        gstPercent: selection.gstPercent,
+        cessPercent: selection.cessPercent,
+      );
+      _clearProductSelection();
+      await _loadProducts();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Set ${selection.label} on $changed item${changed == 1 ? '' : 's'}',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -538,9 +580,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
           color: AppColors.error,
           size: 34,
         ),
-        title: const Text('Delete Selected Products'),
+        title: const Text('Delete Selected Items'),
         content: Text(
-          'Remove ${selectedIds.length} selected product${selectedIds.length == 1 ? '' : 's'}?',
+          'Remove ${selectedIds.length} selected item${selectedIds.length == 1 ? '' : 's'}?',
         ),
         actions: [
           TextButton(
@@ -566,7 +608,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Deleted ${selectedIds.length} products'),
+          content: Text('Deleted ${selectedIds.length} items'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -632,9 +674,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
       if (!ctx.mounted) return null;
 
       if (parsed.products.isEmpty && parsed.errors.isEmpty) {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('No products found in file')),
-        );
+        ScaffoldMessenger.of(
+          ctx,
+        ).showSnackBar(const SnackBar(content: Text('No items found in file')));
         return null;
       }
       return parsed;
@@ -684,7 +726,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (_allProducts.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Add products first!')));
+      ).showSnackBar(const SnackBar(content: Text('Add items first!')));
       return;
     }
     Navigator.push(
@@ -694,16 +736,41 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Future<void> _showQuickAdd() async {
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) =>
-          _QuickAddSheet(units: _units, scanBarcode: _scanBarcodeValue),
+    final result = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute<Object?>(
+        builder: (_) => ItemFormScreen(
+          units: _units,
+          categories: _categories,
+          scanBarcode: _scanBarcodeValue,
+        ),
+      ),
     );
     if (!mounted) return;
     await _loadProducts();
-    if (!mounted || result != _QuickAddSheet.openPurchase) return;
+    if (!mounted || result != ItemFormScreen.openPurchase) return;
     await _showNewPurchaseFlow();
+  }
+
+  /// Opens the full-screen item form for [product].
+  Future<void> _openItemEditor(Product product) async {
+    if (widget.searchScope != null &&
+        (!(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true) ||
+            !await isCurrentHomeSearchScope(widget.searchScope!))) {
+      return;
+    }
+    if (!mounted) return;
+    final saved = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute<Object?>(
+        builder: (_) => ItemFormScreen(
+          product: product,
+          units: _units,
+          categories: _categories,
+          scanBarcode: _scanBarcodeValue,
+        ),
+      ),
+    );
+    if (!mounted || saved == null) return;
+    await _loadProducts();
   }
 
   Future<void> _adjustStock(Product product) async {
@@ -1286,107 +1353,190 @@ class _ProductsScreenState extends State<ProductsScreen> {
     manualPriceCtrl.addListener(updateMarginFromDirectPrice);
     updateMarginFromDirectPrice();
 
-    final draft =
-        await showModalBottomSheet<_PurchaseDraft>(
-          context: context,
-          isScrollControlled: true,
-          isDismissible: false,
-          enableDrag: false,
-          backgroundColor: Colors.transparent,
-          builder: (ctx) => StatefulBuilder(
-            builder: (ctx, setSheet) {
-              final preview = buildPreview();
-              Future<void> requestClose() async {
-                if (isSaving) return;
-                if (!hasUserEdited) {
-                  Navigator.pop(ctx);
-                  return;
-                }
-                final discard = await showDialog<bool>(
-                  context: ctx,
-                  builder: (dialogCtx) => AlertDialog(
-                    icon: const Icon(
-                      Icons.warning_amber_rounded,
-                      color: AppColors.amber,
-                      size: 34,
-                    ),
-                    title: const Text('Discard changes?'),
-                    content: const Text(
-                      'Your product changes have not been saved.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogCtx, false),
-                        child: const Text('Keep Editing'),
+    final draft = await Navigator.of(context)
+        .push<_PurchaseDraft>(
+          MaterialPageRoute<_PurchaseDraft>(
+            builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setSheet) {
+                final preview = buildPreview();
+                Future<void> requestClose() async {
+                  if (isSaving) return;
+                  if (!hasUserEdited) {
+                    Navigator.pop(ctx);
+                    return;
+                  }
+                  final discard = await showDialog<bool>(
+                    context: ctx,
+                    builder: (dialogCtx) => AlertDialog(
+                      icon: const Icon(
+                        Icons.warning_amber_rounded,
+                        color: AppColors.amber,
+                        size: 34,
                       ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(dialogCtx, true),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.error,
+                      title: const Text('Discard changes?'),
+                      content: const Text(
+                        'Your item changes have not been saved.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogCtx, false),
+                          child: const Text('Keep Editing'),
                         ),
-                        child: Text(context.l10n.discard),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dialogCtx, true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.error,
+                          ),
+                          child: Text(context.l10n.discard),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (discard == true && ctx.mounted) Navigator.pop(ctx);
+                }
+
+                Future<void> saveProduct() async {
+                  if (isSaving) return;
+                  if (!formKey.currentState!.validate()) return;
+                  final customGst = double.tryParse(gstCtrl.text);
+                  if (gstCustom &&
+                      (customGst == null || !isAllowedGstRate(customGst))) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'GST must be one of ${allowedGstRates.map(_formatQuantityInput).join(', ')}%.',
+                        ),
                       ),
-                    ],
-                  ),
-                );
-                if (discard == true && ctx.mounted) Navigator.pop(ctx);
-              }
-
-              Future<void> saveProduct() async {
-                if (isSaving) return;
-                if (!formKey.currentState!.validate()) return;
-                setSheet(() => isSaving = true);
-                try {
-                  final name = nameCtrl.text.trim();
-                  final restockingExisting =
-                      !isCatalogEditing && selectedExistingProduct != null;
-
-                  // In staging mode, block a name already in this batch (unless it's
-                  // the same staged item being edited).
-                  if (stageOnly && stagedNames.contains(name.toLowerCase())) {
-                    if (ctx.mounted) {
-                      setSheet(() {
-                        nameError = '"$name" is already in this batch';
-                        isSaving = false;
-                      });
-                    }
+                    );
                     return;
                   }
+                  setSheet(() => isSaving = true);
+                  try {
+                    final name = nameCtrl.text.trim();
+                    final restockingExisting =
+                        !isCatalogEditing && selectedExistingProduct != null;
 
-                  // For a normal (non-staging) save we hard-block duplicate catalog
-                  // names. In staging mode a catalog match just becomes a restock on
-                  // confirm, so we don't block it here.
-                  final unique =
-                      stageOnly ||
-                      restockingExisting ||
-                      await DatabaseHelper.instance.isNameUnique(
-                        name,
-                        excludeId: product?.id,
+                    // In staging mode, block a name already in this batch (unless it's
+                    // the same staged item being edited).
+                    if (stageOnly && stagedNames.contains(name.toLowerCase())) {
+                      if (ctx.mounted) {
+                        setSheet(() {
+                          nameError = '"$name" is already in this batch';
+                          isSaving = false;
+                        });
+                      }
+                      return;
+                    }
+
+                    // For a normal (non-staging) save we hard-block duplicate catalog
+                    // names. In staging mode a catalog match just becomes a restock on
+                    // confirm, so we don't block it here.
+                    final unique =
+                        stageOnly ||
+                        restockingExisting ||
+                        await DatabaseHelper.instance.isNameUnique(
+                          name,
+                          excludeId: product?.id,
+                        );
+                    if (!unique) {
+                      if (ctx.mounted) {
+                        setSheet(() {
+                          nameError = '"$name" already exists';
+                          isSaving = false;
+                        });
+                      }
+                      return;
+                    }
+                    if (restockingExisting) {
+                      final existing = selectedExistingProduct!;
+                      final updated = Product(
+                        id: existing.id,
+                        uuid: existing.uuid,
+                        shopId: existing.shopId,
+                        productCode: _optionalControllerText(productCodeCtrl),
+                        barcode: _optionalControllerText(barcodeCtrl),
+                        hsnCode: _optionalControllerText(hsnCtrl),
+                        name: name,
+                        categoryId: existing.categoryId,
+                        category: selectedCategory,
+                        supplierId: existing.supplierId,
+                        supplier: selectedSupplier,
+                        unitId: existing.unitId,
+                        unit: selectedUnit,
+                        mrp: preview.sellingPrice,
+                        purchasePrice: double.parse(purchaseCtrl.text),
+                        gstPercent: gstCustom
+                            ? double.tryParse(gstCtrl.text)
+                            : null,
+                        overheadCost: overheadCustom
+                            ? double.tryParse(overheadCtrl.text)
+                            : null,
+                        profitMarginPercent: marginCustom
+                            ? double.tryParse(marginCtrl.text)
+                            : null,
+                        directPriceToggle: directPrice,
+                        manualPrice: directPrice
+                            ? double.tryParse(manualPriceCtrl.text)
+                            : null,
+                        quantity: existing.quantity,
+                        itemType: existing.itemType,
+                        taxType: existing.taxType,
+                        cessPercent: existing.cessPercent,
+                        trackStock: trackStock,
+                        reorderLevel: double.tryParse(reorderCtrl.text.trim()),
+                        printedMrp: double.tryParse(mrpCtrl.text.trim()),
+                        purchaseBatchNo: batchCtrl.text.trim().isEmpty
+                            ? null
+                            : batchCtrl.text.trim(),
+                        purchaseExpiry: expiryDate,
+                        source: existing.source,
+                        createdAt: existing.createdAt,
+                        updatedAt: existing.updatedAt,
                       );
-                  if (!unique) {
-                    if (ctx.mounted) {
-                      setSheet(() {
-                        nameError = '"$name" already exists';
-                        isSaving = false;
-                      });
+                      final quantityAdded = double.parse(qtyCtrl.text);
+                      if (stageOnly) {
+                        hasUserEdited = false;
+                        if (ctx.mounted) {
+                          Navigator.pop(
+                            ctx,
+                            _PurchaseDraft(
+                              // Carry the added qty on the product so re-editing the
+                              // staged row shows it; restockProduct recomputes the
+                              // real total at commit, so this value is display-only.
+                              product: updated.copyWith(
+                                quantity: quantityAdded,
+                              ),
+                              quantityAdded: quantityAdded,
+                              restockTarget: existing,
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                      await DatabaseHelper.instance.restockProduct(
+                        updated,
+                        quantityAdded: quantityAdded,
+                        purchaseDate: purchaseDate,
+                        source: ProductSource.mobile,
+                      );
+                      hasUserEdited = false;
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      _loadProducts();
+                      return;
                     }
-                    return;
-                  }
-                  if (restockingExisting) {
-                    final existing = selectedExistingProduct!;
-                    final updated = Product(
-                      id: existing.id,
-                      uuid: existing.uuid,
-                      shopId: existing.shopId,
+                    final p = Product(
+                      id: product?.id,
+                      uuid: product?.uuid,
+                      shopId: product?.shopId ?? '',
                       productCode: _optionalControllerText(productCodeCtrl),
                       barcode: _optionalControllerText(barcodeCtrl),
                       hsnCode: _optionalControllerText(hsnCtrl),
                       name: name,
-                      categoryId: existing.categoryId,
+                      categoryId: product?.categoryId,
                       category: selectedCategory,
-                      supplierId: existing.supplierId,
+                      supplierId: product?.supplierId,
                       supplier: selectedSupplier,
-                      unitId: existing.unitId,
+                      unitId: product?.unitId,
                       unit: selectedUnit,
                       mrp: preview.sellingPrice,
                       purchasePrice: double.parse(purchaseCtrl.text),
@@ -1403,7 +1553,10 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       manualPrice: directPrice
                           ? double.tryParse(manualPriceCtrl.text)
                           : null,
-                      quantity: existing.quantity,
+                      quantity: double.parse(qtyCtrl.text),
+                      itemType: product?.itemType ?? ItemType.product,
+                      taxType: product?.taxType ?? TaxType.taxable,
+                      cessPercent: product?.cessPercent ?? 0,
                       trackStock: trackStock,
                       reorderLevel: double.tryParse(reorderCtrl.text.trim()),
                       printedMrp: double.tryParse(mrpCtrl.text.trim()),
@@ -1411,580 +1564,237 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           ? null
                           : batchCtrl.text.trim(),
                       purchaseExpiry: expiryDate,
-                      source: existing.source,
-                      createdAt: existing.createdAt,
-                      updatedAt: existing.updatedAt,
+                      source: product?.source ?? ProductSource.mobile,
+                      createdAt: product?.createdAt,
+                      updatedAt: product?.updatedAt,
                     );
-                    final quantityAdded = double.parse(qtyCtrl.text);
                     if (stageOnly) {
                       hasUserEdited = false;
                       if (ctx.mounted) {
                         Navigator.pop(
                           ctx,
                           _PurchaseDraft(
-                            // Carry the added qty on the product so re-editing the
-                            // staged row shows it; restockProduct recomputes the
-                            // real total at commit, so this value is display-only.
-                            product: updated.copyWith(quantity: quantityAdded),
-                            quantityAdded: quantityAdded,
-                            restockTarget: existing,
+                            product: p,
+                            quantityAdded: double.parse(qtyCtrl.text),
                           ),
                         );
                       }
                       return;
                     }
-                    await DatabaseHelper.instance.restockProduct(
-                      updated,
-                      quantityAdded: quantityAdded,
-                      purchaseDate: purchaseDate,
-                      source: ProductSource.mobile,
-                    );
+                    if (isEditing) {
+                      await DatabaseHelper.instance.updateProduct(
+                        p,
+                        expectedUpdatedAt: product.updatedAt,
+                      );
+                    } else {
+                      await DatabaseHelper.instance.insertProduct(
+                        p,
+                        purchaseDate: purchaseDate,
+                      );
+                    }
                     hasUserEdited = false;
                     if (ctx.mounted) Navigator.pop(ctx);
                     _loadProducts();
-                    return;
-                  }
-                  final p = Product(
-                    id: product?.id,
-                    uuid: product?.uuid,
-                    shopId: product?.shopId ?? '',
-                    productCode: _optionalControllerText(productCodeCtrl),
-                    barcode: _optionalControllerText(barcodeCtrl),
-                    hsnCode: _optionalControllerText(hsnCtrl),
-                    name: name,
-                    categoryId: product?.categoryId,
-                    category: selectedCategory,
-                    supplierId: product?.supplierId,
-                    supplier: selectedSupplier,
-                    unitId: product?.unitId,
-                    unit: selectedUnit,
-                    mrp: preview.sellingPrice,
-                    purchasePrice: double.parse(purchaseCtrl.text),
-                    gstPercent: gstCustom
-                        ? double.tryParse(gstCtrl.text)
-                        : null,
-                    overheadCost: overheadCustom
-                        ? double.tryParse(overheadCtrl.text)
-                        : null,
-                    profitMarginPercent: marginCustom
-                        ? double.tryParse(marginCtrl.text)
-                        : null,
-                    directPriceToggle: directPrice,
-                    manualPrice: directPrice
-                        ? double.tryParse(manualPriceCtrl.text)
-                        : null,
-                    quantity: double.parse(qtyCtrl.text),
-                    trackStock: trackStock,
-                    reorderLevel: double.tryParse(reorderCtrl.text.trim()),
-                    printedMrp: double.tryParse(mrpCtrl.text.trim()),
-                    purchaseBatchNo: batchCtrl.text.trim().isEmpty
-                        ? null
-                        : batchCtrl.text.trim(),
-                    purchaseExpiry: expiryDate,
-                    source: product?.source ?? ProductSource.mobile,
-                    createdAt: product?.createdAt,
-                    updatedAt: product?.updatedAt,
-                  );
-                  if (stageOnly) {
-                    hasUserEdited = false;
-                    if (ctx.mounted) {
-                      Navigator.pop(
-                        ctx,
-                        _PurchaseDraft(
-                          product: p,
-                          quantityAdded: double.parse(qtyCtrl.text),
-                        ),
-                      );
+                  } catch (e) {
+                    if (ctx.mounted) setSheet(() => isSaving = false);
+                    if (mounted) {
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                     }
-                    return;
-                  }
-                  if (isEditing) {
-                    await DatabaseHelper.instance.updateProduct(
-                      p,
-                      expectedUpdatedAt: product.updatedAt,
-                    );
-                  } else {
-                    await DatabaseHelper.instance.insertProduct(
-                      p,
-                      purchaseDate: purchaseDate,
-                    );
-                  }
-                  hasUserEdited = false;
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  _loadProducts();
-                } catch (e) {
-                  if (ctx.mounted) setSheet(() => isSaving = false);
-                  if (mounted) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                   }
                 }
-              }
 
-              return PopScope(
-                canPop: false,
-                onPopInvokedWithResult: (didPop, result) {
-                  if (!didPop) requestClose();
-                },
-                child: SafeArea(
-                  top: false,
-                  bottom: false,
-                  child: Container(
-                    width: double.infinity,
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceOf(ctx),
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(24),
-                      ),
-                      border: AppColors.isDark(ctx)
-                          ? Border.all(color: AppColors.borderOf(ctx))
-                          : null,
-                    ),
-                    padding: EdgeInsets.only(
-                      bottom: MediaQuery.of(ctx).viewInsets.bottom,
-                    ),
-                    child: Form(
-                      key: formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _ProductSheetHeader(
-                            title: isEditing ? 'Edit Product' : 'Add Product',
-                            onClose: requestClose,
-                          ),
-                          Flexible(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.fromLTRB(
-                                14,
-                                10,
-                                14,
-                                14,
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  if (!isEditing)
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 10,
-                                      ),
-                                      child: _PurchaseContextBar(
-                                        date: purchaseDate,
-                                        supplier: selectedSupplier,
-                                      ),
-                                    ),
-                                  _EditorSection(
-                                    title: 'Product Details',
-                                    icon: Icons.inventory_2_outlined,
-                                    trailing: selectedExistingProduct != null
-                                        ? const _ModePill(
-                                            label: 'Update stock',
-                                            active: true,
-                                          )
-                                        : _SourcePill(
-                                            label: isEditing
-                                                ? product.sourceLabel
-                                                : 'In-app',
-                                            imported:
-                                                product?.isImported ?? false,
-                                          ),
-                                    child: Column(
-                                      children: [
-                                        TestKeys.tag(
-                                          TestKeys.productNameField,
-                                          TextFormField(
-                                            controller: nameCtrl,
-                                            textCapitalization:
-                                                TextCapitalization.words,
-                                            decoration: InputDecoration(
-                                              labelText: 'Product Name *',
-                                              errorText: nameError,
-                                              prefixIcon: const Icon(
-                                                Icons.label_outline_rounded,
-                                                size: 18,
-                                              ),
-                                            ),
-                                            onChanged: (_) {
-                                              markEdited();
-                                              hideProductSuggestions = false;
-                                              if (!lockedRestockTarget) {
-                                                selectedExistingProduct = null;
-                                              }
-                                              if (nameError != null) {
-                                                setSheet(
-                                                  () => nameError = null,
-                                                );
-                                              } else {
-                                                setSheet(() {});
-                                              }
-                                            },
-                                            validator: (v) =>
-                                                (v == null || v.trim().isEmpty)
-                                                ? 'Required'
-                                                : null,
-                                          ),
-                                          textField: true,
+                return PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, result) {
+                    if (!didPop) requestClose();
+                  },
+                  // Full-screen page (M1.0): never a cramped bottom sheet.
+                  child: Scaffold(
+                    backgroundColor: AppColors.surfaceOf(ctx),
+                    body: SafeArea(
+                      child: Form(
+                        key: formKey,
+                        child: Column(
+                          children: [
+                            _ProductSheetHeader(
+                              title: isEditing ? 'Edit Item' : 'Add Item',
+                              onClose: requestClose,
+                            ),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.fromLTRB(
+                                  14,
+                                  10,
+                                  14,
+                                  14,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    if (!isEditing)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 10,
                                         ),
-                                        if (!isEditing &&
-                                            !hideProductSuggestions &&
-                                            _matchingProducts(
-                                              nameCtrl.text,
-                                            ).isNotEmpty) ...[
-                                          const SizedBox(height: 10),
-                                          _ProductSuggestionList(
-                                            products: _matchingProducts(
-                                              nameCtrl.text,
+                                        child: _PurchaseContextBar(
+                                          date: purchaseDate,
+                                          supplier: selectedSupplier,
+                                        ),
+                                      ),
+                                    _EditorSection(
+                                      title: 'Item Details',
+                                      icon: Icons.inventory_2_outlined,
+                                      trailing: selectedExistingProduct != null
+                                          ? const _ModePill(
+                                              label: 'Update stock',
+                                              active: true,
+                                            )
+                                          : _SourcePill(
+                                              label: isEditing
+                                                  ? product.sourceLabel
+                                                  : 'In-app',
+                                              imported:
+                                                  product?.isImported ?? false,
                                             ),
-                                            summaries: _purchaseSummaries,
-                                            onSelected: (match) {
-                                              setSheet(() {
-                                                selectedExistingProduct = match;
-                                                hideProductSuggestions = true;
-                                                nameError = null;
-                                                setFieldText(
-                                                  nameCtrl,
-                                                  match.name,
-                                                );
-                                                setFieldText(
-                                                  productCodeCtrl,
-                                                  match.productCode ?? '',
-                                                );
-                                                setFieldText(
-                                                  barcodeCtrl,
-                                                  match.barcode ?? '',
-                                                );
-                                                setFieldText(
-                                                  hsnCtrl,
-                                                  match.hsnCode ?? '',
-                                                );
-                                                setFieldText(
-                                                  purchaseCtrl,
-                                                  match.purchasePrice
-                                                      .toStringAsFixed(2),
-                                                );
-                                                setFieldText(
-                                                  manualPriceCtrl,
-                                                  (match.manualPrice ??
-                                                          match.mrp)
-                                                      .toStringAsFixed(2),
-                                                );
-                                                setFieldText(qtyCtrl, '');
-                                                setFieldText(totalCtrl, '');
-                                                selectedCategory =
-                                                    match.category;
-                                                selectedUnit = match.unit;
-                                                gstCustom =
-                                                    match.gstPercent != null;
-                                                overheadCustom =
-                                                    match.overheadCost != null;
-                                                marginCustom =
-                                                    match.profitMarginPercent !=
-                                                    null;
-                                                setFieldText(
-                                                  gstCtrl,
-                                                  (match.gstPercent ??
-                                                          effectiveGst())
-                                                      .toStringAsFixed(2),
-                                                );
-                                                setFieldText(
-                                                  overheadCtrl,
-                                                  (match.overheadCost ??
-                                                          effectiveOverhead())
-                                                      .toStringAsFixed(2),
-                                                );
-                                                setFieldText(
-                                                  marginCtrl,
-                                                  (match.profitMarginPercent ??
-                                                          effectiveMargin())
-                                                      .toStringAsFixed(2),
-                                                );
-                                                directPrice =
-                                                    match.directPriceToggle;
-                                              });
-                                            },
-                                          ),
-                                        ],
-                                        const SizedBox(height: 10),
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: TextFormField(
-                                                controller: productCodeCtrl,
-                                                textCapitalization:
-                                                    TextCapitalization
-                                                        .characters,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText: 'Product Code',
-                                                      prefixIcon: Icon(
-                                                        Icons.tag_outlined,
-                                                        size: 18,
-                                                      ),
-                                                    ),
-                                                onChanged: (_) {
-                                                  markEdited();
+                                      child: Column(
+                                        children: [
+                                          TestKeys.tag(
+                                            TestKeys.productNameField,
+                                            TextFormField(
+                                              controller: nameCtrl,
+                                              textCapitalization:
+                                                  TextCapitalization.words,
+                                              decoration: InputDecoration(
+                                                labelText: 'Item Name *',
+                                                errorText: nameError,
+                                                prefixIcon: const Icon(
+                                                  Icons.label_outline_rounded,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              onChanged: (_) {
+                                                markEdited();
+                                                hideProductSuggestions = false;
+                                                if (!lockedRestockTarget) {
+                                                  selectedExistingProduct =
+                                                      null;
+                                                }
+                                                if (nameError != null) {
+                                                  setSheet(
+                                                    () => nameError = null,
+                                                  );
+                                                } else {
                                                   setSheet(() {});
-                                                },
-                                              ),
+                                                }
+                                              },
+                                              validator: (v) =>
+                                                  (v == null ||
+                                                      v.trim().isEmpty)
+                                                  ? 'Required'
+                                                  : null,
                                             ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: TestKeys.tag(
-                                                TestKeys.productBarcodeField,
-                                                TextFormField(
-                                                  controller: barcodeCtrl,
-                                                  keyboardType:
-                                                      TextInputType.text,
-                                                  decoration: InputDecoration(
-                                                    labelText: 'Barcode',
-                                                    prefixIcon: const Icon(
-                                                      Icons
-                                                          .qr_code_scanner_rounded,
-                                                      size: 18,
-                                                    ),
-                                                    suffixIcon: IconButton(
-                                                      tooltip: context
-                                                          .l10n
-                                                          .scanBarcode,
-                                                      icon: const Icon(
-                                                        Icons
-                                                            .center_focus_strong,
-                                                      ),
-                                                      onPressed: () async {
-                                                        final value =
-                                                            await _scanBarcodeValue(
-                                                              ctx,
-                                                            );
-                                                        if (value == null ||
-                                                            !ctx.mounted) {
-                                                          return;
-                                                        }
-                                                        markEdited();
-                                                        setFieldText(
-                                                          barcodeCtrl,
-                                                          value,
-                                                        );
-                                                        setSheet(() {});
-                                                      },
-                                                    ),
-                                                  ),
-                                                  onTapOutside: (_) =>
-                                                      FocusScope.of(
-                                                        ctx,
-                                                      ).unfocus(),
-                                                  onChanged: (_) {
-                                                    markEdited();
-                                                    setSheet(() {});
-                                                  },
-                                                  onFieldSubmitted: (_) =>
-                                                      FocusScope.of(
-                                                        ctx,
-                                                      ).unfocus(),
-                                                ),
-                                                textField: true,
+                                            textField: true,
+                                          ),
+                                          if (!isEditing &&
+                                              !hideProductSuggestions &&
+                                              _matchingProducts(
+                                                nameCtrl.text,
+                                              ).isNotEmpty) ...[
+                                            const SizedBox(height: 10),
+                                            _ProductSuggestionList(
+                                              products: _matchingProducts(
+                                                nameCtrl.text,
                                               ),
+                                              summaries: _purchaseSummaries,
+                                              onSelected: (match) {
+                                                setSheet(() {
+                                                  selectedExistingProduct =
+                                                      match;
+                                                  hideProductSuggestions = true;
+                                                  nameError = null;
+                                                  setFieldText(
+                                                    nameCtrl,
+                                                    match.name,
+                                                  );
+                                                  setFieldText(
+                                                    productCodeCtrl,
+                                                    match.productCode ?? '',
+                                                  );
+                                                  setFieldText(
+                                                    barcodeCtrl,
+                                                    match.barcode ?? '',
+                                                  );
+                                                  setFieldText(
+                                                    hsnCtrl,
+                                                    match.hsnCode ?? '',
+                                                  );
+                                                  setFieldText(
+                                                    purchaseCtrl,
+                                                    match.purchasePrice
+                                                        .toStringAsFixed(2),
+                                                  );
+                                                  setFieldText(
+                                                    manualPriceCtrl,
+                                                    (match.manualPrice ??
+                                                            match.mrp)
+                                                        .toStringAsFixed(2),
+                                                  );
+                                                  setFieldText(qtyCtrl, '');
+                                                  setFieldText(totalCtrl, '');
+                                                  selectedCategory =
+                                                      match.category;
+                                                  selectedUnit = match.unit;
+                                                  gstCustom =
+                                                      match.gstPercent != null;
+                                                  overheadCustom =
+                                                      match.overheadCost !=
+                                                      null;
+                                                  marginCustom =
+                                                      match
+                                                          .profitMarginPercent !=
+                                                      null;
+                                                  setFieldText(
+                                                    gstCtrl,
+                                                    (match.gstPercent ??
+                                                            effectiveGst())
+                                                        .toStringAsFixed(2),
+                                                  );
+                                                  setFieldText(
+                                                    overheadCtrl,
+                                                    (match.overheadCost ??
+                                                            effectiveOverhead())
+                                                        .toStringAsFixed(2),
+                                                  );
+                                                  setFieldText(
+                                                    marginCtrl,
+                                                    (match.profitMarginPercent ??
+                                                            effectiveMargin())
+                                                        .toStringAsFixed(2),
+                                                  );
+                                                  directPrice =
+                                                      match.directPriceToggle;
+                                                });
+                                              },
                                             ),
                                           ],
-                                        ),
-                                        const SizedBox(height: 10),
-                                        TextFormField(
-                                          controller: hsnCtrl,
-                                          keyboardType: TextInputType.number,
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter
-                                                .digitsOnly,
-                                            LengthLimitingTextInputFormatter(8),
-                                          ],
-                                          decoration: const InputDecoration(
-                                            labelText: 'HSN/SAC Code',
-                                            prefixIcon: Icon(
-                                              Icons.numbers_outlined,
-                                              size: 18,
-                                            ),
-                                          ),
-                                          onChanged: (_) {
-                                            markEdited();
-                                            setSheet(() {});
-                                          },
-                                        ),
-                                        const SizedBox(height: 10),
-                                        _OptionDropdown(
-                                          label: 'Category',
-                                          value: selectedCategory,
-                                          options: _categories,
-                                          onChanged: (value) {
-                                            markEdited();
-                                            updateCategoryPricing(
-                                              value,
-                                              setSheet,
-                                            );
-                                          },
-                                          onAdd: () async {
-                                            final value =
-                                                await _showAddOptionDialog(
-                                                  'Category',
-                                                );
-                                            if (value == null ||
-                                                !mounted ||
-                                                !ctx.mounted) {
-                                              return;
-                                            }
-                                            await DatabaseHelper.instance
-                                                .addCategoryOption(value);
-                                            if (!mounted || !ctx.mounted) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              if (!_categories.contains(
-                                                value,
-                                              )) {
-                                                _categories.add(value);
-                                                _categories.sort();
-                                              }
-                                            });
-                                            await updateCategoryPricing(
-                                              value,
-                                              setSheet,
-                                            );
-                                            markEdited();
-                                          },
-                                        ),
-                                        const SizedBox(height: 10),
-                                        TestKeys.tag(
-                                          TestKeys.productCostField,
-                                          TextFormField(
-                                            controller: purchaseCtrl,
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.allow(
-                                                RegExp(r'^\d*\.?\d{0,2}'),
-                                              ),
-                                            ],
-                                            decoration: const InputDecoration(
-                                              labelText: 'Purchase Price *',
-                                              prefixText: '₹',
-                                              prefixIcon: Icon(
-                                                Icons.inventory_2_outlined,
-                                                size: 18,
-                                              ),
-                                            ),
-                                            onChanged: (_) {
-                                              markEdited();
-                                              updateMarginFromDirectPrice();
-                                              setSheet(() {});
-                                            },
-                                            validator: (value) {
-                                              final number = double.tryParse(
-                                                value ?? '',
-                                              );
-                                              return number == null ||
-                                                      number <= 0
-                                                  ? 'Invalid'
-                                                  : null;
-                                            },
-                                          ),
-                                          textField: true,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        _OptionDropdown(
-                                          label: context.l10n.unit,
-                                          value: selectedUnit,
-                                          options: _units,
-                                          noValueLabel: 'No Unit',
-                                          addLabel: 'Add custom',
-                                          onChanged: (value) {
-                                            markEdited();
-                                            setSheet(
-                                              () => selectedUnit = value,
-                                            );
-                                          },
-                                          onAdd: () async {
-                                            final value =
-                                                await _showAddOptionDialog(
-                                                  'Unit',
-                                                );
-                                            if (value == null ||
-                                                !mounted ||
-                                                !ctx.mounted) {
-                                              return;
-                                            }
-                                            await DatabaseHelper.instance
-                                                .addUnitOption(value);
-                                            if (!mounted || !ctx.mounted) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              if (!_units.any(
-                                                (unit) =>
-                                                    unit.toLowerCase() ==
-                                                    value.toLowerCase(),
-                                              )) {
-                                                _units.add(value);
-                                                _units.sort(
-                                                  (a, b) =>
-                                                      a.toLowerCase().compareTo(
-                                                        b.toLowerCase(),
-                                                      ),
-                                                );
-                                              }
-                                            });
-                                            markEdited();
-                                            setSheet(
-                                              () => selectedUnit = value,
-                                            );
-                                          },
-                                        ),
-                                        const SizedBox(height: 10),
-                                        _MrpAndBatchFields(
-                                          mrpController: mrpCtrl,
-                                          batchController: batchCtrl,
-                                          expiryDate: expiryDate,
-                                          showBatch: !isCatalogEditing,
-                                          onExpiryChanged: (value) {
-                                            markEdited();
-                                            setSheet(() => expiryDate = value);
-                                          },
-                                          onChanged: markEdited,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        _StockTrackingFields(
-                                          trackStock: trackStock,
-                                          reorderController: reorderCtrl,
-                                          onTrackStockChanged: (value) {
-                                            markEdited();
-                                            setSheet(() => trackStock = value);
-                                          },
-                                          onChanged: markEdited,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: TestKeys.tag(
-                                                TestKeys.productQtyField,
-                                                TextFormField(
-                                                  controller: qtyCtrl,
-                                                  keyboardType:
-                                                      const TextInputType.numberWithOptions(
-                                                        decimal: true,
-                                                      ),
-                                                  inputFormatters: [
-                                                    FilteringTextInputFormatter.allow(
-                                                      RegExp(r'^\d*\.?\d{0,3}'),
-                                                    ),
-                                                  ],
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextFormField(
+                                                  controller: productCodeCtrl,
+                                                  textCapitalization:
+                                                      TextCapitalization
+                                                          .characters,
                                                   decoration:
                                                       const InputDecoration(
-                                                        labelText: 'Quantity *',
+                                                        labelText:
+                                                            'Product Code',
                                                         prefixIcon: Icon(
-                                                          Icons.layers_outlined,
+                                                          Icons.tag_outlined,
                                                           size: 18,
                                                         ),
                                                       ),
@@ -1992,10 +1802,329 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                                     markEdited();
                                                     setSheet(() {});
                                                   },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: TestKeys.tag(
+                                                  TestKeys.productBarcodeField,
+                                                  TextFormField(
+                                                    controller: barcodeCtrl,
+                                                    keyboardType:
+                                                        TextInputType.text,
+                                                    decoration: InputDecoration(
+                                                      labelText: 'Barcode',
+                                                      prefixIcon: const Icon(
+                                                        Icons
+                                                            .qr_code_scanner_rounded,
+                                                        size: 18,
+                                                      ),
+                                                      suffixIcon: IconButton(
+                                                        tooltip: context
+                                                            .l10n
+                                                            .scanBarcode,
+                                                        icon: const Icon(
+                                                          Icons
+                                                              .center_focus_strong,
+                                                        ),
+                                                        onPressed: () async {
+                                                          final value =
+                                                              await _scanBarcodeValue(
+                                                                ctx,
+                                                              );
+                                                          if (value == null ||
+                                                              !ctx.mounted) {
+                                                            return;
+                                                          }
+                                                          markEdited();
+                                                          setFieldText(
+                                                            barcodeCtrl,
+                                                            value,
+                                                          );
+                                                          setSheet(() {});
+                                                        },
+                                                      ),
+                                                    ),
+                                                    onTapOutside: (_) =>
+                                                        FocusScope.of(
+                                                          ctx,
+                                                        ).unfocus(),
+                                                    onChanged: (_) {
+                                                      markEdited();
+                                                      setSheet(() {});
+                                                    },
+                                                    onFieldSubmitted: (_) =>
+                                                        FocusScope.of(
+                                                          ctx,
+                                                        ).unfocus(),
+                                                  ),
+                                                  textField: true,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+                                          TextFormField(
+                                            controller: hsnCtrl,
+                                            keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                              LengthLimitingTextInputFormatter(
+                                                8,
+                                              ),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: 'HSN/SAC Code',
+                                              prefixIcon: Icon(
+                                                Icons.numbers_outlined,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            onChanged: (_) {
+                                              markEdited();
+                                              setSheet(() {});
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _OptionDropdown(
+                                            label: 'Category',
+                                            value: selectedCategory,
+                                            options: _categories,
+                                            onChanged: (value) {
+                                              markEdited();
+                                              updateCategoryPricing(
+                                                value,
+                                                setSheet,
+                                              );
+                                            },
+                                            onAdd: () async {
+                                              final value =
+                                                  await _showAddOptionDialog(
+                                                    'Category',
+                                                  );
+                                              if (value == null ||
+                                                  !mounted ||
+                                                  !ctx.mounted) {
+                                                return;
+                                              }
+                                              await DatabaseHelper.instance
+                                                  .addCategoryOption(value);
+                                              if (!mounted || !ctx.mounted) {
+                                                return;
+                                              }
+                                              setState(() {
+                                                if (!_categories.contains(
+                                                  value,
+                                                )) {
+                                                  _categories.add(value);
+                                                  _categories.sort();
+                                                }
+                                              });
+                                              await updateCategoryPricing(
+                                                value,
+                                                setSheet,
+                                              );
+                                              markEdited();
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          TestKeys.tag(
+                                            TestKeys.productCostField,
+                                            TextFormField(
+                                              controller: purchaseCtrl,
+                                              keyboardType:
+                                                  const TextInputType.numberWithOptions(
+                                                    decimal: true,
+                                                  ),
+                                              inputFormatters: [
+                                                FilteringTextInputFormatter.allow(
+                                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                                ),
+                                              ],
+                                              decoration: const InputDecoration(
+                                                labelText: 'Purchase Price *',
+                                                prefixText: '₹',
+                                                prefixIcon: Icon(
+                                                  Icons.inventory_2_outlined,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              onChanged: (_) {
+                                                markEdited();
+                                                updateMarginFromDirectPrice();
+                                                setSheet(() {});
+                                              },
+                                              validator: (value) {
+                                                final number = double.tryParse(
+                                                  value ?? '',
+                                                );
+                                                return number == null ||
+                                                        number <= 0
+                                                    ? 'Invalid'
+                                                    : null;
+                                              },
+                                            ),
+                                            textField: true,
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _OptionDropdown(
+                                            label: context.l10n.unit,
+                                            value: selectedUnit,
+                                            options: _units,
+                                            noValueLabel: 'No Unit',
+                                            addLabel: 'Add custom',
+                                            onChanged: (value) {
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedUnit = value,
+                                              );
+                                            },
+                                            onAdd: () async {
+                                              final value =
+                                                  await _showAddOptionDialog(
+                                                    'Unit',
+                                                  );
+                                              if (value == null ||
+                                                  !mounted ||
+                                                  !ctx.mounted) {
+                                                return;
+                                              }
+                                              await DatabaseHelper.instance
+                                                  .addUnitOption(value);
+                                              if (!mounted || !ctx.mounted) {
+                                                return;
+                                              }
+                                              setState(() {
+                                                if (!_units.any(
+                                                  (unit) =>
+                                                      unit.toLowerCase() ==
+                                                      value.toLowerCase(),
+                                                )) {
+                                                  _units.add(value);
+                                                  _units.sort(
+                                                    (a, b) => a
+                                                        .toLowerCase()
+                                                        .compareTo(
+                                                          b.toLowerCase(),
+                                                        ),
+                                                  );
+                                                }
+                                              });
+                                              markEdited();
+                                              setSheet(
+                                                () => selectedUnit = value,
+                                              );
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _MrpAndBatchFields(
+                                            mrpController: mrpCtrl,
+                                            batchController: batchCtrl,
+                                            expiryDate: expiryDate,
+                                            showBatch: !isCatalogEditing,
+                                            onExpiryChanged: (value) {
+                                              markEdited();
+                                              setSheet(
+                                                () => expiryDate = value,
+                                              );
+                                            },
+                                            onChanged: markEdited,
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _StockTrackingFields(
+                                            trackStock: trackStock,
+                                            reorderController: reorderCtrl,
+                                            onTrackStockChanged: (value) {
+                                              markEdited();
+                                              setSheet(
+                                                () => trackStock = value,
+                                              );
+                                            },
+                                            onChanged: markEdited,
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TestKeys.tag(
+                                                  TestKeys.productQtyField,
+                                                  TextFormField(
+                                                    controller: qtyCtrl,
+                                                    keyboardType:
+                                                        const TextInputType.numberWithOptions(
+                                                          decimal: true,
+                                                        ),
+                                                    inputFormatters: [
+                                                      FilteringTextInputFormatter.allow(
+                                                        RegExp(
+                                                          r'^\d*\.?\d{0,3}',
+                                                        ),
+                                                      ),
+                                                    ],
+                                                    decoration:
+                                                        const InputDecoration(
+                                                          labelText:
+                                                              'Quantity *',
+                                                          prefixIcon: Icon(
+                                                            Icons
+                                                                .layers_outlined,
+                                                            size: 18,
+                                                          ),
+                                                        ),
+                                                    onChanged: (_) {
+                                                      markEdited();
+                                                      setSheet(() {});
+                                                    },
+                                                    validator: (v) {
+                                                      if (v == null ||
+                                                          v.isEmpty) {
+                                                        return 'Required';
+                                                      }
+                                                      final n = double.tryParse(
+                                                        v,
+                                                      );
+                                                      return (n == null ||
+                                                              n < 0)
+                                                          ? 'Invalid'
+                                                          : null;
+                                                    },
+                                                  ),
+                                                  textField: true,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: TextFormField(
+                                                  controller: totalCtrl,
+                                                  keyboardType:
+                                                      const TextInputType.numberWithOptions(
+                                                        decimal: true,
+                                                      ),
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter.allow(
+                                                      RegExp(r'^\d*\.?\d{0,2}'),
+                                                    ),
+                                                  ],
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        labelText:
+                                                            'Stock Value (₹)',
+                                                        prefixIcon: Icon(
+                                                          Icons
+                                                              .calculate_outlined,
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                  onChanged: (_) {
+                                                    markEdited();
+                                                    updateQtyFromTotal();
+                                                    setSheet(() {});
+                                                  },
                                                   validator: (v) {
                                                     if (v == null ||
                                                         v.isEmpty) {
-                                                      return 'Required';
+                                                      return null;
                                                     }
                                                     final n = double.tryParse(
                                                       v,
@@ -2005,231 +2134,195 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                                         : null;
                                                   },
                                                 ),
-                                                textField: true,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: TextFormField(
-                                                controller: totalCtrl,
-                                                keyboardType:
-                                                    const TextInputType.numberWithOptions(
-                                                      decimal: true,
-                                                    ),
-                                                inputFormatters: [
-                                                  FilteringTextInputFormatter.allow(
-                                                    RegExp(r'^\d*\.?\d{0,2}'),
-                                                  ),
-                                                ],
-                                                decoration:
-                                                    const InputDecoration(
-                                                      labelText:
-                                                          'Stock Value (₹)',
-                                                      prefixIcon: Icon(
-                                                        Icons
-                                                            .calculate_outlined,
-                                                        size: 18,
-                                                      ),
-                                                    ),
-                                                onChanged: (_) {
-                                                  markEdited();
-                                                  updateQtyFromTotal();
-                                                  setSheet(() {});
-                                                },
-                                                validator: (v) {
-                                                  if (v == null || v.isEmpty) {
-                                                    return null;
-                                                  }
-                                                  final n = double.tryParse(v);
-                                                  return (n == null || n < 0)
-                                                      ? 'Invalid'
-                                                      : null;
-                                                },
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _EditorSection(
-                                    title: 'Selling Price',
-                                    icon: Icons.payments_outlined,
-                                    trailing: _ModePill(
-                                      label: globalPricing.gstRegistered
-                                          ? 'GST registered'
-                                          : 'GST not registered',
-                                      active: globalPricing.gstRegistered,
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        _DirectPriceControl(
-                                          directPrice: directPrice,
-                                          onChanged: (value) => setSheet(() {
-                                            markEdited();
-                                            if (!directPrice) {
-                                              formulaMarginText =
-                                                  marginCtrl.text;
-                                            }
-                                            directPrice = value;
-                                            if (directPrice) {
-                                              updateMarginFromDirectPrice();
-                                            } else {
-                                              restoreFormulaMargin();
-                                            }
-                                          }),
-                                        ),
-                                        if (directPrice) ...[
-                                          const SizedBox(height: 10),
-                                          TextFormField(
-                                            controller: manualPriceCtrl,
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.allow(
-                                                RegExp(r'^\d*\.?\d{0,2}'),
                                               ),
                                             ],
-                                            decoration: const InputDecoration(
-                                              labelText:
-                                                  'Direct Selling Price *',
-                                              prefixText: '₹',
-                                              prefixIcon: Icon(
-                                                Icons.sell_outlined,
-                                                size: 18,
-                                              ),
-                                            ),
-                                            onChanged: (_) {
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _EditorSection(
+                                      title: 'Selling Price',
+                                      icon: Icons.payments_outlined,
+                                      trailing: _ModePill(
+                                        label: globalPricing.gstRegistered
+                                            ? 'GST registered'
+                                            : 'GST not registered',
+                                        active: globalPricing.gstRegistered,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          _DirectPriceControl(
+                                            directPrice: directPrice,
+                                            onChanged: (value) => setSheet(() {
                                               markEdited();
+                                              if (!directPrice) {
+                                                formulaMarginText =
+                                                    marginCtrl.text;
+                                              }
+                                              directPrice = value;
+                                              if (directPrice) {
+                                                updateMarginFromDirectPrice();
+                                              } else {
+                                                restoreFormulaMargin();
+                                              }
+                                            }),
+                                          ),
+                                          if (directPrice) ...[
+                                            const SizedBox(height: 10),
+                                            TextFormField(
+                                              controller: manualPriceCtrl,
+                                              keyboardType:
+                                                  const TextInputType.numberWithOptions(
+                                                    decimal: true,
+                                                  ),
+                                              inputFormatters: [
+                                                FilteringTextInputFormatter.allow(
+                                                  RegExp(r'^\d*\.?\d{0,2}'),
+                                                ),
+                                              ],
+                                              decoration: const InputDecoration(
+                                                labelText:
+                                                    'Direct Selling Price *',
+                                                prefixText: '₹',
+                                                prefixIcon: Icon(
+                                                  Icons.sell_outlined,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              onChanged: (_) {
+                                                markEdited();
+                                                updateMarginFromDirectPrice();
+                                                setSheet(() {});
+                                              },
+                                              validator: (value) {
+                                                final number = double.tryParse(
+                                                  value ?? '',
+                                                );
+                                                return number == null ||
+                                                        number <= 0
+                                                    ? 'Invalid'
+                                                    : null;
+                                              },
+                                            ),
+                                          ],
+                                          const SizedBox(height: 10),
+                                          _PricingCalculationTable(
+                                            gstCtrl: gstCtrl,
+                                            overheadCtrl: overheadCtrl,
+                                            marginCtrl: marginCtrl,
+                                            directPrice: directPrice,
+                                            expanded: priceBreakdownOpen,
+                                            breakdown: preview,
+                                            gstRegistered:
+                                                globalPricing.gstRegistered,
+                                            gstSourceHint: sourceHint(
+                                              gstCustom,
+                                              selectedCategoryPricing
+                                                      ?.gstPercent !=
+                                                  null,
+                                            ),
+                                            overheadSourceHint: sourceHint(
+                                              overheadCustom,
+                                              selectedCategoryPricing
+                                                      ?.overheadCost !=
+                                                  null,
+                                            ),
+                                            marginSourceHint: sourceHint(
+                                              directPrice || marginCustom,
+                                              selectedCategoryPricing
+                                                      ?.profitMarginPercent !=
+                                                  null,
+                                            ),
+                                            onGstChanged: () {
+                                              markEdited();
+                                              gstCustom = true;
                                               updateMarginFromDirectPrice();
                                               setSheet(() {});
                                             },
-                                            validator: (value) {
-                                              final number = double.tryParse(
-                                                value ?? '',
-                                              );
-                                              return number == null ||
-                                                      number <= 0
-                                                  ? 'Invalid'
-                                                  : null;
+                                            onOverheadChanged: () {
+                                              markEdited();
+                                              overheadCustom = true;
+                                              updateMarginFromDirectPrice();
+                                              setSheet(() {});
                                             },
+                                            onMarginChanged: () {
+                                              markEdited();
+                                              marginCustom = true;
+                                              formulaMarginText =
+                                                  marginCtrl.text;
+                                              updateMarginFromDirectPrice();
+                                              setSheet(() {});
+                                            },
+                                            onResetGst: () => setSheet(() {
+                                              markEdited();
+                                              gstCustom = false;
+                                              setFieldText(
+                                                gstCtrl,
+                                                effectiveGst().toStringAsFixed(
+                                                  2,
+                                                ),
+                                              );
+                                              updateMarginFromDirectPrice();
+                                            }),
+                                            onResetOverhead: () => setSheet(() {
+                                              markEdited();
+                                              overheadCustom = false;
+                                              setFieldText(
+                                                overheadCtrl,
+                                                effectiveOverhead()
+                                                    .toStringAsFixed(2),
+                                              );
+                                              updateMarginFromDirectPrice();
+                                            }),
+                                            onResetMargin: directPrice
+                                                ? null
+                                                : () => setSheet(() {
+                                                    markEdited();
+                                                    marginCustom = false;
+                                                    formulaMarginText =
+                                                        effectiveMargin()
+                                                            .toStringAsFixed(2);
+                                                    setFieldText(
+                                                      marginCtrl,
+                                                      formulaMarginText,
+                                                    );
+                                                    updateMarginFromDirectPrice();
+                                                  }),
+                                            onToggleExpanded: () => setSheet(
+                                              () => priceBreakdownOpen =
+                                                  !priceBreakdownOpen,
+                                            ),
                                           ),
                                         ],
-                                        const SizedBox(height: 10),
-                                        _PricingCalculationTable(
-                                          gstCtrl: gstCtrl,
-                                          overheadCtrl: overheadCtrl,
-                                          marginCtrl: marginCtrl,
-                                          directPrice: directPrice,
-                                          expanded: priceBreakdownOpen,
-                                          breakdown: preview,
-                                          gstRegistered:
-                                              globalPricing.gstRegistered,
-                                          gstSourceHint: sourceHint(
-                                            gstCustom,
-                                            selectedCategoryPricing
-                                                    ?.gstPercent !=
-                                                null,
-                                          ),
-                                          overheadSourceHint: sourceHint(
-                                            overheadCustom,
-                                            selectedCategoryPricing
-                                                    ?.overheadCost !=
-                                                null,
-                                          ),
-                                          marginSourceHint: sourceHint(
-                                            directPrice || marginCustom,
-                                            selectedCategoryPricing
-                                                    ?.profitMarginPercent !=
-                                                null,
-                                          ),
-                                          onGstChanged: () {
-                                            markEdited();
-                                            gstCustom = true;
-                                            updateMarginFromDirectPrice();
-                                            setSheet(() {});
-                                          },
-                                          onOverheadChanged: () {
-                                            markEdited();
-                                            overheadCustom = true;
-                                            updateMarginFromDirectPrice();
-                                            setSheet(() {});
-                                          },
-                                          onMarginChanged: () {
-                                            markEdited();
-                                            marginCustom = true;
-                                            formulaMarginText = marginCtrl.text;
-                                            updateMarginFromDirectPrice();
-                                            setSheet(() {});
-                                          },
-                                          onResetGst: () => setSheet(() {
-                                            markEdited();
-                                            gstCustom = false;
-                                            setFieldText(
-                                              gstCtrl,
-                                              effectiveGst().toStringAsFixed(2),
-                                            );
-                                            updateMarginFromDirectPrice();
-                                          }),
-                                          onResetOverhead: () => setSheet(() {
-                                            markEdited();
-                                            overheadCustom = false;
-                                            setFieldText(
-                                              overheadCtrl,
-                                              effectiveOverhead()
-                                                  .toStringAsFixed(2),
-                                            );
-                                            updateMarginFromDirectPrice();
-                                          }),
-                                          onResetMargin: directPrice
-                                              ? null
-                                              : () => setSheet(() {
-                                                  markEdited();
-                                                  marginCustom = false;
-                                                  formulaMarginText =
-                                                      effectiveMargin()
-                                                          .toStringAsFixed(2);
-                                                  setFieldText(
-                                                    marginCtrl,
-                                                    formulaMarginText,
-                                                  );
-                                                  updateMarginFromDirectPrice();
-                                                }),
-                                          onToggleExpanded: () => setSheet(
-                                            () => priceBreakdownOpen =
-                                                !priceBreakdownOpen,
-                                          ),
-                                        ),
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          TestKeys.tag(
-                            TestKeys.saveBtn,
-                            _ProductSheetActionBar(
-                              sellingPrice: preview.sellingPrice,
-                              unit: selectedUnit,
-                              isEditing: isEditing,
-                              isSaving: isSaving,
-                              onPressed: saveProduct,
+                            TestKeys.tag(
+                              TestKeys.saveBtn,
+                              _ProductSheetActionBar(
+                                sellingPrice: preview.sellingPrice,
+                                unit: selectedUnit,
+                                isEditing: isEditing,
+                                isSaving: isSaving,
+                                onPressed: saveProduct,
+                              ),
+                              button: true,
                             ),
-                            button: true,
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ).whenComplete(() {
+        )
+        .whenComplete(() {
           Future<void>.delayed(const Duration(milliseconds: 350), () {
             purchaseCtrl.removeListener(updateTotalFromPriceAndQty);
             qtyCtrl.removeListener(updateTotalFromPriceAndQty);
@@ -2256,7 +2349,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.delete_outline, color: AppColors.error, size: 32),
-        title: const Text('Delete Product'),
+        title: const Text('Delete Item'),
         content: Text('Remove "${product.name}"?'),
         actions: [
           TextButton(
@@ -2282,7 +2375,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (widget.searchScope != null &&
         !(DatabaseHelper.instance.isAdminMutationAllowed?.call() ?? true)) {
       return Scaffold(
-        appBar: navyAppBar(title: 'Product'),
+        appBar: navyAppBar(title: 'Item'),
         body: const Center(child: Text('Return to Home and search again.')),
       );
     }
@@ -2322,7 +2415,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     cursorColor: AppColors.amber,
                     decoration: InputDecoration(
                       isCollapsed: true,
-                      hintText: 'Search products...',
+                      hintText: 'Search items...',
                       hintStyle: TextStyle(
                         color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 16,
@@ -2372,11 +2465,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
               IconButton(
                 onPressed: _openQrSheet,
                 icon: const Icon(Icons.qr_code_2),
-                tooltip: 'Product labels',
+                tooltip: 'Item labels',
               ),
               if (_allProducts.isNotEmpty)
                 PopupMenuButton<ExportFormat>(
-                  tooltip: 'Export products',
+                  tooltip: 'Export items',
                   icon: const Icon(Icons.file_download_outlined),
                   onSelected: _exportProducts,
                   itemBuilder: (_) => const [
@@ -2391,24 +2484,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   ],
                 ),
               const AppInfoAction(
-                title: 'Products Help',
+                title: 'Items Help',
                 intro:
-                    'Products are managed through purchases so stock, supplier, and date stay accurate.',
+                    'Add an item quickly, or enter a purchase so stock, supplier, and date stay accurate.',
                 sections: [
                   AppInfoSection(
                     title: 'Add stock',
                     points: [
                       'Add purchase keeps a local draft with date, optional supplier and staged items.',
-                      'Choose an existing product to restock using quantity and cost; product pricing stays unchanged.',
+                      'Choose an existing item to restock using quantity and cost; item pricing stays unchanged.',
                       'Product import is inside New Purchase; it is not a separate catalog action.',
                     ],
                   ),
                   AppInfoSection(
-                    title: 'Find and manage products',
+                    title: 'Find and manage items',
                     points: [
-                      'Search by name, product code, barcode, category, unit, supplier, or source.',
-                      'Long press products to select multiple rows for bulk category, supplier, or delete actions.',
-                      'Product labels opens QR or barcode sheets for printing.',
+                      'Search by name, item code, barcode, category, unit, supplier, or source.',
+                      'Long press items to select multiple rows for bulk category, GST, supplier, or delete actions.',
+                      'Item labels opens QR or barcode sheets for printing.',
                     ],
                   ),
                 ],
@@ -2441,7 +2534,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     TestKeys.addProductBtn,
                     FloatingActionButton.extended(
                       heroTag: 'add',
-                      tooltip: 'Add product',
+                      tooltip: 'Add item',
                       onPressed: _showQuickAdd,
                       icon: const Icon(Icons.add_rounded),
                       label: Text(context.l10n.addProductLower),
@@ -2601,14 +2694,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
             onClear: _clearProductSelection,
             onSetCategory: _showBulkCategoryPicker,
             onSetSupplier: _showBulkSupplierPicker,
+            onSetGst: _showBulkGstPicker,
             onDelete: _deleteSelectedProducts,
           ),
         // ── Product List ──
         Expanded(
           child: _filtered.isEmpty
-              ? Center(
-                  child: Text('No matching products', style: AppText.caption),
-                )
+              ? Center(child: Text('No matching items', style: AppText.caption))
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
@@ -2631,7 +2723,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           _selectedProductIds.contains(_filtered[i].id),
                       onTap: () => _selectionMode
                           ? _toggleProductSelection(_filtered[i])
-                          : _showAddEditSheet(product: _filtered[i]),
+                          : _openItemEditor(_filtered[i]),
                       onLongPress: () => _toggleProductSelection(_filtered[i]),
                       onHistory: () => _showStockHistory(_filtered[i]),
                       onAdjust: () => _adjustStock(_filtered[i]),

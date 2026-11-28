@@ -6,7 +6,7 @@ mixin DatabaseSchema {
     final path = join(dbPath, filePath);
     final db = await openDatabase(
       path,
-      version: 30,
+      version: 31,
       onConfigure: _configureDB,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -52,6 +52,7 @@ mixin DatabaseSchema {
     await _ensureV22Columns(db);
     await _ensureV29Columns(db);
     await _ensureV30Columns(db);
+    await _ensureV31Columns(db);
     await _seedBaseData(db);
     await _runOneShotMigrations(db);
   }
@@ -70,6 +71,7 @@ mixin DatabaseSchema {
     await _ensureV22Columns(db);
     await _ensureV29Columns(db);
     await _ensureV30Columns(db);
+    await _ensureV31Columns(db);
     await _runOneShotMigrations(db);
     await _ensureSyncTracking(db);
   }
@@ -513,6 +515,8 @@ mixin DatabaseSchema {
         hsn_type TEXT,
         hsn_description TEXT,
         gst_percent REAL,
+        tax_type TEXT,
+        cess_percent REAL,
         overhead_cost REAL,
         profit_margin_percent REAL,
         commission_percent REAL,
@@ -608,6 +612,9 @@ mixin DatabaseSchema {
         selling_price REAL NOT NULL DEFAULT 0,
         purchase_price REAL NOT NULL DEFAULT 0,
         gst_percent REAL,
+        item_type TEXT NOT NULL DEFAULT 'product',
+        tax_type TEXT NOT NULL DEFAULT 'taxable',
+        cess_percent REAL NOT NULL DEFAULT 0,
         overhead_cost REAL,
         profit_margin_percent REAL,
         direct_price_toggle INTEGER NOT NULL DEFAULT 0,
@@ -720,6 +727,7 @@ mixin DatabaseSchema {
         cgst_amount REAL NOT NULL DEFAULT 0,
         sgst_amount REAL NOT NULL DEFAULT 0,
         igst_amount REAL NOT NULL DEFAULT 0,
+        cess_amount REAL NOT NULL DEFAULT 0,
         round_off_amount REAL NOT NULL DEFAULT 0,
         round_off_mode TEXT NOT NULL DEFAULT 'nearest',
         round_off_increment REAL NOT NULL DEFAULT 1.0,
@@ -769,6 +777,10 @@ mixin DatabaseSchema {
         cgst_amount_snapshot REAL NOT NULL DEFAULT 0,
         sgst_amount_snapshot REAL NOT NULL DEFAULT 0,
         igst_amount_snapshot REAL NOT NULL DEFAULT 0,
+        item_type_snapshot TEXT NOT NULL DEFAULT 'product',
+        tax_type_snapshot TEXT NOT NULL DEFAULT 'taxable',
+        cess_percent_snapshot REAL NOT NULL DEFAULT 0,
+        cess_amount_snapshot REAL NOT NULL DEFAULT 0,
         was_direct_price INTEGER NOT NULL DEFAULT 1,
         quantity REAL NOT NULL DEFAULT 0,
         discount_mode TEXT NOT NULL DEFAULT 'percent',
@@ -1137,6 +1149,29 @@ mixin DatabaseSchema {
   /// v30 billing metadata: optional notes on bills.
   Future<void> _ensureV30Columns(DatabaseExecutor executor) async {
     await _ensureColumns(executor, 'bills', {'notes': 'TEXT'});
+  }
+
+  /// v31 items: product/service type, GST taxability and cess on items,
+  /// category tax defaults, and cess snapshots on bills and bill lines.
+  Future<void> _ensureV31Columns(DatabaseExecutor executor) async {
+    await _ensureColumns(executor, 'products', {
+      'item_type': "TEXT NOT NULL DEFAULT 'product'",
+      'tax_type': "TEXT NOT NULL DEFAULT 'taxable'",
+      'cess_percent': 'REAL NOT NULL DEFAULT 0',
+    });
+    await _ensureColumns(executor, 'categories', {
+      'tax_type': 'TEXT',
+      'cess_percent': 'REAL',
+    });
+    await _ensureColumns(executor, 'bills', {
+      'cess_amount': 'REAL NOT NULL DEFAULT 0',
+    });
+    await _ensureColumns(executor, 'bill_items', {
+      'item_type_snapshot': "TEXT NOT NULL DEFAULT 'product'",
+      'tax_type_snapshot': "TEXT NOT NULL DEFAULT 'taxable'",
+      'cess_percent_snapshot': 'REAL NOT NULL DEFAULT 0',
+      'cess_amount_snapshot': 'REAL NOT NULL DEFAULT 0',
+    });
   }
 
   /// v20 changed these index definitions but kept their names, so the CREATE

@@ -125,7 +125,11 @@ void main() {
       await tapVisible(tester, find.byKey(const ValueKey('checkout-save')));
       await settleIo(tester);
       expect(tester.widget<TextField>(amount).controller!.text, '25.01');
-      expect(find.text('Original customer'), findsOneWidget);
+      // The party bar on Create Bill shows the same name.
+      expect(
+        find.widgetWithText(TextField, 'Original customer'),
+        findsOneWidget,
+      );
       expect(find.textContaining('Checkout details are kept.'), findsOneWidget);
       expect(await tester.runAsync(db.getAllBills), isEmpty);
       await tester.runAsync(() => sql.execute('DROP TRIGGER fail_checkout'));
@@ -158,7 +162,11 @@ void main() {
         find.byKey(const ValueKey('checkout-review-latest')),
       );
       await settleIo(tester);
-      expect(find.text('Original customer'), findsOneWidget);
+      // The party bar on Create Bill shows the same name.
+      expect(
+        find.widgetWithText(TextField, 'Original customer'),
+        findsOneWidget,
+      );
       final settlement = tester
           .widgetList<SegmentedButton<String>>(
             find.byType(SegmentedButton<String>),

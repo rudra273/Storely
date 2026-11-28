@@ -1,5 +1,6 @@
 import '../utils/exact_decimal.dart';
 import 'bill.dart';
+import 'product.dart';
 
 /// Rounds a rupee amount to paise using exact decimal half-away-from-zero.
 double roundMoney(double value) {
@@ -21,6 +22,9 @@ class BillTotals {
   final double sgstAmount;
   final double igstAmount;
 
+  /// Compensation cess across all lines (never part of [gstAmount]).
+  final double cessAmount;
+
   /// Sum of line amounts after discount, including tax, before round-off.
   final double netAmount;
   final double roundOffAmount;
@@ -33,6 +37,7 @@ class BillTotals {
     required this.cgstAmount,
     required this.sgstAmount,
     required this.igstAmount,
+    this.cessAmount = 0,
     required this.netAmount,
     required this.roundOffAmount,
     required this.grandTotal,
@@ -59,7 +64,9 @@ class BillTotals {
     var taxable = ExactDecimal.zero;
     var intraGst = ExactDecimal.zero;
     var igst = ExactDecimal.zero;
+    var cess = ExactDecimal.zero;
     for (final item in taxedItems) {
+      cess += ExactDecimal.fromNum(item.totalCess);
       final lineSub = ExactDecimal.fromNum(item.subtotal);
       final lineNet = ExactDecimal.fromNum(item.lineAmount);
       final lineTaxable = ExactDecimal.fromNum(item.totalTaxableValue);
@@ -95,6 +102,7 @@ class BillTotals {
       cgstAmount: cgst.toMoneyDouble(),
       sgstAmount: sgst.toMoneyDouble(),
       igstAmount: igst.toMoneyDouble(),
+      cessAmount: cess.roundMoney().toMoneyDouble(),
       netAmount: net.toMoneyDouble(),
       roundOffAmount: roundOffAmount.toMoneyDouble(),
       grandTotal: (net + roundOffAmount).toMoneyDouble(),
@@ -214,8 +222,9 @@ class BillTotals {
         var allocated = ExactDecimal.zero;
         for (var k = 0; k < eligible.length - 1; k++) {
           final idx = eligible[k];
-          final share = (signedDocDisc * afterLineBases[idx] / totalAfterLineBase)
-              .roundMoney();
+          final share =
+              (signedDocDisc * afterLineBases[idx] / totalAfterLineBase)
+                  .roundMoney();
           prorated[idx] = share;
           allocated += share;
         }
@@ -240,49 +249,85 @@ class BillTotals {
     var netAmount = ExactDecimal.zero;
     var intraGst = ExactDecimal.zero;
     var igstAmount = ExactDecimal.zero;
+    var cessAmount = ExactDecimal.zero;
 
     for (var i = 0; i < items.length; i++) {
       final item = items[i];
       final qty = quantities[i];
       final effMode = item.taxMode ?? effectiveBillTaxMode;
-      final gstPct = ExactDecimal.fromNum(item.gstPercentSnapshot ?? 0.0);
-      final charged = gstRegistered && gstPct.isPositive;
+      // Exempt and non-GST lines carry no GST and no cess: the full net line
+      // is taxable value.
+      final isTaxable = item.taxTypeSnapshot == TaxType.taxable;
+      final gstPct = isTaxable
+          ? ExactDecimal.fromNum(item.gstPercentSnapshot ?? 0.0)
+          : ExactDecimal.zero;
+      final cessPct = isTaxable
+          ? ExactDecimal.fromNum(item.cessPercentSnapshot)
+          : ExactDecimal.zero;
+      final gstCharged = gstRegistered && gstPct.isPositive;
+      final cessCharged = gstRegistered && cessPct.isPositive;
+      final charged = gstCharged || cessCharged;
       final discountedUnit = discountedUnits[i];
       final afterDocBase = afterDocBases[i];
 
       late final ExactDecimal taxableUnit;
       late final ExactDecimal gstUnit;
+      late final ExactDecimal cessUnit;
       late final ExactDecimal totalTaxableValue;
       late final ExactDecimal totalGst;
+      late final ExactDecimal totalCess;
       late final ExactDecimal lineAmount;
 
       if (effMode == Bill.taxModeExclusive) {
         taxableUnit = discountedUnit;
-        gstUnit = charged
+        gstUnit = gstCharged
             ? discountedUnit * (gstPct / ExactDecimal.hundred)
+            : ExactDecimal.zero;
+        cessUnit = cessCharged
+            ? discountedUnit * (cessPct / ExactDecimal.hundred)
             : ExactDecimal.zero;
         totalTaxableValue = afterDocBase;
         totalGst = (gstUnit * qty).roundMoney();
-        lineAmount = (totalTaxableValue + totalGst).roundMoney();
+        totalCess = (cessUnit * qty).roundMoney();
+        lineAmount = (totalTaxableValue + totalGst + totalCess).roundMoney();
       } else {
+        final rate =
+            (gstCharged ? gstPct : ExactDecimal.zero) +
+            (cessCharged ? cessPct : ExactDecimal.zero);
         taxableUnit = charged
             ? discountedUnit /
-                  (ExactDecimal.one + (gstPct / ExactDecimal.hundred))
+                  (ExactDecimal.one + (rate / ExactDecimal.hundred))
             : discountedUnit;
-        gstUnit = charged ? discountedUnit - taxableUnit : ExactDecimal.zero;
         lineAmount = afterDocBase;
         totalTaxableValue = (taxableUnit * qty).roundMoney();
-        totalGst = (lineAmount - totalTaxableValue).roundMoney();
+        if (cessCharged && !gstCharged) {
+          // Cess-only line: the rounding remainder belongs to cess.
+          cessUnit = discountedUnit - taxableUnit;
+          gstUnit = ExactDecimal.zero;
+          totalCess = (lineAmount - totalTaxableValue).roundMoney();
+          totalGst = ExactDecimal.zero;
+        } else {
+          // GST (+ cess) line: the rounding remainder belongs to GST.
+          cessUnit = cessCharged
+              ? taxableUnit * (cessPct / ExactDecimal.hundred)
+              : ExactDecimal.zero;
+          gstUnit = charged
+              ? discountedUnit - taxableUnit - cessUnit
+              : ExactDecimal.zero;
+          totalCess = (cessUnit * qty).roundMoney();
+          totalGst = (lineAmount - totalTaxableValue - totalCess).roundMoney();
+        }
       }
 
-      final intraState = charged && !interState;
+      final intraState = gstCharged && !interState;
       final halfGstUnit = gstUnit / ExactDecimal.fromInt(2);
 
       subtotal += lineSubtotals[i];
       totalAfterDocBase += afterDocBase;
       taxableAmount += totalTaxableValue;
       netAmount += lineAmount;
-      if (charged && interState) {
+      cessAmount += totalCess;
+      if (gstCharged && interState) {
         igstAmount += totalGst;
       } else {
         intraGst += totalGst;
@@ -309,7 +354,11 @@ class BillTotals {
           taxableValueSnapshot: taxableUnit.toDouble(),
           cgstAmountSnapshot: intraState ? halfGstUnit.toDouble() : 0,
           sgstAmountSnapshot: intraState ? halfGstUnit.toDouble() : 0,
-          igstAmountSnapshot: charged && interState ? gstUnit.toDouble() : 0,
+          igstAmountSnapshot: gstCharged && interState ? gstUnit.toDouble() : 0,
+          itemTypeSnapshot: item.itemTypeSnapshot,
+          taxTypeSnapshot: item.taxTypeSnapshot,
+          cessPercentSnapshot: item.cessPercentSnapshot,
+          cessAmountSnapshot: cessUnit.toDouble(),
           wasDirectPrice: item.wasDirectPrice,
           quantity: item.quantity,
           discountMode: item.discountMode,
@@ -349,6 +398,7 @@ class BillTotals {
         cgstAmount: cgstAmount.toMoneyDouble(),
         sgstAmount: sgstAmount.toMoneyDouble(),
         igstAmount: igstAmount.toMoneyDouble(),
+        cessAmount: cessAmount.roundMoney().toMoneyDouble(),
         netAmount: netAmount.toMoneyDouble(),
         roundOffAmount: roundOffAmount.toMoneyDouble(),
         grandTotal: grandTotal.toMoneyDouble(),

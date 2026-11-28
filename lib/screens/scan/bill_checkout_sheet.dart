@@ -751,13 +751,13 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                           prefixIcon: const Icon(Icons.calendar_today_outlined),
                           suffixIcon: widget.canBackdate
                               ? const Icon(Icons.edit_calendar_outlined)
-                              : const Icon(Icons.lock_outline_rounded, size: 18),
+                              : const Icon(
+                                  Icons.lock_outline_rounded,
+                                  size: 18,
+                                ),
                           enabled: widget.canBackdate && !_frozen,
                         ),
-                        child: Text(
-                          _billDateLabel(),
-                          style: AppText.body,
-                        ),
+                        child: Text(_billDateLabel(), style: AppText.body),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -1117,15 +1117,23 @@ class _BillCheckoutSheetState extends State<_BillCheckoutSheet> {
                                 : 'Discount',
                             value: '- ${rupees(discount)}',
                           ),
-                          if (totals.gstAmount > 0) ...[
+                          if (totals.gstAmount > 0 ||
+                              totals.cessAmount > 0) ...[
                             _BillSummaryRow(
                               label: 'Taxable',
                               value: rupees(totals.taxableAmount),
                             ),
-                            _BillSummaryRow(
-                              label: 'GST',
-                              value: rupees(totals.gstAmount),
-                            ),
+                            if (totals.gstAmount > 0)
+                              _BillSummaryRow(
+                                label: 'GST',
+                                value: rupees(totals.gstAmount),
+                              ),
+                            if (totals.cessAmount > 0)
+                              _BillSummaryRow(
+                                valueKey: const ValueKey('checkout-cess'),
+                                label: 'Cess',
+                                value: rupees(totals.cessAmount),
+                              ),
                           ],
                           if (totals.roundOffAmount != 0)
                             _BillSummaryRow(
